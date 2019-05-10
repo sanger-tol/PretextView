@@ -11,7 +11,7 @@ OpenGL 3.3<br/>
 2G of RAM<br/>
 
 # Mac and Linux Builds
-The prebuilt apps for Mac and Linux are highly recomended over building the app yourself.<br/>
+The prebuilt apps for Mac and Linux are highly recomended over building the app yourself (https://github.com/wtsi-hpag/PretextView/releases).<br/>
 The Mac app was built for MacOS 10.13.6<br/>
 The Linux app was built for kernel 3.13<br/>
 
