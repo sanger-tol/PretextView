@@ -1,0 +1,191 @@
+#!/usr/bin/env python
+
+from subprocess import Popen, PIPE
+import argparse, os, os.path, shutil, sys
+
+parser = argparse.ArgumentParser()
+
+parser.add_argument("-c", "--compiler", type=str,
+                    help="compiler to use (one will be chosen if not specified)")
+parser.add_argument("-f", "--flags", type=str,
+                    help="compiler flags (override defaults)")
+parser.add_argument("-d", "--libdeflate", type=str,
+                    help="path to libdeflate static library (will be downloaded and built if not specified)")
+parser.add_argument("-g", "--libglfw3", type=str,
+                    help="path to libglfw3 static library (will be downloaded and built if not specified)")
+
+args = parser.parse_args()
+
+
+if "linux" not in sys.platform and "darwin" not in sys.platform:
+    raise SystemExit("Only Linux and Mac builds currently supported")
+
+
+compilers = ['clang', 'gcc']
+flags = {"clang": "-Ofast -pthreads", "gcc": "-O3 -pthread"}
+def getFlags(compiler):
+    for c in flags.keys():
+        if c in compiler.split("/")[-1]:
+            return flags[c]
+    raise SystemExit("Unknown compiler " + compiler)
+
+if args.compiler is None:
+    
+    for compiler in compilers:
+        
+        p = Popen(['which', compiler], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+        output, err = p.communicate()
+        
+        if p.returncode == 0:
+            args.compiler = compiler
+            print("Using " + compiler)
+            break
+else:
+    p = Popen(['which', args.compiler], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        raise SystemExit("Could not find '" + args.compiler + "' on your PATH")
+
+
+if args.compiler is None:
+    raise SystemExit("Could not find an installed compiler on your PATH")
+
+
+if args.flags is None:
+    args.flags = getFlags(args.compiler)
+    args.flags += " -march=native"
+
+
+if args.libdeflate is None:
+    print("Downloading and building libdeflate")
+    
+    p = Popen(['which', 'git'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        raise SystemExit("Could not find 'git' on your PATH, cannot install libdeflate")
+
+    p = Popen(['git', 'clone', 'https://github.com/ebiggers/libdeflate'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        raise SystemExit("Error cloning libdeflate: " + err)
+
+    if not os.path.exists("libdeflate"):
+        raise SystemExit("Error, libdeflate directory does not exist")
+
+    os.chdir("libdeflate")
+
+    env = os.environ.copy()
+    env['CC'] = args.compiler
+    env['CFLAGS'] = flags = getFlags(args.compiler)
+    env['DISABLE_GZIP'] = '1'
+    env['DISABLE_ZLIB'] = '1'
+    p = Popen(['make', 'libdeflate.a'], stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        raise SystemExit("Error making libdeflate.a: " + err)
+
+    if not os.path.exists("libdeflate.a"):
+        raise SystemExit("Error, could not find libdeflate.a")
+
+    os.rename("libdeflate.a", "../libdeflate.a")
+    os.chdir("..")
+    try:
+        shutil.rmtree("libdeflate")
+    except OSError as e:
+        raise SystemExit("Error: %s - %s.".format(e.filename, e.strerror))
+
+    args.libdeflate = "libdeflate.a"
+
+
+if args.libglfw3 is None:
+    print("Downloading and building GLFW3")
+    
+    p = Popen(['which', 'git'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        raise SystemExit("Could not find 'git' on your PATH, cannot install libglfw3")
+
+    p = Popen(['git', 'clone', 'https://github.com/glfw/glfw.git'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        raise SystemExit("Error cloning glfw: " + err)
+
+    if not os.path.exists("glfw"):
+        raise SystemExit("Error, glfw directory does not exist")
+
+    os.chdir("glfw")
+    os.mkdir("build")
+    os.chdir("build")
+
+    env = os.environ.copy()
+    env['CC'] = args.compiler
+    env['CXX'] = args.compiler
+    
+    p = Popen(['cmake', '-DCMAKE_BUILD_TYPE=Release', '-DGLFW_BUILD_EXAMPLES=OFF', '-DGLFW_BUILD_DOCS=OFF', '-DGLFW_INSTALL=OFF', '-DGLFW_BUILD_TESTS=OFF', '..'], stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        raise SystemExit("Error running cmake on glfw: " + err)
+
+    p = Popen(['make'], stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        raise SystemExit("Error running make on glfw: " + err)
+
+    if not os.path.exists("src/libglfw3.a"):
+        raise SystemExit("Error, could not find libglfw3.a")
+
+    os.rename("src/libglfw3.a", "../../libglfw3.a")
+    os.chdir("../..")
+    try:
+        shutil.rmtree("glfw")
+    except OSError as e:
+        raise SystemExit("Error: %s - %s.".format(e.filename, e.strerror))
+
+    args.libglfw3 = "libglfw3.a"
+
+print("Building Glad")
+command = args.compiler + " -c glad.c " + args.flags + " -o glad.o -Iinclude"
+p = Popen(command.strip().split(), stdin=PIPE, stdout=PIPE, stderr=PIPE)
+output, err = p.communicate()
+if p.returncode != 0:
+    raise SystemExit("Error making glad.o: " + err)
+
+
+print("Building Resources")
+resources = "Resources_linux.S" if "linux" in sys.platform else "Resources_mac.S"
+command = args.compiler + " -c " + resources + " " + args.flags + " -o Resources.o -Iinclude"
+p = Popen(command.strip().split(), stdin=PIPE, stdout=PIPE, stderr=PIPE)
+output, err = p.communicate()
+if p.returncode != 0:
+    raise SystemExit("Error making Resources.o: " + err)
+
+
+print("Building PretextView")
+links = " -ldl -lX11 -lm" if "linux" in sys.platform else " -framework Cocoa -framework OpenGL -framework IOKit -framework CoreVideo"
+command = args.compiler + " -std=c++11 PretextView.cpp " + args.libdeflate + " " + args.libglfw3 + " glad.o Resources.o " + args.flags + " -o PretextView -Iinclude" + links
+p = Popen(command.strip().split(), stdin=PIPE, stdout=PIPE, stderr=PIPE)
+output, err = p.communicate()
+if p.returncode != 0:
+    raise SystemExit("Error making PretextView: " + err)
+    
+
+if "darwin" in sys.platform:
+    print("Building Mac App")
+    
+    p = Popen(["./setup.sh", "PretextView", "pretextview_icon.svg"], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    output, err = p.communicate()
+    if p.returncode != 0:
+        raise SystemExit("Error making PretextView: " + err)
+
+    os.rename("PretextView", "PretextView.app/Contents/MacOS/PretextView")
+
+
+print("Done")
+
+
+
+
+
+
+
+
