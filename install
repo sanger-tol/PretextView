@@ -67,7 +67,7 @@ if args.libdeflate is None:
     p = Popen(['git', 'clone', 'https://github.com/ebiggers/libdeflate'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
     output, err = p.communicate()
     if p.returncode != 0:
-        raise SystemExit("Error cloning libdeflate: " + err)
+        raise SystemExit("Error cloning libdeflate: " + err.decode('utf-8'))
 
     if not os.path.exists("libdeflate"):
         raise SystemExit("Error, libdeflate directory does not exist")
@@ -82,7 +82,7 @@ if args.libdeflate is None:
     p = Popen(['make', 'libdeflate.a'], stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env)
     output, err = p.communicate()
     if p.returncode != 0:
-        raise SystemExit("Error making libdeflate.a: " + err)
+        raise SystemExit("Error making libdeflate.a: " + err.decode('utf-8'))
 
     if not os.path.exists("libdeflate.a"):
         raise SystemExit("Error, could not find libdeflate.a")
@@ -108,7 +108,7 @@ if args.libglfw3 is None:
     p = Popen(['git', 'clone', 'https://github.com/glfw/glfw.git'], stdin=PIPE, stdout=PIPE, stderr=PIPE)
     output, err = p.communicate()
     if p.returncode != 0:
-        raise SystemExit("Error cloning glfw: " + err)
+        raise SystemExit("Error cloning glfw: " + err.decode('utf-8'))
 
     if not os.path.exists("glfw"):
         raise SystemExit("Error, glfw directory does not exist")
@@ -124,12 +124,12 @@ if args.libglfw3 is None:
     p = Popen(['cmake', '-DCMAKE_BUILD_TYPE=Release', '-DGLFW_BUILD_EXAMPLES=OFF', '-DGLFW_BUILD_DOCS=OFF', '-DGLFW_INSTALL=OFF', '-DGLFW_BUILD_TESTS=OFF', '..'], stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env)
     output, err = p.communicate()
     if p.returncode != 0:
-        raise SystemExit("Error running cmake on glfw: " + err)
+        raise SystemExit("Error running cmake on glfw: " + err.decode('utf-8'))
 
     p = Popen(['make'], stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env)
     output, err = p.communicate()
     if p.returncode != 0:
-        raise SystemExit("Error running make on glfw: " + err)
+        raise SystemExit("Error running make on glfw: " + err.decode('utf-8'))
 
     if not os.path.exists("src/libglfw3.a"):
         raise SystemExit("Error, could not find libglfw3.a")
@@ -148,7 +148,7 @@ command = args.compiler + " -c glad.c " + args.flags + " -o glad.o -Iinclude"
 p = Popen(command.strip().split(), stdin=PIPE, stdout=PIPE, stderr=PIPE)
 output, err = p.communicate()
 if p.returncode != 0:
-    raise SystemExit("Error making glad.o: " + err)
+    raise SystemExit("Error making glad.o: " + err.decode('utf-8'))
 
 
 print("Building Resources")
@@ -157,7 +157,7 @@ command = args.compiler + " -c " + resources + " " + args.flags + " -o Resources
 p = Popen(command.strip().split(), stdin=PIPE, stdout=PIPE, stderr=PIPE)
 output, err = p.communicate()
 if p.returncode != 0:
-    raise SystemExit("Error making Resources.o: " + err)
+    raise SystemExit("Error making Resources.o: " + err.decode('utf-8'))
 
 
 print("Building PretextView")
@@ -166,7 +166,7 @@ command = args.compiler + " -std=c++11 PretextView.cpp " + args.libdeflate + " "
 p = Popen(command.strip().split(), stdin=PIPE, stdout=PIPE, stderr=PIPE)
 output, err = p.communicate()
 if p.returncode != 0:
-    raise SystemExit("Error making PretextView: " + err)
+    raise SystemExit("Error making PretextView: " + err.decode('utf-8'))
     
 
 if "darwin" in sys.platform:
@@ -175,7 +175,7 @@ if "darwin" in sys.platform:
     p = Popen(["./setup.sh", "PretextView", "pretextview_icon.svg"], stdin=PIPE, stdout=PIPE, stderr=PIPE)
     output, err = p.communicate()
     if p.returncode != 0:
-        raise SystemExit("Error making PretextView: " + err)
+        raise SystemExit("Error making PretextView: " + err.decode('utf-8'))
 
     os.rename("PretextView", "PretextView.app/Contents/MacOS/PretextView")
 
