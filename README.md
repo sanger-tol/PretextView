@@ -15,6 +15,8 @@ The prebuilt apps for Mac and Linux are highly recomended over building the app 
 The Mac app was built for MacOS 10.13.6<br/>
 The Linux app was built for kernel 3.13<br/>
 
+The Linux app is a binary can be launched from the command line.<br/>
+
 More prebuilt versions will be added if there's demand for them.
 
 # Windows Builds
