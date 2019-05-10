@@ -7,8 +7,8 @@ PretextView is a desktop application for viewing pretex contact maps.<br/>
 Use the middle mouse button or the 'u' key to bring up the GUI. Pan by holding down the right mouse button. Click and drag with the left mouse button to select an are to zoom to. Scroll to zoom. A three button mouse is recomended.
 
 # Requirments, running
-OpenGL 3.3<br\>
-2G or RAM<br\>
+OpenGL 3.3<br/>
+2G of RAM<br/>
 
 # Mac and Linux Builds
 The prebuilt apps for Mac and Linux are highly recomended over building the app yourself.<br/>
