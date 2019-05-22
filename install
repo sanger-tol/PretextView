@@ -150,19 +150,9 @@ output, err = p.communicate()
 if p.returncode != 0:
     raise SystemExit("Error making glad.o: " + err.decode('utf-8'))
 
-
-print("Building Resources")
-resources = "Resources_linux.S" if "linux" in sys.platform else "Resources_mac.S"
-command = args.compiler + " -c " + resources + " " + args.flags + " -o Resources.o -Iinclude"
-p = Popen(command.strip().split(), stdin=PIPE, stdout=PIPE, stderr=PIPE)
-output, err = p.communicate()
-if p.returncode != 0:
-    raise SystemExit("Error making Resources.o: " + err.decode('utf-8'))
-
-
 print("Building PretextView")
 links = " -ldl -lX11 -lm" if "linux" in sys.platform else " -framework Cocoa -framework OpenGL -framework IOKit -framework CoreVideo"
-command = args.compiler + " -std=c++11 PretextView.cpp " + args.libdeflate + " " + args.libglfw3 + " glad.o Resources.o " + args.flags + " -o PretextView -Iinclude" + links
+command = args.compiler + " -std=c++11 PretextView.cpp " + args.libdeflate + " " + args.libglfw3 + " glad.o " + args.flags + " -o PretextView -Iinclude" + links
 p = Popen(command.strip().split(), stdin=PIPE, stdout=PIPE, stderr=PIPE)
 output, err = p.communicate()
 if p.returncode != 0:
