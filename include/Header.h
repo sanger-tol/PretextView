@@ -23,11 +23,22 @@ SOFTWARE.
 #ifndef HEADER_H
 #define HEADER_H
 
+#ifdef _WIN32
+#define WINVER 0x0601 // Target Windows 7 as a Minimum Platform
+#define _WIN32_WINNT 0x0601
+#include <windows.h>
+#endif
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
+#ifdef _WIN32
+#include <intrin.h>
+#else
 #include <x86intrin.h>
+#endif
 
 #include "libdeflate.h"
 
@@ -84,7 +95,7 @@ typedef size_t memptr;
 #define ArrayCount(array) (sizeof(array) / sizeof(array[0]))
 #define ForLoop(n) for (u32 index = 0; index < (n); ++index)
 #define ForLoop2(n) for (u32 index2 = 0; index2 < (n); ++index2)
-#define ForLoopN(i, n) for (u32 (i) = 0; (i) < (n); (++(i)))
+#define ForLoopN(i, n) for (u32 i = 0; i < (n); ++i)
 #define TraverseLinkedList(startNode, type) for (type *(node) = (startNode); node; node = node->next)
 
 #define ArgCount argc
@@ -93,24 +104,33 @@ typedef size_t memptr;
 #define MainArgs s32 main(s32 ArgCount, const char *ArgBuffer[])
 #define EndMain return(0)
 
+#ifndef _WIN32
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
+#else
+#define __atomic_fetch_add(x, y, z) _InterlockedExchangeAdd(x, y)
+#define __atomic_add_fetch(x, y, z) (y + _InterlockedExchangeAdd(x, y))
+#define __sync_fetch_and_add(x, y) _InterlockedExchangeAdd(x, y)
+#define __sync_fetch_and_sub(x, y) _InterlockedExchangeAdd(x, -y)
+#define __atomic_store(x, y, z) _InterlockedCompareExchange(x, *y, *x)
+#endif
 
+#ifndef _WIN32
 #define ThreadFence __asm__ volatile("" ::: "memory")
+#else
+#define ThreadFence _mm_mfence()
+#endif
 #define FenceIn(x) ThreadFence; \
 	x; \
 	ThreadFence
 
+typedef volatile u32 threadSig;
+
+#ifndef _WIN32
 typedef pthread_t thread;
 typedef pthread_mutex_t mutex;
 typedef pthread_cond_t cond;
-
-typedef volatile u32 threadSig;
-
-#define CreateThread(x) thread *x
-#define CreateMutex(x) mutex *x
-#define CreateCond(x) cond *x
 
 #define InitialiseMutex(x) x = PTHREAD_MUTEX_INITIALIZER
 #define InitialiseCond(x) x = PTHREAD_COND_INITIALIZER
@@ -118,13 +138,28 @@ typedef volatile u32 threadSig;
 #define LaunchThread(thread, func, dataIn) pthread_create(&thread, NULL, func, dataIn)
 #define WaitForThread(x) pthread_join(*x, NULL)
 #define DetachThread(thread) pthread_detach(thread)
-#define PauseThread(thread) pthread_kill(thread, SIGUSR1)
 
 #define LockMutex(x) pthread_mutex_lock(&x)
 #define UnlockMutex(x) pthread_mutex_unlock(&x)
 #define WaitOnCond(cond, mutex) pthread_cond_wait(&cond, &mutex) 
 #define SignalCondition(x) pthread_cond_signal(&x)
 #define BroadcastCondition(x) pthread_cond_broadcast(&x)
+#else
+typedef HANDLE thread;
+typedef CRITICAL_SECTION mutex;
+typedef CONDITION_VARIABLE cond;
+
+#define InitialiseMutex(x) InitializeCriticalSection(&x)
+#define InitialiseCond(x) InitializeConditionVariable(&x)
+
+#define LaunchThread(thread, func, dataIn) thread = CreateThread(NULL, 0, func, dataIn, 0, NULL)
+
+#define LockMutex(x) EnterCriticalSection(&x)
+#define UnlockMutex(x) LeaveCriticalSection(&x)
+#define WaitOnCond(cond, mutex) SleepConditionVariableCS(&cond, &mutex, INFINITE) 
+#define SignalCondition(x) WakeConditionVariable(&x)
+#define BroadcastCondition(x) WakeAllConditionVariable(&x)
+#endif
 
 struct
 binary_semaphore
@@ -188,11 +223,6 @@ thread_context
 #define MegaByte(x) 1024*KiloByte(x)
 #define GigaByte(x) 1024*MegaByte(x)
 
-#if 0
-#include "zlib.h"
-#define CHUNK KiloByte(256)
-#endif
-
 #define Default_Memory_Alignment_Pow2 4
 
 struct
@@ -227,7 +257,13 @@ global_function
 void
 CreateMemoryArena_(memory_arena *arena, u64 size, u32 alignment_pow2 = Default_Memory_Alignment_Pow2)
 {
+#ifndef _WIN32
 	posix_memalign((void **)&arena->base, Pow2(alignment_pow2), size);
+#else
+	#include <memoryapi.h>
+	(void)alignment_pow2;
+	arena->base = (u08 *)VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+#endif
 	arena->currentSize = 0;
 	arena->maxSize = size;
 }
@@ -285,11 +321,11 @@ PushSize_(memory_arena *arena, u64 size, u32 alignment_pow2 = Default_Memory_Ali
 	if((size + arena->currentSize + padding + sizeof(u64)) > arena->maxSize)
 	{
 		result = 0;
-#ifdef __APPLE__
-		printf("Push of %llu bytes failed, out of memory.\n", size);
+#if defined(__APPLE__) || defined(_WIN32)
+	 	printf("Push of %llu bytes failed, out of memory.\n", size);   
 #else
 		printf("Push of %lu bytes failed, out of memory.\n", size);
-#endif		
+#endif	
 		*((volatile u32 *)0) = 0;
 	}
 	else
@@ -345,22 +381,6 @@ PushSubArena_(memory_arena *mainArena, u64 size, u32 alignment_pow2 = Default_Me
 global_variable
 threadSig
 Threads_KeepAlive;
-
-global_variable
-threadSig
-Threads_OnHold;
-
-global_function
-void
-ThreadHold(s32 id)
-{
-    (void)id;
-    Threads_OnHold = 1;
-    while (Threads_OnHold)
-    {
-	sleep(1);
-    }
-}
 
 global_function
 void
@@ -489,24 +509,17 @@ FreeThreadJob(job_queue *jobQueue, thread_job *job)
 }
 
 global_function
+#ifndef _WIN32
 void *
+#else
+DWORD WINAPI
+#endif
 ThreadFunc(void *in)
 {
     thread_context *context = (thread_context *)in;
     
     thread_pool *pool = context->pool;
 
-    struct sigaction act;
-    sigemptyset(&act.sa_mask);
-    act.sa_flags = 0;
-    act.sa_handler = ThreadHold;
-
-    if (sigaction(SIGUSR1, &act, NULL) == -1)
-    {
-	printf("\nThreadFunc(): cannot handle SIGUSR1\n");
-	*((threadSig *)0) = 0;
-    }
-	
     LockMutex(pool->threadCountLock);
     pool->numThreadsAlive += 1;
     UnlockMutex(pool->threadCountLock);
@@ -562,7 +575,9 @@ ThreadInit(memory_arena *arena, thread_pool *pool, thread_context **context, u32
     (*context)->id = id;
 
     LaunchThread((*context)->th, ThreadFunc, *context);
+#ifndef _WIN32
     DetachThread((*context)->th);
+#endif
 }
 
 #define Number_Thread_Jobs 1024
@@ -635,7 +650,6 @@ global_function
 thread_pool *
 ThreadPoolInit(memory_arena *arena, u32 nThreads)
 {
-    Threads_OnHold = 0;
     Threads_KeepAlive = 1;
 
     thread_pool *threadPool = PushStructP(arena, thread_pool);
@@ -662,6 +676,11 @@ ThreadPoolInit(memory_arena *arena, u32 nThreads)
 }
 
 #define ThreadPoolAddTask(pool, func, args) ThreadPoolAddWork(pool, (void (*)(void *))func, (void *)args)
+
+#ifdef _WIN32
+#include <ctime>
+#define sleep(x) Sleep(1000 * x)
+#endif
 
 global_function
 void
@@ -724,25 +743,6 @@ ThreadPoolDestroy(thread_pool *threadPool)
 
 	JobQueueClear(&threadPool->jobQueue);
     }
-}
-
-global_function
-void
-ThreadPoolPause(thread_pool *threadPool)
-{
-    for (   u32 index = 0;
-	    index < threadPool->numThreadsAlive;
-	    ++index )
-    {
-	PauseThread(threadPool->threads[index]->th);
-    }
-}
-
-global_function
-void
-ThreadPoolUnPause()
-{
-    Threads_OnHold = 0;
 }
 
 global_function
@@ -867,22 +867,27 @@ StringToInt(char *string)
 
 global_function
 u32
-SIMDTestEquali(__m128i a, __m128i b)
+StringToInt_Check(u08 *string, u32 *result)
 {
-	__m128i neq = _mm_xor_si128(a, b);
-	return((u32)_mm_test_all_zeros(neq, neq));
-}
+    u32 goodResult = 1;
+    *result = 0;
 
-global_function
-__m128i
-CountSetBitsPerByte(__m128i x)
-{
-	__m128i countMask = _mm_set1_epi8(0x0F);
-	__m128i countTable = _mm_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
-	__m128i count0 = _mm_shuffle_epi8(countTable, _mm_and_si128(x, countMask));
-	__m128i count1 = _mm_shuffle_epi8(countTable, _mm_and_si128(_mm_srli_epi16(x, 4), countMask));
+    u32 strLen = 1;
+    while(*++string != '\0') ++strLen;
 
-	return(_mm_add_epi8(count0, count1));
+    u32 pow = 1;
+
+    while(--strLen > 0 && goodResult)
+    {
+	*result += (u32)(*--string - '0') * pow;	
+	goodResult = (*string >= '0' && *string <= '9');
+	pow *= 10;
+    }
+    
+    *result += (u32)(*--string - '0') * pow;
+    goodResult = (goodResult && *string >= '0' && *string <= '9');
+    
+    return(goodResult);
 }
 
 global_function
@@ -894,6 +899,7 @@ IntDivideCeil(u32 x, u32 y)
 }
 
 //https://github.com/ZilongTan/fast-hash/blob/master/fasthash.c
+#ifndef _WIN32
 #define HashMix(h) ({					\
 			(h) ^= (h) >> 23;		\
 			(h) *= 0x2127599bf4325c37ULL;	\
@@ -935,6 +941,52 @@ FastHash64(void *buf, u64 len, u64 seed)
 
     return(HashMix(h));
 } 
+#else
+#define HashMix(h) {					\
+			(h) ^= (h) >> 23;		\
+			(h) *= 0x2127599bf4325c37ULL;	\
+			(h) ^= (h) >> 47; }
+
+global_function
+u64
+FastHash64(void *buf, u64 len, u64 seed)
+{
+    u64 m = 0x880355f21e6d1965ULL;
+    u64 *pos = (u64 *)buf;
+    u64 *end = pos + (len / 8);
+    u08 *pos2;
+    u64 h = seed ^ (len * m);
+    u64 v;
+
+    while (pos != end)
+    {
+	v  = *pos++;
+	HashMix(v);
+	h ^= v;
+	h *= m;
+    }
+
+    pos2 = (u08*)pos;
+    v = 0;
+
+    switch (len & 7)
+    {
+	case 7: v ^= (u64)pos2[6] << 48; [[clang::fallthrough]];
+	case 6: v ^= (u64)pos2[5] << 40; [[clang::fallthrough]];
+	case 5: v ^= (u64)pos2[4] << 32; [[clang::fallthrough]];
+	case 4: v ^= (u64)pos2[3] << 24; [[clang::fallthrough]];
+	case 3: v ^= (u64)pos2[2] << 16; [[clang::fallthrough]];
+	case 2: v ^= (u64)pos2[1] << 8;  [[clang::fallthrough]];
+	case 1: v ^= (u64)pos2[0];
+		HashMix(v);
+		h ^= v;
+		h *= m;
+    }
+
+    HashMix(h);
+    return(h);
+} 
+#endif
 
 global_function
 u32

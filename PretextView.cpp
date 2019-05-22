@@ -20,6 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#define PretextView_Version "PretextView Version 0.0.3"
+
 #include "Header.h"
 
 #ifdef DEBUG
@@ -28,11 +30,7 @@ SOFTWARE.
 
 #pragma clang diagnostic push
 #pragma GCC diagnostic ignored "-Wreserved-id-macro"
-//#ifdef __APPLE__
 #include <glad/glad.h>
-//#else
-//#include <glad/gl.h>
-//#endif
 #pragma clang diagnostic pop
 
 #pragma clang diagnostic push
@@ -138,54 +136,7 @@ SOFTWARE.
 #include "nuklear.h"
 #pragma clang diagnostic pop
 
-extern
-u08 FontNormal[];
-
-extern
-s32
-FontNormal_Size;
-
-extern
-u08 FontBold[];
-
-extern
-s32
-FontBold_Size;
-
-extern
-u08 IconHome[];
-
-extern
-s32
-IconHome_Size;
-
-extern
-u08 IconFolder[];
-
-extern
-s32
-IconFolder_Size;
-
-extern
-u08 IconDrive[];
-
-extern
-s32
-IconDrive_Size;
-
-extern
-u08 IconFile[];
-
-extern
-s32
-IconFile_Size;
-
-extern
-u08 IconImage[];
-
-extern
-s32
-IconImage_Size;
+#include "Resources.cpp"
 
 global_variable
 const
@@ -212,12 +163,13 @@ FragmentSource_Texture = R"glsl(
     out vec4 outColor;
     uniform sampler2D tex;
     uniform samplerBuffer colormap;
-    uniform float controlpoint;
+    uniform vec3 controlpoints;
     float bezier(float t)
     {
         float tsq = t * t;
         float omt = 1.0 - t;
-        return((2.0 * t * omt * controlpoint) + tsq);
+        float omtsq = omt * omt;
+        return((omtsq * controlpoints.x) + (2.0 * t * omt * controlpoints.y) + (tsq * controlpoints.z));
     }
     void main()
     {
@@ -316,6 +268,42 @@ global_variable
 u32
 Redisplay = 0;
 
+global_variable
+s32
+Window_Width, Window_Height, FrameBuffer_Width, FrameBuffer_Height;
+
+global_variable
+struct nk_vec2
+Screen_Scale;
+
+enum
+theme
+{
+    THEME_BLACK,
+    THEME_WHITE,
+    THEME_RED,
+    THEME_BLUE,
+    THEME_DARK,
+    
+    THEME_COUNT
+};
+
+global_variable
+theme
+Current_Theme;
+
+global_variable
+u08 *
+Theme_Name[THEME_COUNT];
+
+global_function
+void
+SetTheme(struct nk_context *ctx, enum theme theme);
+
+global_variable
+nk_context *
+NK_Context;
+
 global_function
 void
 ChangeSize(s32 width, s32 height)
@@ -325,11 +313,33 @@ ChangeSize(s32 width, s32 height)
 
 global_function
 void
-GLFWChangeSize(GLFWwindow *win, s32 width, s32 height)
+UpdateScreenScale()
+{
+    Screen_Scale.x = (f32)FrameBuffer_Width / (f32)Window_Width;
+    Screen_Scale.y = (f32)FrameBuffer_Height / (f32)Window_Height;
+    SetTheme(NK_Context, Current_Theme);
+}
+
+global_function
+void
+GLFWChangeFrameBufferSize(GLFWwindow *win, s32 width, s32 height)
 {
     (void)win;
     ChangeSize(width, height);
     Redisplay = 1;
+    FrameBuffer_Height = height;
+    FrameBuffer_Width = width;
+    UpdateScreenScale();
+}
+
+global_function
+void
+GLFWChangeWindowSize(GLFWwindow *win, s32 width, s32 height)
+{
+    (void)win;
+    Window_Width = width;
+    Window_Height = height;
+    UpdateScreenScale();
 }
 
 struct
@@ -363,6 +373,8 @@ quad_data
 {
     GLuint *vaos;
     GLuint *vbos;
+    u32 nBuffers;
+    u32 pad;
 };
 
 struct
@@ -372,7 +384,7 @@ color_maps
     u32 currMap;
     u32 nMaps;
     GLint cpLocation;
-    GLfloat controlPoint;
+    GLfloat controlPoints[3];
     struct nk_image *mapPreviews;
 };
 
@@ -405,10 +417,6 @@ device
 global_variable
 device *
 NK_Device;
-
-global_variable
-nk_context *
-NK_Context;
 
 global_variable
 nk_font_atlas *
@@ -537,13 +545,38 @@ global_variable
 FONScontext *
 FontStash_Context;
 
-global_variable
-u32
-Contig_Name_Labels_On = 0;
+struct
+ui_colour_element_bg
+{
+    u32 on;
+    u32 fg;
+    nk_colorf bg;
+};
+
+#define Grey_Background {0.569f, 0.549f, 0.451f, 1.0f}
+#define Yellow_Text glfonsRGBA(240, 185, 15, 255)
+#define Yellow_Text_Float {0.941176471f, 0.725490196f, 0.058823529f, 1.0f}
+#define Red_Text glfonsRGBA(240, 10, 5, 255)
+#define Red_Text_Float {0.941176471f, 0.039215686f, 0.019607843f, 1.0f}
 
 global_variable
-u32
-Scale_Bars_On = 0;
+ui_colour_element_bg *
+Contig_Name_Labels;
+
+global_variable
+ui_colour_element_bg *
+Scale_Bars;
+
+struct
+ui_colour_element
+{
+    u32 on;
+    nk_colorf bg;
+};
+
+global_variable
+ui_colour_element *
+Grid;
 
 global_variable
 u32
@@ -812,8 +845,8 @@ u32
 File_Loaded = 0;
 
 global_variable
-struct nk_vec2
-Screen_Scale;
+nk_color
+Theme_Colour;
 
 global_function
 void
@@ -824,7 +857,7 @@ Render()
     f32 height;
     {
         glClear(GL_COLOR_BUFFER_BIT);
-        glClearColor(0.2f, 1.0f, 0.5f, 1.0f);
+        glClearColor(0.2f, 0.6f, 0.4f, 1.0f);
 
         s32 viewport[4];
         glGetIntegerv (GL_VIEWPORT, viewport);
@@ -866,11 +899,10 @@ Render()
     }
 
     // Grid
-    if (File_Loaded)
+    if (File_Loaded && Grid->on)
     {
         glUseProgram(Flat_Shader->shaderProgram);
-        const GLfloat color[] = {0.569f, 0.549f, 0.451f, 1.0f};
-        glUniform4fv(Flat_Shader->colorLocation, 1, color);
+        glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&Grid->bg);
 
         u32 ptr = 0;
         vertex vert[4];
@@ -1062,7 +1094,7 @@ Render()
     }
 
     // Text Rendering
-    if (Contig_Name_Labels_On || Scale_Bars_On || UI_On || Loading)
+    if (Contig_Name_Labels->on || Scale_Bars->on || UI_On || Loading)
     {
         f32 textNormalMat[16];
         f32 textRotMat[16];
@@ -1094,11 +1126,10 @@ Render()
         }
 
         // Contig Labels
-        if (File_Loaded && Contig_Name_Labels_On)
+        if (File_Loaded && Contig_Name_Labels->on)
         {
             glUseProgram(Flat_Shader->shaderProgram);
-            const GLfloat color[] = {0.569f, 0.549f, 0.451f, 1.0f};
-            glUniform4fv(Flat_Shader->colorLocation, 1, color);
+            glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&Contig_Name_Labels->bg);
             glUniformMatrix4fv(Flat_Shader->matLocation, 1, GL_FALSE, textNormalMat);
 
             glUseProgram(UI_Shader->shaderProgram);
@@ -1110,14 +1141,13 @@ Render()
             glViewport(0, 0, (s32)width, (s32)height);
 
             f32 lh = 0.0f;   
-            u32 yellow = glfonsRGBA(240, 185, 15, 255);
 
             fonsClearState(FontStash_Context);
             fonsSetSize(FontStash_Context, 32.0f * Screen_Scale.x);
             fonsSetAlign(FontStash_Context, FONS_ALIGN_CENTER | FONS_ALIGN_TOP);
             fonsSetFont(FontStash_Context, Font_Bold);
             fonsVertMetrics(FontStash_Context, 0, 0, &lh);
-            fonsSetColor(FontStash_Context, yellow);
+            fonsSetColor(FontStash_Context, Contig_Name_Labels->fg);
 
             f32 leftPixel = ModelXToScreen(-0.5f);
             f32 totalLength = 0.0f;
@@ -1223,14 +1253,15 @@ Render()
 
         // Scale bars
 #define MaxTicksPerScaleBar 128
-        if (File_Loaded && Scale_Bars_On)
+        if (File_Loaded && Scale_Bars->on)
         {
             glUseProgram(Flat_Shader->shaderProgram);
+            glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&Scale_Bars->bg);
             glUniformMatrix4fv(Flat_Shader->matLocation, 1, GL_FALSE, textNormalMat);
-
+            
             glUseProgram(UI_Shader->shaderProgram);
             glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textNormalMat);
-
+            
             u32 ptr = 0;
             vertex vert[4];
 
@@ -1239,14 +1270,13 @@ Render()
             glViewport(0, 0, (s32)width, (s32)height);
 
             f32 lh = 0.0f;   
-            u32 red = glfonsRGBA(240, 10, 5, 255);
 
             fonsClearState(FontStash_Context);
             fonsSetSize(FontStash_Context, 20.0f * Screen_Scale.x);
             fonsSetAlign(FontStash_Context, FONS_ALIGN_CENTER | FONS_ALIGN_TOP);
             fonsSetFont(FontStash_Context, Font_Normal);
             fonsVertMetrics(FontStash_Context, 0, 0, &lh);
-            fonsSetColor(FontStash_Context, red);
+            fonsSetColor(FontStash_Context, Scale_Bars->fg);
 
             f32 leftPixel = ModelXToScreen(-0.5f);
             f32 rightPixel = ModelXToScreen(0.5f);
@@ -1257,8 +1287,14 @@ Render()
 
             f32 bpPerPixel = (f32)((f64)Total_Genome_Length / (f64)(rightPixel - leftPixel));
 
-            const GLfloat flatGrey[] = {0.569f, 0.549f, 0.451f, 1.0f};
-            const GLfloat flatRed[] = {0.941f, 0.039f, 0.020f, 1.0f};
+            GLfloat *bg = (GLfloat *)&Scale_Bars->bg;
+            static f32 scale = 1.0f / 255.0f;
+            GLfloat fg[4];
+            fg[0] = scale * (Scale_Bars->fg & 0xff);
+            fg[1] = scale * ((Scale_Bars->fg >> 8) & 0xff);
+            fg[2] = scale * ((Scale_Bars->fg >> 16) & 0xff);
+            fg[3] = scale * ((Scale_Bars->fg >> 24) & 0xff);
+            
             f32 scaleBarWidth = 4.0f * Screen_Scale.x;
             f32 tickLength = 3.0f * Screen_Scale.x;
 
@@ -1284,7 +1320,7 @@ Render()
                     if (labels)
                     {
                         glUseProgram(Flat_Shader->shaderProgram);
-                        glUniform4fv(Flat_Shader->colorLocation, 1, flatGrey);
+                        glUniform4fv(Flat_Shader->colorLocation, 1, bg);
 
                         vert[0].x = leftPixel + 1.0f;
                         vert[0].y = y + scaleBarWidth + tickLength + 1.0f + lh;
@@ -1300,7 +1336,7 @@ Render()
                         glBindVertexArray(Scale_Bar_Data->vaos[ptr++]);
                         glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
-                        glUniform4fv(Flat_Shader->colorLocation, 1, flatRed);
+                        glUniform4fv(Flat_Shader->colorLocation, 1, fg);
 
                         vert[0].x = leftPixel + 1.0f;
                         vert[0].y = y + scaleBarWidth;
@@ -1378,7 +1414,7 @@ Render()
                         f32 bottomPixel_x = -bottomPixel;
 
                         glUseProgram(Flat_Shader->shaderProgram);
-                        glUniform4fv(Flat_Shader->colorLocation, 1, flatGrey);
+                        glUniform4fv(Flat_Shader->colorLocation, 1, bg);
 
                         vert[0].x = bottomPixel_x + 1.0f;
                         vert[0].y = y + scaleBarWidth + tickLength + 1.0f + lh;
@@ -1394,7 +1430,7 @@ Render()
                         glBindVertexArray(Scale_Bar_Data->vaos[ptr++]);
                         glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
-                        glUniform4fv(Flat_Shader->colorLocation, 1, flatRed);
+                        glUniform4fv(Flat_Shader->colorLocation, 1, fg);
 
                         vert[0].x = bottomPixel_x + 1.0f;
                         vert[0].y = y + scaleBarWidth;
@@ -1529,13 +1565,13 @@ Render()
 
         if (Loading)
         {
-            u32 red = glfonsRGBA(240, 85, 15, 255);
+            u32 colour = glfonsRGBA(Theme_Colour.r, Theme_Colour.g, Theme_Colour.b, Theme_Colour.a);
 
             fonsClearState(FontStash_Context);
             fonsSetSize(FontStash_Context, 64.0f * Screen_Scale.x);
             fonsSetAlign(FontStash_Context, FONS_ALIGN_CENTER | FONS_ALIGN_MIDDLE);
             fonsSetFont(FontStash_Context, Font_Bold);
-            fonsSetColor(FontStash_Context, red);
+            fonsSetColor(FontStash_Context, colour);
 
             glUseProgram(UI_Shader->shaderProgram);
             glUniformMatrix4fv(Flat_Shader->matLocation, 1, GL_FALSE, textNormalMat);
@@ -1697,10 +1733,10 @@ AdjustColorMap(s32 dir)
     f32 unit = 0.05f;
     f32 delta = unit * (dir > 0 ? 1.0f : -1.0f);
 
-    Color_Maps->controlPoint = Max(Min(Color_Maps->controlPoint + delta, 1.0f), 0.0f);
+    Color_Maps->controlPoints[1] = Max(Min(Color_Maps->controlPoints[1] + delta, Color_Maps->controlPoints[2]), Color_Maps->controlPoints[0]);
 
     glUseProgram(Contact_Matrix->shaderProgram);
-    glUniform1f( Color_Maps->cpLocation, Color_Maps->controlPoint);
+    glUniform3fv( Color_Maps->cpLocation, 1, Color_Maps->controlPoints);
 }
 
 global_function
@@ -1807,14 +1843,14 @@ LoadFile(const char *fileName, memory_arena *arena)
         glDeleteVertexArrays((GLsizei)(Number_of_Textures_1D * Number_of_Textures_1D), Contact_Matrix->vaos);
         glDeleteBuffers((GLsizei)(Number_of_Textures_1D * Number_of_Textures_1D), Contact_Matrix->vbos);
 
-        glDeleteVertexArrays((GLsizei)(2 * (Number_of_Contigs + 1)), Grid_Data->vaos);
-        glDeleteBuffers((GLsizei)(2 * (Number_of_Contigs + 1)), Grid_Data->vbos);
+        glDeleteVertexArrays((GLsizei)Grid_Data->nBuffers, Grid_Data->vaos);
+        glDeleteBuffers((GLsizei)Grid_Data->nBuffers, Grid_Data->vbos);
 
-        glDeleteVertexArrays((GLsizei)(2 * Number_of_Contigs), Label_Box_Data->vaos);
-        glDeleteBuffers((GLsizei)(2 * Number_of_Contigs), Label_Box_Data->vbos);
+        glDeleteVertexArrays((GLsizei)Label_Box_Data->nBuffers, Label_Box_Data->vaos);
+        glDeleteBuffers((GLsizei)Label_Box_Data->nBuffers, Label_Box_Data->vbos);
 
-        glDeleteVertexArrays((GLsizei)(2 * Number_of_Contigs * (2 + MaxTicksPerScaleBar)), Scale_Bar_Data->vaos);
-        glDeleteBuffers((GLsizei)(2 * Number_of_Contigs * (2 + MaxTicksPerScaleBar)), Scale_Bar_Data->vbos);
+        glDeleteVertexArrays((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vaos);
+        glDeleteBuffers((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vbos);
 
         Current_Loaded_Texture = 0;
         Texture_Ptr = 0;
@@ -2069,6 +2105,7 @@ LoadFile(const char *fileName, memory_arena *arena)
 
         (*quadData)->vaos = PushArrayP(arena, GLuint, numberOfBuffers);
         (*quadData)->vbos = PushArrayP(arena, GLuint, numberOfBuffers);
+        (*quadData)->nBuffers = numberOfBuffers;
 
         glUseProgram(Flat_Shader->shaderProgram);
 
@@ -2100,7 +2137,7 @@ LoadFile(const char *fileName, memory_arena *arena)
 
     //Scale Bar Data
     {
-        PushGenericBuffer(&Scale_Bar_Data, 2 * Number_of_Contigs_to_Display * (2 + MaxTicksPerScaleBar));
+        PushGenericBuffer(&Scale_Bar_Data, 2 * Min(Number_of_Contigs_to_Display, 4) * (2 + MaxTicksPerScaleBar));
     }
 
     FenceIn(File_Loaded = 1);
@@ -2111,6 +2148,162 @@ LoadFile(const char *fileName, memory_arena *arena)
 global_variable
 memory_arena *
 Loading_Arena;
+
+global_function
+void
+SetTheme(struct nk_context *ctx, enum theme theme)
+{
+    struct nk_color table[NK_COLOR_COUNT];
+    u32 themeSet = 1;
+
+    switch (theme)
+    {
+        case THEME_WHITE:
+            {
+                table[NK_COLOR_TEXT] = nk_rgba(70, 70, 70, 255);
+                table[NK_COLOR_WINDOW] = nk_rgba(175, 175, 175, 255);
+                table[NK_COLOR_HEADER] = nk_rgba(175, 175, 175, 255);
+                table[NK_COLOR_BORDER] = nk_rgba(0, 0, 0, 255);
+                table[NK_COLOR_BUTTON] = nk_rgba(185, 185, 185, 255);
+                table[NK_COLOR_BUTTON_HOVER] = nk_rgba(170, 170, 170, 255);
+                table[NK_COLOR_BUTTON_ACTIVE] = nk_rgba(160, 160, 160, 255);
+                table[NK_COLOR_TOGGLE] = nk_rgba(150, 150, 150, 255);
+                table[NK_COLOR_TOGGLE_HOVER] = nk_rgba(120, 120, 120, 255);
+                table[NK_COLOR_TOGGLE_CURSOR] = nk_rgba(175, 175, 175, 255);
+                table[NK_COLOR_SELECT] = nk_rgba(190, 190, 190, 255);
+                table[NK_COLOR_SELECT_ACTIVE] = nk_rgba(175, 175, 175, 255);
+                table[NK_COLOR_SLIDER] = nk_rgba(190, 190, 190, 255);
+                table[NK_COLOR_SLIDER_CURSOR] = nk_rgba(80, 80, 80, 255);
+                table[NK_COLOR_SLIDER_CURSOR_HOVER] = nk_rgba(70, 70, 70, 255);
+                table[NK_COLOR_SLIDER_CURSOR_ACTIVE] = nk_rgba(60, 60, 60, 255);
+                table[NK_COLOR_PROPERTY] = nk_rgba(175, 175, 175, 255);
+                table[NK_COLOR_EDIT] = nk_rgba(150, 150, 150, 255);
+                table[NK_COLOR_EDIT_CURSOR] = nk_rgba(0, 0, 0, 255);
+                table[NK_COLOR_COMBO] = nk_rgba(175, 175, 175, 255);
+                table[NK_COLOR_CHART] = nk_rgba(160, 160, 160, 255);
+                table[NK_COLOR_CHART_COLOR] = nk_rgba(45, 45, 45, 255);
+                table[NK_COLOR_CHART_COLOR_HIGHLIGHT] = nk_rgba( 255, 0, 0, 255);
+                table[NK_COLOR_SCROLLBAR] = nk_rgba(180, 180, 180, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR] = nk_rgba(140, 140, 140, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR_HOVER] = nk_rgba(150, 150, 150, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR_ACTIVE] = nk_rgba(160, 160, 160, 255);
+                table[NK_COLOR_TAB_HEADER] = nk_rgba(180, 180, 180, 255);
+            }
+            break;
+
+        case THEME_RED:
+            {
+                table[NK_COLOR_TEXT] = nk_rgba(190, 190, 190, 255);
+                table[NK_COLOR_WINDOW] = nk_rgba(30, 33, 40, 215);
+                table[NK_COLOR_HEADER] = nk_rgba(181, 45, 69, 220);
+                table[NK_COLOR_BORDER] = nk_rgba(51, 55, 67, 255);
+                table[NK_COLOR_BUTTON] = nk_rgba(181, 45, 69, 255);
+                table[NK_COLOR_BUTTON_HOVER] = nk_rgba(190, 50, 70, 255);
+                table[NK_COLOR_BUTTON_ACTIVE] = nk_rgba(195, 55, 75, 255);
+                table[NK_COLOR_TOGGLE] = nk_rgba(51, 55, 67, 255);
+                table[NK_COLOR_TOGGLE_HOVER] = nk_rgba(45, 60, 60, 255);
+                table[NK_COLOR_TOGGLE_CURSOR] = nk_rgba(181, 45, 69, 255);
+                table[NK_COLOR_SELECT] = nk_rgba(51, 55, 67, 255);
+                table[NK_COLOR_SELECT_ACTIVE] = nk_rgba(181, 45, 69, 255);
+                table[NK_COLOR_SLIDER] = nk_rgba(51, 55, 67, 255);
+                table[NK_COLOR_SLIDER_CURSOR] = nk_rgba(181, 45, 69, 255);
+                table[NK_COLOR_SLIDER_CURSOR_HOVER] = nk_rgba(186, 50, 74, 255);
+                table[NK_COLOR_SLIDER_CURSOR_ACTIVE] = nk_rgba(191, 55, 79, 255);
+                table[NK_COLOR_PROPERTY] = nk_rgba(51, 55, 67, 255);
+                table[NK_COLOR_EDIT] = nk_rgba(51, 55, 67, 225);
+                table[NK_COLOR_EDIT_CURSOR] = nk_rgba(190, 190, 190, 255);
+                table[NK_COLOR_COMBO] = nk_rgba(51, 55, 67, 255);
+                table[NK_COLOR_CHART] = nk_rgba(51, 55, 67, 255);
+                table[NK_COLOR_CHART_COLOR] = nk_rgba(170, 40, 60, 255);
+                table[NK_COLOR_CHART_COLOR_HIGHLIGHT] = nk_rgba( 255, 0, 0, 255);
+                table[NK_COLOR_SCROLLBAR] = nk_rgba(30, 33, 40, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR] = nk_rgba(64, 84, 95, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR_HOVER] = nk_rgba(70, 90, 100, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR_ACTIVE] = nk_rgba(75, 95, 105, 255);
+                table[NK_COLOR_TAB_HEADER] = nk_rgba(181, 45, 69, 220);
+            }
+            break;
+
+        case THEME_BLUE:
+            {
+                table[NK_COLOR_TEXT] = nk_rgba(20, 20, 20, 255);
+                table[NK_COLOR_WINDOW] = nk_rgba(202, 212, 214, 215);
+                table[NK_COLOR_HEADER] = nk_rgba(137, 182, 224, 220);
+                table[NK_COLOR_BORDER] = nk_rgba(140, 159, 173, 255);
+                table[NK_COLOR_BUTTON] = nk_rgba(137, 182, 224, 255);
+                table[NK_COLOR_BUTTON_HOVER] = nk_rgba(142, 187, 229, 255);
+                table[NK_COLOR_BUTTON_ACTIVE] = nk_rgba(147, 192, 234, 255);
+                table[NK_COLOR_TOGGLE] = nk_rgba(177, 210, 210, 255);
+                table[NK_COLOR_TOGGLE_HOVER] = nk_rgba(182, 215, 215, 255);
+                table[NK_COLOR_TOGGLE_CURSOR] = nk_rgba(137, 182, 224, 255);
+                table[NK_COLOR_SELECT] = nk_rgba(177, 210, 210, 255);
+                table[NK_COLOR_SELECT_ACTIVE] = nk_rgba(137, 182, 224, 255);
+                table[NK_COLOR_SLIDER] = nk_rgba(177, 210, 210, 255);
+                table[NK_COLOR_SLIDER_CURSOR] = nk_rgba(137, 182, 224, 245);
+                table[NK_COLOR_SLIDER_CURSOR_HOVER] = nk_rgba(142, 188, 229, 255);
+                table[NK_COLOR_SLIDER_CURSOR_ACTIVE] = nk_rgba(147, 193, 234, 255);
+                table[NK_COLOR_PROPERTY] = nk_rgba(210, 210, 210, 255);
+                table[NK_COLOR_EDIT] = nk_rgba(210, 210, 210, 225);
+                table[NK_COLOR_EDIT_CURSOR] = nk_rgba(20, 20, 20, 255);
+                table[NK_COLOR_COMBO] = nk_rgba(210, 210, 210, 255);
+                table[NK_COLOR_CHART] = nk_rgba(210, 210, 210, 255);
+                table[NK_COLOR_CHART_COLOR] = nk_rgba(137, 182, 224, 255);
+                table[NK_COLOR_CHART_COLOR_HIGHLIGHT] = nk_rgba( 255, 0, 0, 255);
+                table[NK_COLOR_SCROLLBAR] = nk_rgba(190, 200, 200, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR] = nk_rgba(64, 84, 95, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR_HOVER] = nk_rgba(70, 90, 100, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR_ACTIVE] = nk_rgba(75, 95, 105, 255);
+                table[NK_COLOR_TAB_HEADER] = nk_rgba(156, 193, 220, 255);
+            }
+            break;
+
+        case THEME_DARK:
+            {
+                table[NK_COLOR_TEXT] = nk_rgba(210, 210, 210, 255);
+                table[NK_COLOR_WINDOW] = nk_rgba(57, 67, 71, 215);
+                table[NK_COLOR_HEADER] = nk_rgba(51, 51, 56, 220);
+                table[NK_COLOR_BORDER] = nk_rgba(46, 46, 46, 255);
+                table[NK_COLOR_BUTTON] = nk_rgba(48, 83, 111, 255);
+                table[NK_COLOR_BUTTON_HOVER] = nk_rgba(58, 93, 121, 255);
+                table[NK_COLOR_BUTTON_ACTIVE] = nk_rgba(63, 98, 126, 255);
+                table[NK_COLOR_TOGGLE] = nk_rgba(50, 58, 61, 255);
+                table[NK_COLOR_TOGGLE_HOVER] = nk_rgba(45, 53, 56, 255);
+                table[NK_COLOR_TOGGLE_CURSOR] = nk_rgba(48, 83, 111, 255);
+                table[NK_COLOR_SELECT] = nk_rgba(57, 67, 61, 255);
+                table[NK_COLOR_SELECT_ACTIVE] = nk_rgba(48, 83, 111, 255);
+                table[NK_COLOR_SLIDER] = nk_rgba(50, 58, 61, 255);
+                table[NK_COLOR_SLIDER_CURSOR] = nk_rgba(48, 83, 111, 245);
+                table[NK_COLOR_SLIDER_CURSOR_HOVER] = nk_rgba(53, 88, 116, 255);
+                table[NK_COLOR_SLIDER_CURSOR_ACTIVE] = nk_rgba(58, 93, 121, 255);
+                table[NK_COLOR_PROPERTY] = nk_rgba(50, 58, 61, 255);
+                table[NK_COLOR_EDIT] = nk_rgba(50, 58, 61, 225);
+                table[NK_COLOR_EDIT_CURSOR] = nk_rgba(210, 210, 210, 255);
+                table[NK_COLOR_COMBO] = nk_rgba(50, 58, 61, 255);
+                table[NK_COLOR_CHART] = nk_rgba(50, 58, 61, 255);
+                table[NK_COLOR_CHART_COLOR] = nk_rgba(48, 83, 111, 255);
+                table[NK_COLOR_CHART_COLOR_HIGHLIGHT] = nk_rgba(255, 0, 0, 255);
+                table[NK_COLOR_SCROLLBAR] = nk_rgba(50, 58, 61, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR] = nk_rgba(48, 83, 111, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR_HOVER] = nk_rgba(53, 88, 116, 255);
+                table[NK_COLOR_SCROLLBAR_CURSOR_ACTIVE] = nk_rgba(58, 93, 121, 255);
+                table[NK_COLOR_TAB_HEADER] = nk_rgba(48, 83, 111, 255);
+            }
+            break;
+
+        case THEME_BLACK:
+        case THEME_COUNT:
+            themeSet = 0;
+    }
+
+    if (themeSet) nk_style_from_table(ctx, table, Screen_Scale.x, Screen_Scale.y);
+    else nk_style_default(ctx, Screen_Scale.x, Screen_Scale.y);
+
+    Theme_Colour = table[NK_COLOR_BUTTON_ACTIVE];
+    
+    NK_Context->style.slider.show_buttons = nk_true;
+
+    Current_Theme = theme;
+}
 
 global_function
 void
@@ -2125,6 +2318,29 @@ Setup()
 
     Texture_Buffer_Queue = PushStruct(Working_Set, texture_buffer_queue);
     
+    // Contig Name Label UI
+    {
+        Contig_Name_Labels = PushStruct(Working_Set, ui_colour_element_bg);
+        Contig_Name_Labels->on = 0;
+        Contig_Name_Labels->fg = Yellow_Text;
+        Contig_Name_Labels->bg = Grey_Background;
+    }
+    
+    // Scale Bar UI
+    {
+        Scale_Bars = PushStruct(Working_Set, ui_colour_element_bg);
+        Scale_Bars->on = 0;
+        Scale_Bars->fg = Red_Text;
+        Scale_Bars->bg = Grey_Background;
+    }
+   
+    // Grid UI
+    {
+        Grid = PushStruct(Working_Set, ui_colour_element);
+        Grid->on = 1;
+        Grid->bg = Grey_Background;
+    }
+
     // Contact Matrix Shader
     {
         Contact_Matrix = PushStruct(Working_Set, contact_matrix);
@@ -2188,9 +2404,11 @@ Setup()
 
         glActiveTexture(GL_TEXTURE0);
 
-        Color_Maps->cpLocation = glGetUniformLocation(Contact_Matrix->shaderProgram, "controlpoint");
-        Color_Maps->controlPoint = 0.5f;
-        glUniform1f( Color_Maps->cpLocation, Color_Maps->controlPoint);
+        Color_Maps->cpLocation = glGetUniformLocation(Contact_Matrix->shaderProgram, "controlpoints");
+        Color_Maps->controlPoints[0] = 0.0f;
+        Color_Maps->controlPoints[1] = 0.5f;
+        Color_Maps->controlPoints[2] = 1.0f;
+        glUniform3fv( Color_Maps->cpLocation, 1, Color_Maps->controlPoints);
     }
 
     // Flat Color Shader
@@ -2216,16 +2434,14 @@ Setup()
         UI_Shader->matLocation = glGetUniformLocation(UI_Shader->shaderProgram, "matrix");
 
         FontStash_Context = glfonsCreate(512, 512, FONS_ZERO_TOPLEFT);
-        //Font_Normal = fonsAddFont(FontStash_Context, "sans", "DroidSerif-Regular.ttf");
-        Font_Normal = fonsAddFontMem(FontStash_Context, "Sans Regular", FontNormal, FontNormal_Size, 0);
+        Font_Normal = fonsAddFontMem(FontStash_Context, "Sans Regular", FontNormal, (s32)FontNormal_Size, 0);
 
         if (Font_Normal == FONS_INVALID)
         {
             fprintf(stderr, "Could not add font 'DroidSerif-Regular.ttf'\n");
             exit(1);
         }
-        //Font_Bold = fonsAddFont(FontStash_Context, "sans", "DroidSerif-Bold.ttf");
-        Font_Bold = fonsAddFontMem(FontStash_Context, "Sans Bold", FontBold, FontBold_Size, 0);
+        Font_Bold = fonsAddFontMem(FontStash_Context, "Sans Bold", FontBold, (s32)FontBold_Size, 0);
         if (Font_Bold == FONS_INVALID)
         {
             fprintf(stderr, "Could not add font 'DroidSerif-Bold.ttf'\n");
@@ -2281,7 +2497,7 @@ Setup()
 
     // Nuklear Setup
     {
-#define NK_Memory_Size MegaByte(16)
+#define NK_Memory_Size MegaByte(32)
         NK_Device = PushStruct(Working_Set, device);
         u08 *nkCmdMemory = PushArray(Working_Set, u08, NK_Memory_Size);
         nk_buffer_init_fixed(&NK_Device->cmds, (void *)nkCmdMemory, NK_Memory_Size);
@@ -2320,8 +2536,6 @@ Setup()
         struct nk_font_config cfg = nk_font_config(14);
         cfg.oversample_h = 3;
         cfg.oversample_v = 3;
-        //NK_Font = nk_font_atlas_add_from_file(NK_Atlas, "DroidSerif-Bold.ttf", 22, &cfg);
-        //NK_Font_Browser = nk_font_atlas_add_from_file(NK_Atlas, "DroidSerif-Bold.ttf", 14, &cfg);
         NK_Font = nk_font_atlas_add_from_memory(NK_Atlas, FontBold, (nk_size)FontBold_Size, 22 * Screen_Scale.y, &cfg);
         NK_Font_Browser = nk_font_atlas_add_from_memory(NK_Atlas, FontBold, (nk_size)FontBold_Size, 14 * Screen_Scale.y, &cfg);
 
@@ -2339,40 +2553,13 @@ Setup()
         u08 *nkContextMemory = PushArray(Working_Set, u08, NK_Memory_Size);
         nk_init_fixed(NK_Context, (void *)nkContextMemory, NK_Memory_Size, &NK_Font->handle);
 
-        {
-            struct nk_color table[NK_COLOR_COUNT];
+        SetTheme(NK_Context, THEME_DARK);
 
-            table[NK_COLOR_TEXT] = nk_rgba(210, 210, 210, 255);
-            table[NK_COLOR_WINDOW] = nk_rgba(57, 67, 71, 215);
-            table[NK_COLOR_HEADER] = nk_rgba(51, 51, 56, 220);
-            table[NK_COLOR_BORDER] = nk_rgba(46, 46, 46, 255);
-            table[NK_COLOR_BUTTON] = nk_rgba(48, 83, 111, 255);
-            table[NK_COLOR_BUTTON_HOVER] = nk_rgba(58, 93, 121, 255);
-            table[NK_COLOR_BUTTON_ACTIVE] = nk_rgba(63, 98, 126, 255);
-            table[NK_COLOR_TOGGLE] = nk_rgba(75, 87, 92, 255);
-            table[NK_COLOR_TOGGLE_HOVER] = nk_rgba(45, 53, 56, 255);
-            table[NK_COLOR_TOGGLE_CURSOR] = nk_rgba(72, 125, 167, 255);
-            table[NK_COLOR_SELECT] = nk_rgba(57, 67, 61, 255);
-            table[NK_COLOR_SELECT_ACTIVE] = nk_rgba(48, 83, 111, 255);
-            table[NK_COLOR_SLIDER] = nk_rgba(50, 58, 61, 255);
-            table[NK_COLOR_SLIDER_CURSOR] = nk_rgba(48, 83, 111, 245);
-            table[NK_COLOR_SLIDER_CURSOR_HOVER] = nk_rgba(53, 88, 116, 255);
-            table[NK_COLOR_SLIDER_CURSOR_ACTIVE] = nk_rgba(58, 93, 121, 255);
-            table[NK_COLOR_PROPERTY] = nk_rgba(50, 58, 61, 255);
-            table[NK_COLOR_EDIT] = nk_rgba(50, 58, 61, 225);
-            table[NK_COLOR_EDIT_CURSOR] = nk_rgba(210, 210, 210, 255);
-            table[NK_COLOR_COMBO] = nk_rgba(50, 58, 61, 255);
-            table[NK_COLOR_CHART] = nk_rgba(50, 58, 61, 255);
-            table[NK_COLOR_CHART_COLOR] = nk_rgba(48, 83, 111, 255);
-            table[NK_COLOR_CHART_COLOR_HIGHLIGHT] = nk_rgba(255, 0, 0, 255);
-            table[NK_COLOR_SCROLLBAR] = nk_rgba(112, 130, 137, 255);
-            table[NK_COLOR_SCROLLBAR_CURSOR] = nk_rgba(48, 83, 111, 255);
-            table[NK_COLOR_SCROLLBAR_CURSOR_HOVER] = nk_rgba(53, 88, 116, 255);
-            table[NK_COLOR_SCROLLBAR_CURSOR_ACTIVE] = nk_rgba(58, 93, 121, 255);
-            table[NK_COLOR_TAB_HEADER] = nk_rgba(48, 83, 111, 255);
-
-            nk_style_from_table(NK_Context, table);
-        }
+        Theme_Name[THEME_RED] = (u08 *)"Red";
+        Theme_Name[THEME_BLUE] = (u08 *)"Blue";
+        Theme_Name[THEME_WHITE] = (u08 *)"White";
+        Theme_Name[THEME_BLACK] = (u08 *)"Black";
+        Theme_Name[THEME_DARK] = (u08 *)"Dark";
     }
 
     Loading_Arena = PushSubArena(Working_Set, MegaByte(128));
@@ -2395,7 +2582,7 @@ TakeScreenShot()
     FreeLastPush(Working_Set);
 }
 
-global_function
+global_variable
 s32
 Windowed_Xpos, Windowed_Ypos, Windowed_Width, Windowed_Height;
 
@@ -2446,11 +2633,15 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
             switch (key)
             {
                 case GLFW_KEY_N:
-                    Contig_Name_Labels_On = !Contig_Name_Labels_On;
+                    Contig_Name_Labels->on = !Contig_Name_Labels->on;
                     break;
 
                 case GLFW_KEY_B:
-                    Scale_Bars_On = !Scale_Bars_On;
+                    Scale_Bars->on = !Scale_Bars->on;
+                    break;
+
+                case GLFW_KEY_G:
+                    Grid->on = !Grid->on;
                     break;
 
                 case GLFW_KEY_S:
@@ -2556,7 +2747,7 @@ enum
 file_groups
 {
     FILE_GROUP_DEFAULT,
-    FILE_GROUP_PRETEX,
+    FILE_GROUP_PRETEXT,
     FILE_GROUP_MAX
 };
 
@@ -2564,7 +2755,7 @@ enum
 file_types
 {
     FILE_DEFAULT,
-    FILE_PRETEX,
+    FILE_PRETEXT,
     FILE_PSTM,
     FILE_MAX
 };
@@ -2653,41 +2844,75 @@ DirList(const char *dir, u32 return_subdirs, size_t *count)
     size_t n = 0;
     char buffer[MAX_PATH_LEN];
     char **results = NULL;
+#ifndef _WIN32
     const DIR *none = NULL;
+    DIR *z;
+#else
+    WIN32_FIND_DATA ffd;
+    HANDLE hFind = INVALID_HANDLE_VALUE;
+    char dirBuff[MAX_PATH_LEN];
+#endif
     size_t capacity = 32;
     size_t size;
-    DIR *z;
 
     assert(dir);
     assert(count);
     strncpy(buffer, dir, MAX_PATH_LEN);
     n = strlen(buffer);
 
+#ifndef _WIN32
     if (n > 0 && (buffer[n-1] != '/'))
         buffer[n++] = '/';
+#else
+    if (n > 0 && (buffer[n-1] != '\\'))
+        buffer[n++] = '\\';
+#endif
 
     size = 0;
 
+#ifndef _WIN32
     z = opendir(dir);
+#else
+    strncpy(dirBuff, buffer, MAX_PATH_LEN);
+    dirBuff[n] = '*';
+    hFind = FindFirstFile(dirBuff, &ffd);
+#endif
+    
+#ifndef _WIN32
     if (z != none)
+#else
+    if (hFind != INVALID_HANDLE_VALUE)
+#endif
     {
+#ifndef _WIN32
         u32 nonempty = 1;
         struct dirent *data = readdir(z);
         nonempty = (data != NULL);
         if (!nonempty) return NULL;
-
+#endif
         do
         {
+#ifndef _WIN32
             DIR *y;
+#endif
             char *p;
             u32 is_subdir;
+#ifndef _WIN32
             if (data->d_name[0] == '.')
+#else
+            if (ffd.cFileName[0] == '.') 
+#endif
                 continue;
 
+#ifndef _WIN32
             strncpy(buffer + n, data->d_name, MAX_PATH_LEN-n);
             y = opendir(buffer);
             is_subdir = (y != NULL);
             if (y != NULL) closedir(y);
+#else
+            strncpy(buffer + n, ffd.cFileName, MAX_PATH_LEN-n);
+            is_subdir = ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+#endif
 
             if ((return_subdirs && is_subdir) || (!is_subdir && !return_subdirs))
             {
@@ -2703,13 +2928,25 @@ DirList(const char *dir, u32 return_subdirs, size_t *count)
                     assert(results);
                     if (!results) free(old);
                 }
+#ifndef _WIN32
                 p = StrDuplicate(data->d_name);
+#else
+                p = StrDuplicate(ffd.cFileName);
+#endif  
                 results[size++] = p;
             }
+#ifndef _WIN32    
         } while ((data = readdir(z)) != NULL);
+#else
+        } while (FindNextFile(hFind, &ffd) != 0);
+#endif
     }
 
+#ifndef _WIN32
     if (z) closedir(z);
+#else
+    FindClose(hFind);
+#endif
     *count = size;
     return results;
 }
@@ -2792,12 +3029,12 @@ MediaInit(struct media *media)
     /* file groups */
     struct icons *icons = &media->icons;
     media->group[FILE_GROUP_DEFAULT] = FILE_GROUP(FILE_GROUP_DEFAULT,"default",&icons->default_file);
-    media->group[FILE_GROUP_PRETEX] = FILE_GROUP(FILE_GROUP_PRETEX, "pretex", &icons->img_file);
+    media->group[FILE_GROUP_PRETEXT] = FILE_GROUP(FILE_GROUP_PRETEXT, "pretext", &icons->img_file);
 
     /* files */
     media->files[FILE_DEFAULT] = FILE_DEF(FILE_DEFAULT, NULL, FILE_GROUP_DEFAULT);
-    media->files[FILE_PRETEX] = FILE_DEF(FILE_PRETEX, "pretex", FILE_GROUP_PRETEX);
-    media->files[FILE_PSTM] = FILE_DEF(FILE_PSTM, "pstm", FILE_GROUP_PRETEX);
+    media->files[FILE_PRETEXT] = FILE_DEF(FILE_PRETEXT, "pretext", FILE_GROUP_PRETEXT);
+    media->files[FILE_PSTM] = FILE_DEF(FILE_PSTM, "pstm", FILE_GROUP_PRETEXT);
 }
 
 global_function
@@ -2824,30 +3061,46 @@ FileBrowserInit(struct file_browser *browser, struct media *media)
         if (!home) home = getenv("USERPROFILE");
 #else
         if (!home) home = getpwuid(getuid())->pw_dir;
+#endif
         {
             size_t l;
             strncpy(browser->home, home, MAX_PATH_LEN);
             l = strlen(browser->home);
-            strcpy(browser->home + l, "/");
+#ifdef _WIN32
+      char *sep = (char *)"\\";
+#else
+      char *sep = (char *)"/";
+#endif
+            strcpy(browser->home + l, sep);
             strcpy(browser->directory, browser->home);
         }
-#endif
         
         browser->files = DirList(browser->directory, 0, &browser->file_count);
         browser->directories = DirList(browser->directory, 1, &browser->dir_count);
     }
 }
 
-static
+global_function
 u32
-FileBrowserRun(struct file_browser *browser, struct nk_context *ctx)
+FileBrowserRun(struct file_browser *browser, struct nk_context *ctx, u32 show)
 {
-    static u32 setup = 1;
-    nk_flags setupFlags = 0;
-    if (setup)
+#ifndef _WIN32
+    char pathSep = '/';
+#else
+    char pathSep = '\\';
+#endif
+   
+    struct nk_window *window = nk_window_find(ctx, "File Browser");
+    u32 doesExist = window != 0;
+
+    if (!show && !doesExist)
     {
-        setup = 0;
-        setupFlags = NK_WINDOW_HIDDEN;
+        return(0);
+    }
+
+    if (show && doesExist && (window->flags & NK_WINDOW_HIDDEN))
+    {
+        window->flags &= ~(nk_flags)NK_WINDOW_HIDDEN;
     }
 
     u32 ret = 0;
@@ -2855,7 +3108,7 @@ FileBrowserRun(struct file_browser *browser, struct nk_context *ctx)
     struct nk_rect total_space;
 
     if (nk_begin(ctx, "File Browser", nk_rect(Screen_Scale.x * 50, Screen_Scale.y * 50, Screen_Scale.x * 800, Screen_Scale.y * 600),
-                NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_MOVABLE|NK_WINDOW_TITLE|NK_WINDOW_CLOSABLE|setupFlags))
+                NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_MOVABLE|NK_WINDOW_TITLE|NK_WINDOW_CLOSABLE))
     {
         static f32 ratio[] = {0.25f, NK_UNDEFINED};
         f32 spacing_x = ctx->style.window.spacing.x;
@@ -2870,16 +3123,16 @@ FileBrowserRun(struct file_browser *browser, struct nk_context *ctx)
             nk_layout_row_dynamic(ctx, (s32)(Screen_Scale.y * 25.0f), 6);
             while (*d++)
             {
-                if (*d == '/')
+                if (*d == pathSep)
                 {
                     *d = '\0';
                     if (nk_button_label(ctx, begin))
                     {
-                        *d++ = '/'; *d = '\0';
+                        *d++ = pathSep; *d = '\0';
                         FileBrowserReloadDirectoryContent(browser, browser->directory);
                         break;
                     }
-                    *d = '/';
+                    *d = pathSep;
                     begin = d + 1;
                 }
             }
@@ -2899,7 +3152,11 @@ FileBrowserRun(struct file_browser *browser, struct nk_context *ctx)
             if (nk_button_image_label(ctx, home, "home", NK_TEXT_CENTERED))
                 FileBrowserReloadDirectoryContent(browser, browser->home);
             if (nk_button_image_label(ctx,computer,"computer",NK_TEXT_CENTERED))
+#ifndef _WIN32
                 FileBrowserReloadDirectoryContent(browser, "/");
+#else
+                FileBrowserReloadDirectoryContent(browser, "C:\\");
+#endif
             nk_group_end(ctx);
         }
 
@@ -2975,7 +3232,7 @@ FileBrowserRun(struct file_browser *browser, struct nk_context *ctx)
                 n = strlen(browser->directory);
                 if (n < MAX_PATH_LEN - 1)
                 {
-                    browser->directory[n] = '/';
+                    browser->directory[n] = pathSep;
                     browser->directory[n+1] = '\0';
                 }
                 FileBrowserReloadDirectoryContent(browser, browser->directory);
@@ -2989,15 +3246,100 @@ FileBrowserRun(struct file_browser *browser, struct nk_context *ctx)
     return ret;
 }
 
+struct
+about_window
+{
+    struct nk_image logo;
+};
+
+global_function
+void
+AboutWindowRun(about_window *about, struct nk_context *ctx, u32 show)
+{
+    struct nk_window *window = nk_window_find(ctx, "About");
+    u32 doesExist = window != 0;
+
+    if (!show && !doesExist)
+    {
+        return;
+    }
+
+    if (show && doesExist && (window->flags & NK_WINDOW_HIDDEN))
+    {
+        window->flags &= ~(nk_flags)NK_WINDOW_HIDDEN;
+    }
+
+    static u32 showThirdParty = 0;
+
+    if (nk_begin_titled(ctx, "About", PretextView_Version, nk_rect(Screen_Scale.x * 50, Screen_Scale.y * 50, Screen_Scale.x * 870, Screen_Scale.y * 610),
+                NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_MOVABLE|NK_WINDOW_TITLE|NK_WINDOW_CLOSABLE))
+    {
+        nk_menubar_begin(ctx);
+        {
+            nk_layout_row_dynamic(ctx, (s32)(Screen_Scale.y * 35.0f), 2);
+            if (nk_button_label(ctx, "Licence"))
+            {
+                showThirdParty = 0;
+            }
+            if (nk_button_label(ctx, "Third Party Software"))
+            {
+                showThirdParty = 1;
+            }
+        }
+        nk_menubar_end(ctx);
+
+        struct nk_rect total_space = nk_window_get_content_region(ctx);
+        f32 one = NK_UNDEFINED;
+        nk_layout_row(ctx, NK_DYNAMIC, total_space.h, 1, &one);
+
+        nk_group_begin(ctx, "About_Content", 0);
+        {
+            if (showThirdParty)
+            {
+                u08 text[] = R"text(PretextView was made possible thanks to the following third party libraries and
+resources, click each entry to view its licence.)text";
+
+                nk_layout_row_static(ctx, Screen_Scale.y * 60, (s32)(Screen_Scale.x * 820), 1);
+                s32 len = sizeof(text);
+                nk_edit_string(ctx, NK_EDIT_READ_ONLY | NK_EDIT_NO_CURSOR | NK_EDIT_SELECTABLE | NK_EDIT_MULTILINE, (char *)text, &len, len, 0);
+
+                ForLoop(Number_of_ThirdParties)
+                {
+                    u32 nameIndex = 2 * index;
+                    u32 licenceIndex = nameIndex + 1;
+                    s32 *sizes = ThirdParty_Licence_Sizes[index];
+
+                    if (nk_tree_push_id(NK_Context, NK_TREE_TAB, (const char *)ThirdParty[nameIndex], NK_MINIMIZED, (s32)index))
+                    {
+                        nk_layout_row_static(ctx, Screen_Scale.y * sizes[0], (s32)(Screen_Scale.x * sizes[1]), 1);
+                        len = (s32)StringLength(ThirdParty[licenceIndex]);
+                        nk_edit_string(ctx, NK_EDIT_READ_ONLY | NK_EDIT_NO_CURSOR | NK_EDIT_SELECTABLE | NK_EDIT_MULTILINE, (char *)ThirdParty[licenceIndex], &len, len, 0);
+                        nk_tree_pop(NK_Context);
+                    }
+                }
+            }
+            else
+            {
+                nk_layout_row_static(ctx, Screen_Scale.y * 500, (s32)(Screen_Scale.x * 820), 1);
+                (void)about;
+                s32 len = sizeof(Licence);
+                nk_edit_string(ctx, NK_EDIT_READ_ONLY | NK_EDIT_NO_CURSOR | NK_EDIT_SELECTABLE | NK_EDIT_MULTILINE, (char *)Licence, &len, len, 0);
+            }
+            
+            nk_group_end(ctx);
+        }
+    }
+
+    nk_end(ctx);
+}
+
 global_function
 struct nk_image
-//IconLoad(const char *filename)
-IconLoad(u08 *buffer, s32 bufferSize)
+IconLoad(u08 *buffer, u32 bufferSize)
 {
     s32 x,y,n;
     GLuint tex;
-    //u08 *data = stbi_load(filename, &x, &y, &n, 0);
-    u08 *data = stbi_load_from_memory((const u08*)buffer, bufferSize, &x, &y, &n, 0);
+    u08 *data = stbi_load_from_memory((const u08*)buffer, (s32)bufferSize, &x, &y, &n, 0);
     if (!data)
     {
         fprintf(stderr, "Failed to load image\n");
@@ -3064,14 +3406,11 @@ MainArgs
     glfwMakeContextCurrent(window);
     NK_Context = PushStruct(Working_Set, nk_context);
     glfwSetWindowUserPointer(window, NK_Context);
-//#ifdef __APPLE__
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
-//#else
-//    gladLoadGL(glfwGetProcAddress);
-//#endif
     glfwSwapInterval(1);
 
-    glfwSetFramebufferSizeCallback(window, GLFWChangeSize);
+    glfwSetFramebufferSizeCallback(window, GLFWChangeFrameBufferSize);
+    glfwSetWindowSizeCallback(window, GLFWChangeWindowSize);
     glfwSetCursorPosCallback(window, MouseMove);
     glfwSetMouseButtonCallback(window, Mouse);
     glfwSetScrollCallback(window, Scroll);
@@ -3101,15 +3440,19 @@ MainArgs
         UI_On = 1;
     }
 
+    // about screen
+    about_window about;
+    //about.logo = IconLoad(AboutIcon, AboutIcon_Size);
+
     // file browser
     struct file_browser browser;
     struct media media;
     {
-        media.icons.home = IconLoad(IconHome, IconHome_Size);//IconLoad("icon/home-8x.png");
-        media.icons.directory = IconLoad(IconFolder, IconFolder_Size);//IconLoad("icon/folder-8x.png");
-        media.icons.computer = IconLoad(IconDrive, IconDrive_Size);//IconLoad("icon/hard-drive-8x.png");
-        media.icons.default_file = IconLoad(IconFile, IconFile_Size);//IconLoad("icon/file-8x.png");
-        media.icons.img_file = IconLoad(IconImage, IconImage_Size);//IconLoad("icon/image-8x.png");
+        media.icons.home = IconLoad(IconHome, IconHome_Size);
+        media.icons.directory = IconLoad(IconFolder, IconFolder_Size);
+        media.icons.computer = IconLoad(IconDrive, IconDrive_Size);
+        media.icons.default_file = IconLoad(IconFile, IconFile_Size);
+        media.icons.img_file = IconLoad(IconImage, IconImage_Size);
         MediaInit(&media);
         FileBrowserInit(&browser, &media);
     }
@@ -3178,6 +3521,7 @@ MainArgs
             nk_input_end(NK_Context);
             
             s32 showFileBrowser = 0;
+            s32 showAboutScreen = 0;
             static u32 currGroup1 = 0;
             static u32 currGroup2 = 0;
             static s32 currSelected1 = -1;
@@ -3185,25 +3529,144 @@ MainArgs
             {
                 static nk_flags flags = NK_WINDOW_BORDER | NK_WINDOW_SCALABLE | NK_WINDOW_MOVABLE | NK_WINDOW_SCROLL_AUTO_HIDE | NK_WINDOW_TITLE;
 
-                if (nk_begin(NK_Context, "Options", nk_rect(Screen_Scale.x * 10, Screen_Scale.y * 10, Screen_Scale.x * 600, Screen_Scale.y * 600), flags))
+                if (nk_begin(NK_Context, "Options", nk_rect(Screen_Scale.x * 10, Screen_Scale.y * 10, Screen_Scale.x * 700, Screen_Scale.y * 350), flags))
                 {
-                    nk_layout_row_static(NK_Context, (s32)(Screen_Scale.y * 30.0f), (s32)(Screen_Scale.x * 200.0f), 1);
+                    struct nk_rect bounds = nk_window_get_bounds(NK_Context);
+                    bounds.w /= 8;
+                    bounds.h /= 8;
+                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 300, Screen_Scale.y * 400), bounds))
+                    { 
+                        nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 2);
+                        theme curr = Current_Theme;
+                        ForLoop(THEME_COUNT)
+                        {
+                            curr = nk_option_label(NK_Context, (const char *)Theme_Name[index], curr == (theme)index) ? (theme)index : curr;
+                        }
+                        if (curr != Current_Theme)
+                        {
+                            SetTheme(NK_Context, curr);
+                        }
+
+                        nk_contextual_end(NK_Context); 
+                    } 
+                    
+                    nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 2);
                     showFileBrowser = nk_button_label(NK_Context, "Load File");
+                    showAboutScreen = nk_button_label(NK_Context, "About");
 
-                    nk_layout_row_static(NK_Context, (s32)(Screen_Scale.y * 30.0f), (s32)(Screen_Scale.x * 300.0f), 2);
-                    Contig_Name_Labels_On = nk_check_label(NK_Context, "Contig Name Labels", (s32)Contig_Name_Labels_On) ? 1 : 0;
-                    Scale_Bars_On = nk_check_label(NK_Context, "Scale Bars", (s32)Scale_Bars_On) ? 1 : 0;
-
-                    nk_label(NK_Context, "Gamma", NK_TEXT_LEFT);
-                    if (nk_slider_float(NK_Context, 0, &Color_Maps->controlPoint, 1.0f, 0.001f))
+                    nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 1);
+                    bounds = nk_widget_bounds(NK_Context);
+                    Contig_Name_Labels->on = nk_check_label(NK_Context, "Contig Name Labels", (s32)Contig_Name_Labels->on) ? 1 : 0;
+                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 300, Screen_Scale.y * 400), bounds))
                     {
+                        static struct nk_colorf colour_text = Yellow_Text_Float;
+                        static struct nk_colorf colour_bg = Grey_Background;
+                       
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                        nk_label(NK_Context, "Contig Name Label Colour", NK_TEXT_CENTERED);
+
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 2);
+                        nk_label(NK_Context, "Text", NK_TEXT_CENTERED);
+                        nk_label(NK_Context, "Background", NK_TEXT_CENTERED);
+                        
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 200, 2);
+                        colour_text = nk_color_picker(NK_Context, colour_text, NK_RGBA);
+                        colour_bg = nk_color_picker(NK_Context, colour_bg, NK_RGBA);
+                       
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 2);
+                        if (nk_button_label(NK_Context, "Default")) colour_text = Yellow_Text_Float;
+                        if (nk_button_label(NK_Context, "Default")) colour_bg = Grey_Background;
+
+                        Contig_Name_Labels->fg = glfonsRGBA(    (u08)(colour_text.r * 255.0f), 
+                                                                (u08)(colour_text.g * 255.0f), 
+                                                                (u08)(colour_text.b * 255.0f), 
+                                                                (u08)(colour_text.a * 255.0f));
+
+                        Contig_Name_Labels->bg = colour_bg;
+
+                        nk_contextual_end(NK_Context);
+                    }
+
+                    bounds = nk_widget_bounds(NK_Context);
+                    Scale_Bars->on = nk_check_label(NK_Context, "Scale Bars", (s32)Scale_Bars->on) ? 1 : 0;
+                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 300, Screen_Scale.y * 400), bounds))
+                    {
+                        static struct nk_colorf colour_text = Red_Text_Float;
+                        static struct nk_colorf colour_bg = Grey_Background;
+                       
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                        nk_label(NK_Context, "Scale Bar Colour", NK_TEXT_CENTERED);
+
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 2);
+                        nk_label(NK_Context, "Text", NK_TEXT_CENTERED);
+                        nk_label(NK_Context, "Background", NK_TEXT_CENTERED);
+                        
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 200, 2);
+                        colour_text = nk_color_picker(NK_Context, colour_text, NK_RGBA);
+                        colour_bg = nk_color_picker(NK_Context, colour_bg, NK_RGBA);
+                       
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 2);
+                        if (nk_button_label(NK_Context, "Default")) colour_text = Red_Text_Float;
+                        if (nk_button_label(NK_Context, "Default")) colour_bg = Grey_Background;
+
+                        Scale_Bars->fg = glfonsRGBA(    (u08)(colour_text.r * 255.0f), 
+                                                                (u08)(colour_text.g * 255.0f), 
+                                                                (u08)(colour_text.b * 255.0f), 
+                                                                (u08)(colour_text.a * 255.0f));
+
+                        Scale_Bars->bg = colour_bg;
+
+                        nk_contextual_end(NK_Context);
+                    }
+                   
+                    bounds = nk_widget_bounds(NK_Context);
+                    Grid->on = nk_check_label(NK_Context, "Grid", (s32)Grid->on) ? 1 : 0;
+                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 150, Screen_Scale.y * 400), bounds))
+                    {
+                        static struct nk_colorf colour_bg = Grey_Background;
+                       
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                        nk_label(NK_Context, "Grid Colour", NK_TEXT_CENTERED);
+
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 200, 1);
+                        colour_bg = nk_color_picker(NK_Context, colour_bg, NK_RGBA);
+                       
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                        if (nk_button_label(NK_Context, "Default")) colour_bg = Grey_Background;
+
+                        Grid->bg = colour_bg;
+
+                        nk_contextual_end(NK_Context);
+                    }
+
+                    nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 2);
+                    nk_label(NK_Context, "Gamma Min", NK_TEXT_LEFT);
+                    s32 slider1 = nk_slider_float(NK_Context, 0, Color_Maps->controlPoints, 1.0f, 0.001f);
+                    if (slider1)
+                    {
+                        Color_Maps->controlPoints[0] = Min(Color_Maps->controlPoints[0], Color_Maps->controlPoints[2]);
+                    }
+                    
+                    nk_label(NK_Context, "Gamma Mid", NK_TEXT_LEFT);
+                    s32 slider2 = nk_slider_float(NK_Context, 0, Color_Maps->controlPoints + 1, 1.0f, 0.001f);
+                    
+                    nk_label(NK_Context, "Gamma Max", NK_TEXT_LEFT);
+                    s32 slider3 = nk_slider_float(NK_Context, 0, Color_Maps->controlPoints + 2, 1.0f, 0.001f);
+                    if (slider3)
+                    {
+                        Color_Maps->controlPoints[2] = Max(Color_Maps->controlPoints[2], Color_Maps->controlPoints[0]);
+                    }
+
+                    if (slider1 || slider2 || slider3)
+                    {
+                        Color_Maps->controlPoints[1] = Min(Max(Color_Maps->controlPoints[1], Color_Maps->controlPoints[0]), Color_Maps->controlPoints[2]);
                         glUseProgram(Contact_Matrix->shaderProgram);
-                        glUniform1f( Color_Maps->cpLocation, Color_Maps->controlPoint);
+                        glUniform3fv( Color_Maps->cpLocation, 1, Color_Maps->controlPoints);
                     }
 
                     if (nk_tree_push(NK_Context, NK_TREE_TAB, "Colour Maps", NK_MINIMIZED))
                     {
-                        nk_layout_row_static(NK_Context, (s32)(Screen_Scale.y * 30.0f), (s32)(Screen_Scale.x * 400.0f), 2);
+                        nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 2);
                         u32 currMap = Color_Maps->currMap;
                         ForLoop(Color_Maps->nMaps)
                         {
@@ -3230,7 +3693,7 @@ MainArgs
                             s32 prevSelected1 = currSelected1;
                             s32 prevSelected2 = currSelected2;
 
-                            nk_layout_row_static(NK_Context, (s32)(Screen_Scale.y * 30.0f), (s32)(Screen_Scale.x * 200.0f), 1);
+                            nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 1);
                             if (nk_tree_push(NK_Context, NK_TREE_TAB, "Go To:", NK_MINIMIZED))
                             {
                                 static f32 ratio[] = {0.4f, 0.4f};
@@ -3238,14 +3701,14 @@ MainArgs
 
                                 if (nk_group_begin(NK_Context, "Select1", 0))
                                 {
-                                    nk_layout_row_static(NK_Context, (s32)(Screen_Scale.y * 30.0f), (s32)(Screen_Scale.x * 250.0f), 1);
+                                    nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 1);
                                     for (   u32 index = currGroup1;
                                             index < (currGroup1 + NPerGroup) && index < Number_of_Contigs;
                                             ++index )
                                     {
                                         currSelected1 = nk_option_label(NK_Context, (const char *)Contig_Names[index], currSelected1 == (s32)index) ? (s32)index : currSelected1;
                                     }
-                                    nk_layout_row_static(NK_Context, (s32)(Screen_Scale.y * 30.0f), (s32)(Screen_Scale.x * 80.0f), 2);
+                                    nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 2);
                                     if (nk_button_label(NK_Context, "Prev"))
                                     {
                                         currGroup1 = currGroup1 >= NPerGroup ? (currGroup1 - NPerGroup) : (Number_of_Contigs - NPerGroup);
@@ -3259,14 +3722,14 @@ MainArgs
 
                                 if (nk_group_begin(NK_Context, "Select2", 0))
                                 {
-                                    nk_layout_row_static(NK_Context, (s32)(Screen_Scale.y * 30.0f), (s32)(Screen_Scale.x * 250.0f), 1);
+                                    nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 1);
                                     for (   u32 index = currGroup2;
                                             index < (currGroup2 + NPerGroup) && index < Number_of_Contigs;
                                             ++index )
                                     {
                                         currSelected2 = nk_option_label(NK_Context, (const char *)Contig_Names[index], currSelected2 == (s32)index) ? (s32)index : currSelected2;
                                     }
-                                    nk_layout_row_static(NK_Context, (s32)(Screen_Scale.y * 30.0f), (s32)(Screen_Scale.x * 80.0f), 2);
+                                    nk_layout_row_dynamic(NK_Context, (s32)(Screen_Scale.y * 30.0f), 2);
                                     if (nk_button_label(NK_Context, "Prev"))
                                     {
                                         currGroup2 = currGroup2 >= NPerGroup ? (currGroup2 - NPerGroup) : (Number_of_Contigs - NPerGroup);
@@ -3327,8 +3790,7 @@ MainArgs
                 nk_end(NK_Context);
             }
 
-            nk_window_show_if(NK_Context, "File Browser", NK_SHOWN, showFileBrowser);
-            if (FileBrowserRun(&browser, NK_Context))
+            if (FileBrowserRun(&browser, NK_Context, (u32)showFileBrowser))
             {
                 if (!File_Loaded || !AreNullTerminatedStringsEqual(currFile, (u08 *)browser.file))
                 {
@@ -3344,7 +3806,9 @@ MainArgs
                     }
                 }
             }
-            
+           
+            AboutWindowRun(&about, NK_Context, (u32)showAboutScreen);
+
             void *cmds = nk_buffer_memory(&NK_Context->memory);
             if (memcmp(cmds, NK_Device->lastContextMemory, NK_Context->memory.allocated))
             {
