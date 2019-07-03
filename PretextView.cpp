@@ -238,59 +238,6 @@ FragmentSource_Texture = R"glsl(
         return(vec3(pix, z));
     }
     // https://www.codeproject.com/Articles/236394/Bi-Cubic-and-Bi-Linear-Interpolation-with-GLSL/
-    float CatMullRom( float x )
-    {
-        const float B = 0.0;
-        const float C = 0.5;
-        float f = x;
-        if( f < 0.0 )
-        {
-            f = -f;
-        }
-        if( f < 1.0 )
-        {
-            return ( ( 12 - 9 * B - 6 * C ) * ( f * f * f ) +
-                ( -18 + 12 * B + 6 *C ) * ( f * f ) +
-                ( 6 - 2 * B ) ) / 6.0;
-        }
-        else if( f >= 1.0 && f < 2.0 )
-        {
-            return ( ( -B - 6 * C ) * ( f * f * f )
-                + ( 6 * B + 30 * C ) * ( f *f ) +
-                ( - ( 12 * B ) - 48 * C  ) * f +
-                8 * B + 24 * C)/ 6.0;
-        }
-        else
-        {
-            return 0.0;
-        }
-    } 
-    // https://www.codeproject.com/Articles/236394/Bi-Cubic-and-Bi-Linear-Interpolation-with-GLSL/
-    float BiCubic( vec3 inCoord, vec2 texSize, float lod )
-    {
-        //float texelSizeX = 1.0 / fWidth; //size of one texel 
-        //float texelSizeY = 1.0 / fHeight; //size of one texel
-        vec2 texelSize = 1.0 / texSize;
-        float nSum = 0.0;
-        float nDenom = 0.0;
-        //float a = fract( TexCoord.x * fWidth ); // get the decimal part
-        //float b = fract( TexCoord.y * fHeight ); // get the decimal part
-        vec2 a = fract(inCoord.xy * texSize);
-        for( int m = -1; m <=2; m++ )
-        {
-            for( int n =-1; n<= 2; n++)
-            {
-                float vecData = textureLod(tex, 
-                                   pixLookup(inCoord + vec3(texelSize * vec2(float( m ), float( n )), 0)), lod).r;
-                float f  = CatMullRom( float( m ) - a.x );
-                float f1 = CatMullRom( -( float( n ) - a.y ) );
-                nSum = nSum + ( vecData * f1 * f  );
-                nDenom = nDenom + ( f1 * f );
-            }
-        }
-        return nSum / nDenom;
-    }
-    // https://www.codeproject.com/Articles/236394/Bi-Cubic-and-Bi-Linear-Interpolation-with-GLSL/
     float BiLinear( vec3 inCoord, vec2 texSize, float lod )
     {
         vec2 texelSize = 1.0 / texSize;
