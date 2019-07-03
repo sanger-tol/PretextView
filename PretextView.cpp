@@ -3380,8 +3380,8 @@ Render()
                     char *helpText1 = (char *)"Edit Mode";
                     char *helpText2 = (char *)"E: exit, Q: undo";
                     char *helpText3 = (char *)"Left Click: pickup, place";
-                    char *helpText4 = (char *)"Middle Click: pickup whole contig";
-                    char *helpText5 = (char *)"Middle Click (while editing): invert sequence";
+                    char *helpText4 = (char *)"Middle Click / Spacebar: pickup whole contig";
+                    char *helpText5 = (char *)"Middle Click / Spacebar (while editing): invert sequence";
 
                     textWidth = fonsTextBounds(FontStash_Context, 0, 0, helpText5, 0, NULL);
 
@@ -3431,8 +3431,8 @@ Render()
             glUseProgram(Flat_Shader->shaderProgram);
             glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Waypoint_Mode_Colours->base);
 
-            f32 lineWidth = 2.5f;
-            f32 lineHeight = 10.0f;
+            f32 lineWidth = 2.5f * Screen_Scale.x;
+            f32 lineHeight = 10.0f * Screen_Scale.x;
 
             f32 lh = 0.0f;   
 
@@ -5420,6 +5420,45 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     }
                     break;
 
+                case GLFW_KEY_SPACE:
+                    if (Edit_Mode && !Edit_Pixels.editing)
+                    {
+                        Edit_Pixels.editing = 1;
+
+                        Edit_Pixels.pixels.y = Edit_Pixels.pixels.x;
+
+                        while(  Edit_Pixels.pixels.x < ((Texture_Resolution * Number_of_Textures_1D) - 1) &&
+                                Pixel_Contig_Lookup[Edit_Pixels.pixels.x] == Pixel_Contig_Lookup[1 + Edit_Pixels.pixels.x])
+                        {
+                            ++Edit_Pixels.pixels.x;
+                        }
+
+                        while(  Edit_Pixels.pixels.y > 0 &&
+                                Pixel_Contig_Lookup[Edit_Pixels.pixels.y] == Pixel_Contig_Lookup[Edit_Pixels.pixels.y - 1])
+                        {
+                            --Edit_Pixels.pixels.y;
+                        }
+
+                        u32 nPixels = Texture_Resolution * Number_of_Textures_1D;
+
+                        f32 wx = (f32)(((f64)((2 * Edit_Pixels.pixels.x) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
+                        f32 wy = (f32)(((f64)((2 * Edit_Pixels.pixels.y) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
+
+                        Edit_Pixels.worldCoords.x = wx;
+                        Edit_Pixels.worldCoords.y = wy;
+
+                    }
+                    else if (Edit_Mode && Edit_Pixels.editing)
+                    {
+                        InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+                        Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
+                    }
+                    else
+                    {
+                        keyPressed = 0;
+                    }
+                    break;
+
                 case GLFW_KEY_T:
                     ToggleToolTip(window);
                     break;
@@ -6208,7 +6247,7 @@ SetSaveStatePaths()
         char *folder2;
         if (path)
         {
-            folder = (char *)"PretextMap";
+            folder = (char *)"PretextView";
             folder2 = 0;
         }
         else
@@ -6216,7 +6255,7 @@ SetSaveStatePaths()
             path = getenv("HOME");
             if (!path) path = getpwuid(getuid())->pw_dir;
             folder = (char *)".config";
-            folder2 = (char *)"PretextMap";
+            folder2 = (char *)"PretextView";
         }
 
         if (path)
