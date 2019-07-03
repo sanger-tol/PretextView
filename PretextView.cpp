@@ -7406,7 +7406,7 @@ MainArgs
         }
     }
 
-    SaveState(headerHash);
+    if (currFileName) SaveState(headerHash);
 
     ThreadPoolWait(Thread_Pool);
     ThreadPoolDestroy(Thread_Pool);
