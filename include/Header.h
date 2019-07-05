@@ -27,6 +27,8 @@ SOFTWARE.
 #define WINVER 0x0601 // Target Windows 7 as a Minimum Platform
 #define _WIN32_WINNT 0x0601
 #include <windows.h>
+#include <Knownfolders.h>
+#include <Shlobj.h>
 #endif
 
 #include <stdint.h>

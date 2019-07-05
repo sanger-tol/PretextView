@@ -250,13 +250,13 @@ FragmentSource_Texture = R"glsl(
         float p0q1 = textureLod(tex, pixLookup(inCoord + vec3(0, texelSize.y, 0)), lod).r;
         float p1q1 = textureLod(tex, pixLookup(inCoord + vec3(texelSize, 0)), lod).r;
 
-        float a = fract( coord.x * texSize.x ); // Get Interpolation factor for X direction.
+        float a = fract( inCoord.x * texSize.x ); // Get Interpolation factor for X direction.
                         // Fraction near to valid data.
-
-        float pInterp_q0 = mix( p0q0, p1q0, a ); // Interpolates top row in X direction.
+	float b = fract( inCoord.y * texSize.y );// Get Interpolation factor for Y direction.
+        
+		float pInterp_q0 = mix( p0q0, p1q0, a ); // Interpolates top row in X direction.
         float pInterp_q1 = mix( p0q1, p1q1, a ); // Interpolates bottom row in X direction.
 
-        float b = fract( coord.y * texSize.y );// Get Interpolation factor for Y direction.
         return mix( pInterp_q0, pInterp_q1, b ); // Interpolate in Y direction.
     }
     void main()
@@ -265,11 +265,11 @@ FragmentSource_Texture = R"glsl(
         
         float floormml = floor(mml);
 
-        float f1 = BiLinear(Texcoord, textureSize(tex, int(floormml)).xy, floormml);
-        float f2 = BiLinear(Texcoord, textureSize(tex, int(floormml) + 1).xy, floormml + 1);
+        float f1 = BiLinear(Texcoord, textureSize(tex, 0).xy, floormml);
+		float f2 = BiLinear(Texcoord, textureSize(tex, 0).xy, floormml + 1);
 
         float value = bezier(mix(f1, f2, fract(mml)));
-        int idx = int(round(value * 0xFF));
+		int idx = int(round(value * 0xFF));
         outColor = vec4(texelFetch(colormap, idx).rgb, 1.0);
     }
 )glsl";
@@ -6246,20 +6246,29 @@ SetSaveStatePaths()
             }
         }
 #else
-        // TODO
-        wchar_t *path = 0;
+        PWSTR path = 0;
         char sep = '\\';
-        char *folder;
         HRESULT hres = SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, 0, &path);
-        if (hres == S_OK)
+        if (SUCCEEDED(hres))
         {
+            PWSTR pathPtr = path;
+            while ((*buff++ = *pathPtr++)) {}
+            *(buff - 1) = sep;
+            char *folder = (char *)"PretextView";
+            while ((*buff++ = *folder++)) {}
 
+            if (CreateDirectory((char *)buff_, NULL) || ERROR_ALREADY_EXISTS == GetLastError())
+            {
+                u32 n = StringLength((u08*)buff_);
+                SaveState_Path = PushArray(Working_Set, u08, n + 18);
+                CopyNullTerminatedString((u08*)buff_, SaveState_Path);
+                SaveState_Path[n] = (u08)sep;
+                SaveState_Name = SaveState_Path + n + 1;
+                SaveState_Path[n + 17] = 0;
+            }
         }
-        else
-        {
-            const char *home = getenv("HOME");
-            if (!home) home = getenv("USERPROFILE");
-        }
+
+        if (path) CoTaskMemFree(path);
 #endif
     }
 }
@@ -6514,9 +6523,12 @@ LoadState(u64 headerHash)
             u08 *compBuffer = PushArrayP(Loading_Arena, u08, nBytesComp);
 
             fread(compBuffer, 1, nBytesComp, file);
+			fclose(file);
             if (libdeflate_deflate_decompress(Decompressor, (const void *)compBuffer, nBytesComp, (void *)fileContents, nBytesFile, NULL))
             {
-                return;
+				FreeLastPushP(Loading_Arena); // comp buffer
+				FreeLastPushP(Loading_Arena); // fileContents
+				return;
             }
             FreeLastPushP(Loading_Arena); // comp buffer
 
@@ -6765,7 +6777,8 @@ MainArgs
     glfwSetScrollCallback(window, Scroll);
     glfwSetKeyCallback(window, KeyBoard);
 
-    glEnable(GL_TEXTURE_2D);
+	glDisable(GL_DEPTH_TEST);
+	glEnable(GL_TEXTURE_2D);
     glEnable(GL_MULTISAMPLE);
     glCullFace(GL_BACK);
     glEnable(GL_CULL_FACE);
