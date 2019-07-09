@@ -5195,10 +5195,13 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 *flags)
 
                 if (contigId != lastContig)
                 {
-                    Contig_Display_Order[contigPtr++] = lastContig;
-                   
-                    contig *cont = Contigs + lastContig;
-                    cont->fractionalLength = (f32)(pixel - lastPixel) / (f32)nPixels;
+                    if (lastContig < Max_Number_of_Contigs_to_Display)
+                    {
+                        Contig_Display_Order[contigPtr++] = lastContig;
+
+                        contig *cont = Contigs + lastContig;
+                        cont->fractionalLength = (f32)(pixel - lastPixel) / (f32)nPixels;
+                    }
                     
                     lastPixel = pixel;
                     lastContig = contigId;
