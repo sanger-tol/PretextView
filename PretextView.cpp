@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.0.4"
+#define PretextView_Version "PretextView Version 0.0.41 dev"
 
 #include "Header.h"
 
@@ -1746,6 +1746,9 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
 
                 Edit_Pixels.worldCoords.x = (f32)(((f64)((2 * Edit_Pixels.pixels.x) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
                 Edit_Pixels.worldCoords.y = (f32)(((f64)((2 * Edit_Pixels.pixels.y) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
+
+                u32 newFlags = flags & ~(u32)firstMove;
+                RearrangeMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y, 0, &newFlags);
             }
             else
             {
@@ -2669,9 +2672,9 @@ Render()
             vert[3].x = ModelXToScreen(Tool_Tip_Move.worldCoords.x) + spacing + textWidth;
             vert[3].y = ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing;
 
-            glBindBuffer(GL_ARRAY_BUFFER, Label_Box_Data->vbos[0]);
+            glBindBuffer(GL_ARRAY_BUFFER, Tool_Tip_Data->vbos[0]);
             glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
-            glBindVertexArray(Label_Box_Data->vaos[0]);
+            glBindVertexArray(Tool_Tip_Data->vaos[0]);
             glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
             glUseProgram(UI_Shader->shaderProgram);
@@ -2827,8 +2830,6 @@ Render()
             u32 ptr = 0;
             vertex vert[4];
 
-            //u32 *labelsPerContig = PushArray(Working_Set, u32, Number_of_Contigs_to_Display);
-
             glViewport(0, 0, (s32)width, (s32)height);
 
             f32 lh = 0.0f;   
@@ -2850,13 +2851,7 @@ Render()
             f32 bpPerPixel = (f32)((f64)Total_Genome_Length / (f64)(rightPixel - leftPixel));
 
             GLfloat *bg = (GLfloat *)&Scale_Bars->bg;
-            /*static f32 scale = 1.0f / 255.0f;
-            GLfloat fg[4];
-            fg[0] = scale * (Scale_Bars->fg & 0xff);
-            fg[1] = scale * ((Scale_Bars->fg >> 8) & 0xff);
-            fg[2] = scale * ((Scale_Bars->fg >> 16) & 0xff);
-            fg[3] = scale * ((Scale_Bars->fg >> 24) & 0xff);*/
-            
+                        
             f32 scaleBarWidth = 4.0f * Screen_Scale.x;
             f32 tickLength = 3.0f * Screen_Scale.x;
 
@@ -2876,8 +2871,6 @@ Render()
                     labels += (labels + 1);
                 }
                 labels = Min(labels, MaxTicksPerScaleBar);
-
-                //labelsPerContig[index] = labels;
 
                 if (rightPixel > 0.0f && leftPixel < width)
                 {
@@ -2950,105 +2943,7 @@ Render()
                 leftPixel = rightPixel;
             }
 
-#if 0
-            glUseProgram(Flat_Shader->shaderProgram);
-            glUniformMatrix4fv(Flat_Shader->matLocation, 1, GL_FALSE, textRotMat);
-
-            glUseProgram(UI_Shader->shaderProgram);
-            glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textRotMat);
-
-            f32 topPixel = ModelYToScreen(0.5f);
-            f32 wx0 = ModelXToScreen(-0.5f);
-            y = Max(wx0, 0.0f) + offset;
-            totalLength = 0.0f;
-
-            ForLoop(Number_of_Contigs_to_Display)
-            {
-                contig *cont = Contigs + Contig_Display_Order[index];
-                
-                totalLength += cont->fractionalLength;
-                f32 bottomPixel = ModelYToScreen(0.5f - totalLength);
-
-                if (topPixel < height && bottomPixel > 0.0f)
-                {
-                    f32 pixelLength = bottomPixel - topPixel;
-
-                    u32 labels = labelsPerContig[index];
-
-                    if (labels)
-                    {   
-                        f32 topPixel_x = -topPixel;
-                        f32 bottomPixel_x = -bottomPixel;
-
-                        glUseProgram(Flat_Shader->shaderProgram);
-                        glUniform4fv(Flat_Shader->colorLocation, 1, bg);
-
-                        vert[0].x = bottomPixel_x + 1.0f;
-                        vert[0].y = y + scaleBarWidth + tickLength + 1.0f + lh;
-                        vert[1].x = topPixel_x - 1.0f;
-                        vert[1].y = y + scaleBarWidth + tickLength + 1.0f + lh;
-                        vert[2].x = topPixel_x - 1.0f;
-                        vert[2].y = y;
-                        vert[3].x = bottomPixel_x + 1.0f;
-                        vert[3].y = y;
-
-                        glBindBuffer(GL_ARRAY_BUFFER, Scale_Bar_Data->vbos[ptr]);
-                        glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
-                        glBindVertexArray(Scale_Bar_Data->vaos[ptr++]);
-                        glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
-
-                        glUniform4fv(Flat_Shader->colorLocation, 1, fg);
-
-                        vert[0].x = bottomPixel_x + 1.0f;
-                        vert[0].y = y + scaleBarWidth;
-                        vert[1].x = topPixel_x - 1.0f;
-                        vert[1].y = y + scaleBarWidth;
-                        vert[2].x = topPixel_x - 1.0f;
-                        vert[2].y = y;
-                        vert[3].x = bottomPixel_x + 1.0f;
-                        vert[3].y = y;
-
-                        glBindBuffer(GL_ARRAY_BUFFER, Scale_Bar_Data->vbos[ptr]);
-                        glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
-                        glBindVertexArray(Scale_Bar_Data->vaos[ptr++]);
-                        glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
-
-                        f32 fraction = 1.0f / (f32)(labels + 1);
-                        f32 distance = 0.0f;
-                        ForLoop2(labels)
-                        {
-                            distance += fraction;
-                            f32 x = topPixel_x - (pixelLength * distance);
-
-                            glUseProgram(Flat_Shader->shaderProgram);
-
-                            vert[0].x = x - (0.5f * scaleBarWidth);
-                            vert[0].y = y + scaleBarWidth + tickLength;
-                            vert[1].x = x + (0.5f * scaleBarWidth);
-                            vert[1].y = y + scaleBarWidth + tickLength;
-                            vert[2].x = x + (0.5f * scaleBarWidth);
-                            vert[2].y = y + scaleBarWidth;
-                            vert[3].x = x - (0.5f * scaleBarWidth);
-                            vert[3].y = y + scaleBarWidth;
-
-                            glBindBuffer(GL_ARRAY_BUFFER, Scale_Bar_Data->vbos[ptr]);
-                            glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
-                            glBindVertexArray(Scale_Bar_Data->vaos[ptr++]);
-                            glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
-
-                            char buff[16];
-                            stbsp_snprintf(buff, 16, "%$.2f", (f64)(pixelLength * distance * bpPerPixel));
-                            glUseProgram(UI_Shader->shaderProgram);
-                            fonsDrawText(FontStash_Context, x, y + scaleBarWidth + tickLength + 1.0f, buff, 0);
-                        }
-                    }
-                }
-
-                topPixel = bottomPixel;
-            }
-#endif
             ChangeSize((s32)width, (s32)height);
-            //FreeLastPush(Working_Set);
         }
 
         // Edit Mode
@@ -3952,6 +3847,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         f32 *contigFractionalLengths = PushArrayP(arena, f32, numberOfContigs);
         Contig_Display_Order = PushArrayP(arena, u32, Max_Number_of_Contigs_to_Display);
+        memset(Contig_Display_Order, 0xff, sizeof(u32) * Max_Number_of_Contigs_to_Display);
 
         ForLoop(numberOfContigs)
         {
@@ -3969,7 +3865,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             {
                 Contigs[index].fractionalLength = frac;
                 Contigs[index].index = index;
-                Contig_Display_Order[index] = index;
+                //Contig_Display_Order[index] = index;
             }
 
             ptr = (u08 *)name;
@@ -3992,7 +3888,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             ForLoop(Max_Number_of_Contigs_to_Display - numberOfContigs)
             {
                 Contigs[index + numberOfContigs].index = index + numberOfContigs;
-                Contig_Display_Order[index + numberOfContigs] = index + numberOfContigs;
+                //Contig_Display_Order[index + numberOfContigs] = index + numberOfContigs;
             }
             ForLoop(Max_Number_of_Contigs_to_Display - numberOfContigs)
             {
@@ -4042,17 +3938,26 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         f32 totalLength = 0.0f;
         u32 lastPixel = 0;
+        u32 contigOrderPtr = 0;
         ForLoop(numberOfContigs)
         {
             totalLength += contigFractionalLengths[index];
             u32 pixel = (u32)((f64)nPixels * (f64)totalLength);
             
+            if (lastPixel < pixel)
+            {
+                Contig_Display_Order[contigOrderPtr++] = index;
+            }
             while (lastPixel < pixel)
             {
                 Pixel_Contig_Lookup[lastPixel++] = (u16)index;
             }
         }
 
+        while (contigOrderPtr < Max_Number_of_Contigs_to_Display)
+        {
+            Contig_Display_Order[contigOrderPtr++] = Number_of_Contigs_to_Display - 1;
+        }
         while (lastPixel < nPixels)
         {
             Pixel_Contig_Lookup[lastPixel++] = (u16)(numberOfContigs - 1);
@@ -5017,38 +4922,11 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 *flags)
 
         if (forward)
         {
-            u32 loop = 1;
-            while (loop)
-            {
-                loop = 0;
-
-                u16 contigAheadAfter = Pixel_Contig_Lookup[GetRealBufferLocation(pixelTo + (u32)delta + 1)];
-                u16 contigBehindAfter = Pixel_Contig_Lookup[GetRealBufferLocation(pixelTo + (u32)delta)];
-
-                if (contigAheadAfter == contigBehindAfter && contigAheadAfter != myContigId)
-                {
-                    --delta;
-                    loop = 1;
-                }
-            }
+            while (Pixel_Contig_Lookup[GetRealBufferLocation(pixelTo + (u32)delta)] != myContigId) --delta;
         }
         else
         {
-            u32 loop = 1;
-            while (loop)
-            {
-                loop = 0;
-
-                u16 contigBehindAfter = Pixel_Contig_Lookup[GetRealBufferLocation((u32)((s32)pixelFrom + delta) - 1)];
-                u16 contigAheadAfter = Pixel_Contig_Lookup[GetRealBufferLocation((u32)((s32)pixelFrom + delta))];
-
-                if (contigAheadAfter == contigBehindAfter && contigAheadAfter != myContigId)
-                {
-                    ++delta;
-                    loop = 1;
-                }
-            }
-
+            while (Pixel_Contig_Lookup[GetRealBufferLocation((u32)((s32)pixelFrom + delta))] != myContigId) ++delta;
         }
     }
   
@@ -5187,7 +5065,7 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 *flags)
             u32 contigPtr = 0;
             u32 lastPixel = 0;
             u16 lastContig = Pixel_Contig_Lookup[lastPixel];
-            
+           
             ForLoop(nPixels - 1)
             {
                 u32 pixel = index + 1;
@@ -6526,12 +6404,12 @@ LoadState(u64 headerHash)
             u08 *compBuffer = PushArrayP(Loading_Arena, u08, nBytesComp);
 
             fread(compBuffer, 1, nBytesComp, file);
-			fclose(file);
+            fclose(file);
             if (libdeflate_deflate_decompress(Decompressor, (const void *)compBuffer, nBytesComp, (void *)fileContents, nBytesFile, NULL))
             {
-				FreeLastPushP(Loading_Arena); // comp buffer
-				FreeLastPushP(Loading_Arena); // fileContents
-				return;
+                FreeLastPushP(Loading_Arena); // comp buffer
+                FreeLastPushP(Loading_Arena); // fileContents
+                return;
             }
             FreeLastPushP(Loading_Arena); // comp buffer
 
@@ -6664,7 +6542,7 @@ LoadState(u64 headerHash)
                     
                     if (invert) InvertMap(finalPixels.x, finalPixels.y);
 
-                    flags = flags & rearrangeFlag_wasWholeContig ? editFlag_wasWholeContig : 0;
+                    flags = (flags & rearrangeFlag_wasWholeContig) ? editFlag_wasWholeContig : 0;
                     flags |= invert ? editFlag_inverted : 0;
 
                     AddMapEdit(delta, finalPixels, (u16)originalContigId, firstPixelOfOriginalContig, (u16)flags, name);
