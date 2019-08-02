@@ -1951,7 +1951,8 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
             Edit_Pixels.worldCoords.x = wx;
             Edit_Pixels.worldCoords.y = wy;
 
-            Redisplay = 1;
+            MouseMove(window, x, y);
+            //Redisplay = 1;
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && Edit_Pixels.editing && action == GLFW_PRESS)
         {
@@ -5275,6 +5276,9 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                         Edit_Pixels.worldCoords.x = wx;
                         Edit_Pixels.worldCoords.y = wy;
 
+                        f64 x, y;
+                        glfwGetCursorPos(window, &x, &y);
+                        MouseMove(window, x, y);
                     }
                     else if (Edit_Mode && Edit_Pixels.editing)
                     {
