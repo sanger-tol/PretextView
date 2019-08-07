@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.0.41 dev"
+#define PretextView_Version "PretextView Version 0.0.41"
 
 #include "Header.h"
 
@@ -5937,21 +5937,27 @@ AboutWindowRun(struct nk_context *ctx, u32 show)
         window->flags &= ~(nk_flags)NK_WINDOW_HIDDEN;
     }
 
-    static u32 showThirdParty = 0;
+    enum windowMode {showAcknowledgements, showLicence, showThirdParty};
+
+    static windowMode mode = showAcknowledgements;
 
     if (nk_begin_titled(ctx, "About", PretextView_Version, nk_rect(Screen_Scale.x * 50, Screen_Scale.y * 50, Screen_Scale.x * 870, Screen_Scale.y * 610),
                 NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_MOVABLE|NK_WINDOW_TITLE|NK_WINDOW_CLOSABLE))
     {
         nk_menubar_begin(ctx);
         {
-            nk_layout_row_dynamic(ctx, (s32)(Screen_Scale.y * 35.0f), 2);
+            nk_layout_row_dynamic(ctx, (s32)(Screen_Scale.y * 35.0f), 3);
+            if (nk_button_label(ctx, "Acknowledgements"))
+            {
+                mode = showAcknowledgements;
+            }
             if (nk_button_label(ctx, "Licence"))
             {
-                showThirdParty = 0;
+                mode = showLicence;
             }
             if (nk_button_label(ctx, "Third Party Software"))
             {
-                showThirdParty = 1;
+                mode = showThirdParty;
             }
         }
         nk_menubar_end(ctx);
@@ -5962,7 +5968,7 @@ AboutWindowRun(struct nk_context *ctx, u32 show)
 
         nk_group_begin(ctx, "About_Content", 0);
         {
-            if (showThirdParty)
+            if (mode == showThirdParty)
             {
                 u08 text[] = R"text(PretextView was made possible thanks to the following third party libraries and
 resources, click each entry to view its licence.)text";
@@ -5985,6 +5991,12 @@ resources, click each entry to view its licence.)text";
                         nk_tree_pop(NK_Context);
                     }
                 }
+            }
+            else if (mode == showAcknowledgements)
+            {
+                nk_layout_row_static(ctx, Screen_Scale.y * 500, (s32)(Screen_Scale.x * 820), 1);
+                s32 len = sizeof(Acknowledgements);
+                nk_edit_string(ctx, NK_EDIT_READ_ONLY | NK_EDIT_NO_CURSOR | NK_EDIT_SELECTABLE | NK_EDIT_MULTILINE, (char *)Acknowledgements, &len, len, 0);
             }
             else
             {
