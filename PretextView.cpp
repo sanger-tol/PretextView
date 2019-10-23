@@ -6214,7 +6214,7 @@ SaveState(u64 headerHash)
         FreeLastPushP(Loading_Arena); // compBuff
         FreeLastPushP(Loading_Arena); // fileContents
 
-        u08 nameCache[16];
+        u08 nameCache[17];
         CopyNullTerminatedString((u08 *)SaveState_Name, (u08 *)nameCache);
 
         *(SaveState_Name + 0) = 'p';
