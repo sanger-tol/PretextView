@@ -82,6 +82,8 @@ typedef size_t memptr;
 #define Min(x, y) (x < y ? x : y)
 #define Max(x, y) (x > y ? x : y)
 
+#define Abs(x) (x > 0 ? x : -x)
+
 #define u08_n (u08_max + 1)
 
 #define Square(x) (x * x)
@@ -890,6 +892,35 @@ StringToInt_Check(u08 *string, u32 *result)
     goodResult = (goodResult && *string >= '0' && *string <= '9');
     
     return(goodResult);
+}
+
+global_function
+u08 *
+PushStringIntoIntArray(u32 *intArray, u32 arrayLength, u08 *string, u08 stringTerminator = '\0')
+{
+    u08 *stringToInt = (u08 *)intArray;
+    u32 stringLength = 0;
+
+    while (*string != stringTerminator && stringLength < (arrayLength << 2))
+    {
+        *(stringToInt++) = *(string++);
+        ++stringLength;
+    }
+
+    while (stringLength & 3)
+    {
+        *(stringToInt++) = 0;
+        ++stringLength;
+    }
+
+    for (   u32 index = (stringLength >> 2);
+            index < arrayLength;
+            ++index )
+    {
+        intArray[index] = 0;
+    }
+
+    return(string);
 }
 
 global_function
