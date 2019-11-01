@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.1.0-dev"
+#define PretextView_Version "PretextView Version 0.1.0"
 
 #include "Header.h"
 
@@ -6547,6 +6547,53 @@ TextInput(GLFWwindow* window, u32 codepoint)
     }
 }
 
+global_function
+void
+CopyEditsToClipBoard(GLFWwindow *window)
+{
+    u32 nEdits = Min(Edits_Stack_Size, Map_Editor->nEdits);
+
+    if (nEdits)
+    {
+        u32 bufferSize = 128 * nEdits;
+        u08 *buffer = PushArray(Working_Set, u08, bufferSize);
+        u32 bufferPtr = 0;
+
+        u32 editStackPtr = Map_Editor->editStackPtr == nEdits ? 0 : Map_Editor->editStackPtr;
+
+        f64 bpPerPixel = (f64)Total_Genome_Length / (f64)(Number_of_Textures_1D * Texture_Resolution);
+
+        ForLoop(nEdits)
+        {
+            if (editStackPtr == nEdits)
+            {
+                editStackPtr = 0;
+            }
+
+            map_edit *edit = Map_Editor->edits + editStackPtr++;
+
+            u16 start = Min(edit->finalPix1, edit->finalPix2);
+            u16 end = Max(edit->finalPix1, edit->finalPix2);
+            u16 to = start ? start - 1 : (end < (Number_of_Pixels_1D - 1) ? end + 1 : end);
+
+            u32 oldFrom = Map_State->contigRelCoords[start];
+            u32 oldTo = Map_State->contigRelCoords[end];
+            u32 *name = (Original_Contigs + Map_State->originalContigIds[start])->name;
+            u32 *newName = (Original_Contigs + Map_State->originalContigIds[to])->name;
+
+            bufferPtr += (u32)stbsp_snprintf((char *)buffer + bufferPtr, (s32)(bufferSize - bufferPtr), "Edit %d:\n       %s - %$.2fbp to %$.2fbp\n%s\n       %s - %$.2fbp\n",
+                    index + 1, (char *)name, (f64)oldFrom * bpPerPixel, (f64)oldTo * bpPerPixel,
+                    edit->finalPix1 > edit->finalPix2 ? (const char *)"       inverted and moved to" : (const char *)"       moved to",
+                    (char *)newName, (f64)Map_State->contigRelCoords[to] * bpPerPixel);
+        }
+
+        buffer[bufferPtr] = 0;
+        glfwSetClipboardString(window, (const char *)buffer);
+        
+        FreeLastPush(Working_Set); // buffer
+    }
+}
+
 MainArgs
 {
     u32 initWithFile = 0;
@@ -7081,23 +7128,25 @@ MainArgs
                     {
                         {
                             nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "Last Edit", NK_MINIMIZED))
-                            {
-                                f64 bpPerPixel = (f64)Total_Genome_Length / (f64)Number_of_Pixels_1D;
 
-                                if (Map_Editor->nEdits)
+                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "Edits", NK_MINIMIZED))
+                            {
+                                u32 nEdits = Min(Edits_Stack_Size, Map_Editor->nEdits);
+                                u32 editStackPtr = Map_Editor->editStackPtr == nEdits ? 0 : Map_Editor->editStackPtr;
+
+                                f64 bpPerPixel = (f64)Total_Genome_Length / (f64)(Number_of_Textures_1D * Texture_Resolution);
+
+                                ForLoop(nEdits)
                                 {
-                                    u32 editStackPtr = Map_Editor->editStackPtr;
-                                    
-                                    if (!editStackPtr)
+                                    if (editStackPtr == nEdits)
                                     {
-                                        editStackPtr = Edits_Stack_Size + 1;
+                                        editStackPtr = 0;
                                     }
 
-                                    map_edit *edit = Map_Editor->edits + editStackPtr - 1;
+                                    map_edit *edit = Map_Editor->edits + editStackPtr;
 
                                     char buff[64];
-
+                                    
                                     u16 start = Min(edit->finalPix1, edit->finalPix2);
                                     u16 end = Max(edit->finalPix1, edit->finalPix2);
                                     u16 to = start ? start - 1 : (end < (Number_of_Pixels_1D - 1) ? end + 1 : end);
@@ -7106,7 +7155,9 @@ MainArgs
                                     u32 oldTo = Map_State->contigRelCoords[end];
                                     u32 *name = (Original_Contigs + Map_State->originalContigIds[start])->name;
                                     u32 *newName = (Original_Contigs + Map_State->originalContigIds[to])->name;
-
+                                    
+                                    stbsp_snprintf((char *)buff, 64, "Edit %d:", index + 1);
+                                    nk_label(NK_Context, (const char *)buff, NK_TEXT_LEFT);
                                     stbsp_snprintf((char *)buff, 64, "       %s - %$.2fbp to %$.2fbp",
                                             (char *)name, (f64)oldFrom * bpPerPixel,
                                             (f64)oldTo * bpPerPixel);
@@ -7119,9 +7170,13 @@ MainArgs
                                             (char *)newName, (f64)Map_State->contigRelCoords[to] * bpPerPixel);
                                     nk_label(NK_Context, (const char *)buff, NK_TEXT_LEFT);
 
-                                    if (nk_button_label(NK_Context, "Undo")) UndoMapEdit();
+                                    ++editStackPtr;
                                 }
-                                
+
+                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
+                                if (nEdits && nk_button_label(NK_Context, "Undo")) UndoMapEdit();
+                                if (nEdits && nk_button_label(NK_Context, "Copy to Clipboard")) CopyEditsToClipBoard(window);
+
                                 nk_tree_pop(NK_Context);
                             }
                         }
