@@ -37,11 +37,7 @@ Assembly Group, LIMS and Informatics Team, Wellcome Sanger Institute, UK.
 
 PretextView was made possible thanks to the feedback, feature suggestions
 and bug reporting from the members of the Genome Reference Informatics Group,
-Wellcome Sanger Institute. In particular:
-Kerstin Howe
-Jo Wood
-Ying Yan
-Sarah Pelan)ack";
+Wellcome Sanger Institute.)ack";
 
 global_variable
 u08
