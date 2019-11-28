@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.1.1 dev"
+#define PretextView_Version "PretextView Version 0.1.1"
 
 #include "Header.h"
 
@@ -4440,7 +4440,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                         cov->base = DefaultCoverageBase;
                         cov->lineSize = DefaultCoverageLineSize;
                         cov->colour = DefaultCoverageColour;
-                        cov->on = 1;
+                        cov->on = 0;
 
                         cov->shader = PushStructP(arena, editable_plot_shader);
                         cov->shader->shaderProgram = CreateShader(FragmentSource_EditablePlot, VertexSource_EditablePlot, GeometrySource_EditablePlot);
@@ -7798,7 +7798,7 @@ MainArgs
                                                         if (nk_button_label(NK_Context, "Default")) cov->scale = DefaultCoverageScale;
 
                                                         nk_label(NK_Context, "Line Width", NK_TEXT_CENTERED);
-                                                        nk_slider_float(NK_Context, 0.1f, &cov->lineSize, 8.0f * DefaultCoverageLineSize, 0.01f);
+                                                        nk_slider_float(NK_Context, 0.1f, &cov->lineSize, 2.0f * DefaultCoverageLineSize, 0.001f);
                                                         if (nk_button_label(NK_Context, "Default")) cov->lineSize = DefaultCoverageLineSize;
 
                                                         nk_contextual_end(NK_Context);
