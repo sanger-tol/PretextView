@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.1.0"
+#define PretextView_Version "PretextView Version 0.1.1 dev"
 
 #include "Header.h"
 
@@ -282,6 +282,75 @@ FragmentSource_Flat = R"glsl(
     }
 )glsl";
 
+global_variable
+const
+GLchar *
+VertexSource_EditablePlot = R"glsl(
+    #version 330
+    in float position;
+    uniform usamplerBuffer pixrearrangelookup;
+    uniform samplerBuffer yvalues;
+    uniform float ytop;
+    uniform float yscale;
+    void main()
+    {
+        float x = position;
+        float realx = texelFetch(pixrearrangelookup, int(x)).x;
+        x /= textureSize(pixrearrangelookup);
+        x -= 0.5;
+        float y = texelFetch(yvalues, int(realx)).x;
+        y *= yscale;
+        y += ytop;
+
+        gl_Position = vec4(x, y, 0.0, 1.0);
+    }
+)glsl";
+
+global_variable
+const
+GLchar *
+FragmentSource_EditablePlot = R"glsl(
+    #version 330
+    out vec4 outColor;
+    uniform vec4 color;
+    void main()
+    {
+        outColor = color;
+    }
+)glsl";
+
+// https://blog.tammearu.eu/posts/gllines/
+global_variable
+const
+GLchar *
+GeometrySource_EditablePlot = R"glsl(
+    #version 330
+    layout (lines) in;
+    layout (triangle_strip, max_vertices = 4) out;
+
+    uniform mat4 matrix;
+    uniform float linewidth;
+
+    void main()
+    {
+        vec3 start = gl_in[0].gl_Position.xyz;
+        vec3 end = gl_in[1].gl_Position.xyz;
+        vec3 lhs = cross(normalize(end-start), vec3(0.0, 0.0, -1.0));
+
+        lhs *= linewidth*0.0007;
+
+        gl_Position = matrix * vec4(start+lhs, 1.0);
+        EmitVertex();
+        gl_Position = matrix * vec4(start-lhs, 1.0);
+        EmitVertex();
+        gl_Position = matrix * vec4(end+lhs, 1.0);
+        EmitVertex();
+        gl_Position = matrix * vec4(end-lhs, 1.0);
+        EmitVertex();
+        EndPrimitive();
+    }
+)glsl";
+
 #define UI_SHADER_LOC_POSITION 0
 #define UI_SHADER_LOC_TEXCOORD 1
 #define UI_SHADER_LOC_COLOR 2
@@ -448,6 +517,19 @@ ui_shader
 {
     GLuint shaderProgram;
     GLint matLocation;
+};
+
+struct
+editable_plot_shader
+{
+    GLuint shaderProgram;
+    GLuint yValuesBuffer;
+    GLuint yValuesBufferTex;
+    GLint matLocation;
+    GLint colorLocation;
+    GLint yScaleLocation;
+    GLint yTopLocation;
+    GLint lineSizeLocation;
 };
 
 struct
@@ -2018,6 +2100,72 @@ ColourGenerator(u32 index, f32 *rgb)
     rgb[2] = 0.5f * (sinf((f32)index * BlueFreq) + 1.0f);
 }
 
+struct
+coverage
+{
+    u32 name[16];
+    u32 *data;
+    GLuint vbo;
+    GLuint vao;
+    editable_plot_shader *shader;
+    f32 scale;
+    f32 base;
+    f32 lineSize;
+    u32 on;
+    nk_colorf colour;
+};
+
+enum
+extension_type
+{
+    extension_coverage,
+};
+
+global_variable
+char
+extension_magic_bytes[][4] = 
+{
+    {'p', 's', 'c', 'v'}
+};
+
+struct
+extension_node
+{
+    extension_type type;
+    u32 pad;
+    void *extension;
+    extension_node *next;
+};
+
+struct
+extension_sentinel
+{
+    extension_node *head;
+    extension_node *tail;
+};
+
+global_variable
+extension_sentinel
+Extensions = {};
+
+global_function
+void
+AddExtension(extension_node *node)
+{
+    node->next = 0;
+
+    if (!Extensions.head)
+    {
+        Extensions.head = node;
+        Extensions.tail = node;
+    }
+    else
+    {
+        Extensions.tail->next = node;
+        Extensions.tail = node;
+    }
+}
+
 global_function
 void
 Render()
@@ -2047,6 +2195,20 @@ Render()
         glUniformMatrix4fv(Contact_Matrix->matLocation, 1, GL_FALSE, mat);
         glUseProgram(Flat_Shader->shaderProgram);
         glUniformMatrix4fv(Flat_Shader->matLocation, 1, GL_FALSE, mat);
+
+        TraverseLinkedList(Extensions.head, extension_node)
+        {
+            switch (node->type)
+            {
+                case extension_coverage:
+                    {
+                        coverage *cov = (coverage *)node->extension;
+                        glUseProgram(cov->shader->shaderProgram);
+                        glUniformMatrix4fv(cov->shader->matLocation, 1, GL_FALSE, mat);
+                    }
+                    break;
+            }
+        }
     }
 
     // Textures
@@ -2201,7 +2363,40 @@ Render()
         DrawQuadTreeLevel(&ptr, Waypoint_Editor->quadtree, vert, lineWidth);
     }
 #endif
-    
+   
+    // Extensions
+    {
+        TraverseLinkedList(Extensions.head, extension_node)
+        {
+            switch (node->type)
+            {
+                case extension_coverage:
+                    {
+                        coverage *cov = (coverage *)node->extension;
+
+                        if (cov->on)
+                        {
+                            f32 factor1 = 1.0f / (2.0f * Camera_Position.z);
+                            f32 factor2 = 2.0f / height;
+
+                            f32 wy = (factor1 * (1.0f - (factor2 * (height - cov->base) * Screen_Scale.y))) + Camera_Position.y;
+
+                            glUseProgram(cov->shader->shaderProgram);
+                            glUniform4fv(cov->shader->colorLocation, 1, (GLfloat *)&cov->colour);
+                            glUniform1f(cov->shader->yScaleLocation, cov->scale);
+                            glUniform1f(cov->shader->yTopLocation, wy);
+                            glUniform1f(cov->shader->lineSizeLocation, cov->lineSize / Camera_Position.z);
+
+                            glBindBuffer(GL_ARRAY_BUFFER, cov->vbo);
+                            glBindVertexArray(cov->vao);
+                            glDrawArrays(GL_LINE_STRIP, 0, (GLsizei)Number_of_Pixels_1D);
+                        }
+                    }
+                    break;
+            }
+        }
+    }
+
     // Grid
     if (File_Loaded && Grid->on)
     {
@@ -2843,9 +3038,42 @@ Render()
             fonsVertMetrics(FontStash_Context, 0, 0, &lh);
             fonsSetColor(FontStash_Context, FourFloatColorToU32(Tool_Tip->fg));
            
+            // Extension info, extra lines
+            u32 nExtra = 0;
+            f32 longestExtraLineLength = 0.0f;
+            {
+                if (Extensions.head)
+                {
+                    char buff[128];
+                    TraverseLinkedList(Extensions.head, extension_node)
+                    {
+                        switch (node->type)
+                        {
+                            case extension_coverage:
+                                {
+                                    coverage *cov = (coverage *)node->extension;
+                                    if (cov->on)
+                                    {
+                                        glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+                                        u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u16), sizeof(u16), GL_MAP_READ_BIT);
+
+                                        stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)cov->name, cov->data[*buffer]);
+                                        ++nExtra;
+                                        longestExtraLineLength = Max(longestExtraLineLength, fonsTextBounds(FontStash_Context, 0, 0, buff, 0, NULL));
+
+                                        glUnmapBuffer(GL_TEXTURE_BUFFER);
+                                        glBindBuffer(GL_TEXTURE_BUFFER, 0);
+                                    }
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
+
             f32 textBoxHeight = lh;
-            textBoxHeight *= 3.0f;
-            textBoxHeight += 2.0f;
+            textBoxHeight *= (3.0f + (f32)nExtra);
+            textBoxHeight += (2.0f + (f32)nExtra);
 
             u16 id1 = Map_State->originalContigIds[Tool_Tip_Move.pixels.x];
             u16 id2 = Map_State->originalContigIds[Tool_Tip_Move.pixels.y];
@@ -2866,6 +3094,7 @@ Render()
             f32 textWidth_3 = fonsTextBounds(FontStash_Context, 0, 0, line3, 0, NULL);
             f32 textWidth = Max(textWidth_1, textWidth_2);
             textWidth = Max(textWidth, textWidth_3);
+            textWidth = Max(textWidth, longestExtraLineLength);
 
             f32 spacing = 12.0f;
 
@@ -2892,6 +3121,38 @@ Render()
                     ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + lh + 1.0f, line2, 0);
             fonsDrawText(FontStash_Context, ModelXToScreen(Tool_Tip_Move.worldCoords.x) + spacing, 
                     ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + (2.0f * lh) + 2.0f, line3, 0);
+
+            {
+                if (Extensions.head)
+                {
+                    u32 count = 0;
+                    char buff[128];
+                    TraverseLinkedList(Extensions.head, extension_node)
+                    {
+                        switch (node->type)
+                        {
+                            case extension_coverage:
+                                {
+                                    coverage *cov = (coverage *)node->extension;
+                                    if (cov->on)
+                                    {
+                                        glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+                                        u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u16), sizeof(u16), GL_MAP_READ_BIT);
+
+                                        stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)cov->name, cov->data[*buffer]);
+
+                                        fonsDrawText(FontStash_Context, ModelXToScreen(Tool_Tip_Move.worldCoords.x) + spacing, 
+                                                ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + ((2.0f + (f32)(++count)) * (lh + 1.0f)), buff, 0);
+
+                                        glUnmapBuffer(GL_TEXTURE_BUFFER);
+                                        glBindBuffer(GL_TEXTURE_BUFFER, 0);
+                                    }
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
         }
 
         // Edit Mode
@@ -3403,13 +3664,15 @@ PrintShaderInfoLog(GLuint shader)
 
 global_function
 GLuint
-CreateShader(const GLchar *fragmentShaderSource, const GLchar *vertexShaderSource)
+CreateShader(const GLchar *fragmentShaderSource, const GLchar *vertexShaderSource, const GLchar *geometryShaderSource = 0)
 {
     GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
     GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+    GLuint geometryShader = geometryShaderSource ? glCreateShader(GL_GEOMETRY_SHADER) : 0;
 
     glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
     glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
+    if (geometryShader) glShaderSource(geometryShader, 1, &geometryShaderSource, NULL);
 
     GLint compiled;
 
@@ -3435,9 +3698,25 @@ CreateShader(const GLchar *fragmentShaderSource, const GLchar *vertexShaderSourc
         exit(1);
     }
 
+    if (geometryShader)
+    {
+        glCompileShader(geometryShader);
+        glGetShaderiv(geometryShader, GL_COMPILE_STATUS, &compiled);
+
+        if (compiled == GL_FALSE)
+        {
+            PrintShaderInfoLog(geometryShader);
+            glDeleteShader(vertexShader);
+            glDeleteShader(fragmentShader);
+            glDeleteShader(geometryShader);
+            exit(1);
+        }
+    }
+
     GLuint shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
+    if (geometryShader) glAttachShader(shaderProgram, geometryShader);
     glLinkProgram(shaderProgram);
 
     GLint isLinked;
@@ -3456,8 +3735,10 @@ CreateShader(const GLchar *fragmentShaderSource, const GLchar *vertexShaderSourc
 
         glDetachShader(shaderProgram, vertexShader);
         glDetachShader(shaderProgram, fragmentShader);
+        if (geometryShader) glDetachShader(shaderProgram, geometryShader);
         glDeleteShader(vertexShader);
         glDeleteShader(fragmentShader);
+        if (geometryShader) glDeleteShader(geometryShader);
         glDeleteProgram(shaderProgram);
         exit(1);
     }
@@ -3516,9 +3797,8 @@ u08 Magic[] = {'p', 's', 't', 'm'};
 
 global_function
 FILE *
-TestFile(const char *fileName)
+TestFile(const char *fileName, u64 *fileSize = 0)
 {
-    // Test File
     FILE *file;
     {
         file = fopen(fileName, "rb");
@@ -3531,6 +3811,13 @@ TestFile(const char *fileName)
         }
         else
         {
+            if (fileSize)
+            {
+                fseek(file, 0, SEEK_END);
+                *fileSize = (u64)ftell(file);
+                fseek(file, 0, SEEK_SET);
+            }
+
             u08 magicTest[sizeof(Magic)];
 
             u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
@@ -3568,8 +3855,9 @@ global_function
 load_file_result
 LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *headerHash)
 {
-    // Test File
-    FILE *file = TestFile(filePath);
+    u64 fileSize = 0;
+
+    FILE *file = TestFile(filePath, &fileSize);
     if (!file)
     {
         return(fileErr);
@@ -3605,6 +3893,22 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         glDeleteVertexArrays((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vaos);
         glDeleteBuffers((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vbos);
 
+        TraverseLinkedList(Extensions.head, extension_node)
+        {
+            switch (node->type)
+            {
+                case extension_coverage:
+                    {
+                        coverage *cov = (coverage *)node->extension;
+                        glDeleteVertexArrays(1, &cov->vao);
+                        glDeleteBuffers(1, &cov->vbo);
+                        glDeleteBuffers(1, &cov->shader->yValuesBuffer);
+                        glDeleteTextures(1, &cov->shader->yValuesBufferTex);
+                    }
+                    break;
+            }
+        }
+
         Current_Loaded_Texture = 0;
         Texture_Ptr = 0;
         
@@ -3617,6 +3921,8 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
        
         Edit_Pixels.editing = 0;
         Global_Mode = mode_normal;
+
+        Extensions = {};
 
         ResetMemoryArenaP(arena);
     }
@@ -3769,6 +4075,85 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             currLocation += nBytes;
         }
 
+        // Extensions
+        {
+            u08 magicTest[sizeof(extension_magic_bytes[0])];
+
+            while ((u64)(currLocation + sizeof(magicTest)) < fileSize)
+            {
+                u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
+                currLocation += bytesRead;
+                if (bytesRead == sizeof(magicTest))
+                {
+                    ForLoop(ArrayCount(extension_magic_bytes))
+                    {
+                        u08 foundExtension = 1;
+                        u08 *magic = (u08 *)extension_magic_bytes[index];
+                        ForLoop2(sizeof(magicTest))
+                        {
+                            if (magic[index2] != magicTest[index2])
+                            {
+                                foundExtension = 0;
+                                break;
+                            }
+                        }
+
+                        if (foundExtension)
+                        {
+                            extension_type type = (extension_type)index;
+                            u32 extensionSize = 0;
+                            switch (type)
+                            {
+                                case extension_coverage:
+                                    {
+                                        u32 compSize;
+                                        fread(&compSize, 1, sizeof(u32), file);
+                                        coverage *cov = PushStructP(arena, coverage);
+                                        extension_node *node = PushStructP(arena, extension_node);
+                                        u08 *dataPlusName = PushArrayP(arena, u08, ((sizeof(u32) * Number_of_Pixels_1D) + sizeof(cov->name) ));
+#pragma clang diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-align"
+                                        cov->data = (u32 *)(dataPlusName + sizeof(cov->name));
+#pragma clang diagnostic pop                                       
+                                        extensionSize += (compSize + sizeof(u32));
+                                        u08 *compBuffer = PushArrayP(arena, u08, compSize);
+                                        fread(compBuffer, 1, compSize, file);
+                                        if (libdeflate_deflate_decompress(Decompressor, (const void *)compBuffer, compSize, (void *)dataPlusName, (sizeof(u32) * Number_of_Pixels_1D) + sizeof(cov->name), NULL))
+                                        {
+                                            FreeLastPushP(arena); // data
+                                            FreeLastPushP(arena); // coverage
+                                            FreeLastPushP(arena); // node
+                                        }
+                                        else
+                                        {
+#pragma clang diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-align"
+                                            u32 *namePtr = (u32 *)dataPlusName;
+#pragma clang diagnostic pop
+                                            ForLoop2(ArrayCount(cov->name))
+                                            {
+                                                cov->name[index2] = *(namePtr + index2);
+                                            }
+
+                                            node->type = type;
+                                            node->extension = cov;
+                                            AddExtension(node);
+                                        }
+                                        FreeLastPushP(arena); // compBuffer
+                                    }
+                                    break;
+                            }
+                            currLocation += extensionSize;
+                        }
+                    }
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+        
         fclose(file);
     }
 
@@ -4036,6 +4421,90 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
     //Contig Colour Bars
     {
         PushGenericBuffer(&Contig_ColourBar_Data, Max_Number_of_Contigs);
+    }
+
+    // Extensions
+    {
+        TraverseLinkedList(Extensions.head, extension_node)
+        {
+            switch (node->type)
+            {
+                case extension_coverage:
+                    {
+                        coverage *cov = (coverage *)node->extension;
+#define DefaultCoverageScale 0.4f
+#define DefaultCoverageBase 32.0f
+#define DefaultCoverageLineSize 1.0f
+#define DefaultCoverageColour {0.1f, 0.8f, 0.7f, 1.0f}
+                        cov->scale = DefaultCoverageScale;
+                        cov->base = DefaultCoverageBase;
+                        cov->lineSize = DefaultCoverageLineSize;
+                        cov->colour = DefaultCoverageColour;
+                        cov->on = 1;
+
+                        cov->shader = PushStructP(arena, editable_plot_shader);
+                        cov->shader->shaderProgram = CreateShader(FragmentSource_EditablePlot, VertexSource_EditablePlot, GeometrySource_EditablePlot);
+
+                        glUseProgram(cov->shader->shaderProgram);
+                        glBindFragDataLocation(cov->shader->shaderProgram, 0, "outColor");
+                        cov->shader->matLocation = glGetUniformLocation(cov->shader->shaderProgram, "matrix");
+                        cov->shader->colorLocation = glGetUniformLocation(cov->shader->shaderProgram, "color");
+                        cov->shader->yScaleLocation = glGetUniformLocation(cov->shader->shaderProgram, "yscale");
+                        cov->shader->yTopLocation = glGetUniformLocation(cov->shader->shaderProgram, "ytop");
+                        cov->shader->lineSizeLocation = glGetUniformLocation(cov->shader->shaderProgram, "linewidth");
+
+                        glUniform1i(glGetUniformLocation(cov->shader->shaderProgram, "pixrearrangelookup"), 3);
+                        glUniform1i(glGetUniformLocation(cov->shader->shaderProgram, "yvalues"), 4);
+
+                        u32 nValues = Number_of_Pixels_1D;
+                        f32 *xValues = PushArrayP(arena, f32, nValues);
+                        f32 *yValues = PushArrayP(arena, f32, nValues);
+                        
+                        u32 max = 0;
+                        ForLoop(Number_of_Pixels_1D)
+                        {
+                            max = Max(max, cov->data[index]);
+                        }
+
+                        ForLoop(Number_of_Pixels_1D)
+                        {
+                            xValues[index] = (f32)index;
+                            yValues[index] = (f32)cov->data[index] / (f32)max;
+                        }
+
+                        glActiveTexture(GL_TEXTURE4);
+
+                        GLuint yVal, yValTex;
+
+                        glGenBuffers(1, &yVal);
+                        glBindBuffer(GL_TEXTURE_BUFFER, yVal);
+                        glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues, yValues, GL_STATIC_DRAW);
+
+                        glGenTextures(1, &yValTex);
+                        glBindTexture(GL_TEXTURE_BUFFER, yValTex);
+                        glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, yVal);
+
+                        cov->shader->yValuesBuffer = yVal;
+                        cov->shader->yValuesBufferTex = yValTex;
+                        
+                        glGenVertexArrays(1, &cov->vao);
+                        glBindVertexArray(cov->vao);
+                        glGenBuffers(1, &cov->vbo);
+                        glBindBuffer(GL_ARRAY_BUFFER, cov->vbo);
+                        glBufferData(GL_ARRAY_BUFFER, sizeof(f32) * nValues, xValues, GL_STATIC_DRAW);
+
+                        GLuint posAttrib = (GLuint)glGetAttribLocation(cov->shader->shaderProgram, "position");
+                        glEnableVertexAttribArray(posAttrib);
+                        glVertexAttribPointer(posAttrib, 1, GL_FLOAT, GL_FALSE, 0, 0);
+
+                        FreeLastPushP(arena); // y
+                        FreeLastPushP(arena); // x
+
+                        glActiveTexture(GL_TEXTURE0);
+                    }
+                    break;
+            }
+        }
     }
 
 #ifdef Internal
@@ -4431,7 +4900,6 @@ Setup()
         Flat_Shader->colorLocation = glGetUniformLocation(Flat_Shader->shaderProgram, "color");
     }
     
-
     // Fonts
     {
         UI_Shader = PushStruct(Working_Set, ui_shader);
@@ -6014,7 +6482,20 @@ SaveState(u64 headerHash)
         u32 nEdits = Min(Edits_Stack_Size, Map_Editor->nEdits);
         u32 nWayp = Waypoint_Editor->nWaypointsActive;
 
-        u32 nFileBytes = 309 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
+        u32 nCoveragePlots = 0;
+        TraverseLinkedList(Extensions.head, extension_node)
+        {
+            switch (node->type)
+            {
+                case extension_coverage:
+                    {
+                        ++nCoveragePlots;
+                    }
+                    break;
+            }
+        }
+
+        u32 nFileBytes = 309 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nCoveragePlots);
 
         u08 *fileContents = PushArrayP(Loading_Arena, u08, nFileBytes);
         u08 *fileWriter = fileContents;
@@ -6168,9 +6649,9 @@ SaveState(u64 headerHash)
 
         // waypoints
         {
-            *fileWriter = (u08)nWayp;
+            *fileWriter++ = (u08)nWayp;
 
-            u32 ptr = nFileBytes;
+            u32 ptr = 309 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
             TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
             {
                 f32 x = node->coords.x;
@@ -6191,6 +6672,27 @@ SaveState(u64 headerHash)
                 fileContents[--ptr] = ((u08 *)&x)[2];
                 fileContents[--ptr] = ((u08 *)&x)[1];
                 fileContents[--ptr] = ((u08 *)&x)[0];
+            }
+
+            fileWriter += (13 * nWayp);
+        }
+
+        // extensions
+        {
+            TraverseLinkedList(Extensions.head, extension_node)
+            {
+                switch (node->type)
+                {
+                    case extension_coverage:
+                        {
+                            coverage *cov = (coverage *)node->extension;
+                            ForLoop(32)
+                            {
+                                *fileWriter++ = ((u08 *)cov)[index + 88];
+                            }
+                        }
+                        break;
+                }
             }
         }
     
@@ -6333,6 +6835,7 @@ LoadState(u64 headerHash)
             u32 nBytesFile;
             fread(&nBytesComp, 1, 4, file);
             fread(&nBytesFile, 1, 4, file);
+            u32 nBytesRead = 0;
 
             u08 *fileContents = PushArrayP(Loading_Arena, u08, nBytesFile);
             u08 *compBuffer = PushArrayP(Loading_Arena, u08, nBytesComp);
@@ -6360,6 +6863,8 @@ LoadState(u64 headerHash)
                 Grid->on = settings & (1 << 3);
                 Contig_Ids->on = settings & (1 << 4);
                 Tool_Tip->on = settings & (1 << 5);
+
+                nBytesRead += 2;
             }
 
             // colours
@@ -6393,6 +6898,8 @@ LoadState(u64 headerHash)
                 {
                     ((u08 *)Tool_Tip)[index + 4] = *fileContents++;
                 }
+
+                nBytesRead += 256;
             }
 
             // sizes
@@ -6426,6 +6933,8 @@ LoadState(u64 headerHash)
                 {
                     ((u08 *)Tool_Tip)[index + 36] = *fileContents++;
                 }
+
+                nBytesRead += 24;
             }
 
             // colour map
@@ -6436,6 +6945,8 @@ LoadState(u64 headerHash)
                 glActiveTexture(GL_TEXTURE1);
                 glBindTexture(GL_TEXTURE_BUFFER, Color_Maps->maps[Color_Maps->currMap]);
                 glActiveTexture(GL_TEXTURE0);
+
+                ++nBytesRead;
             }
 
             // gamma
@@ -6444,6 +6955,7 @@ LoadState(u64 headerHash)
                 {
                     ((u08 *)Color_Maps->controlPoints)[index] = *fileContents++;
                 }
+                nBytesRead += 12;
 
                 glUseProgram(Contact_Matrix->shaderProgram);
                 glUniform3fv( Color_Maps->cpLocation, 1, Color_Maps->controlPoints);
@@ -6457,6 +6969,7 @@ LoadState(u64 headerHash)
                     {
                         ((u08 *)&Camera_Position)[index] = *fileContents++;
                     }
+                    nBytesRead += 12;
                 }
 
                 // edits
@@ -6464,6 +6977,7 @@ LoadState(u64 headerHash)
                     u08 nEdits = *fileContents++;
                     u08 *contigFlags = fileContents + (6 * nEdits);
                     u32 nContigFlags = ((u32)nEdits + 7) >> 3;
+                    ++nBytesRead;
 
                     ForLoop(nEdits)
                     {
@@ -6493,11 +7007,13 @@ LoadState(u64 headerHash)
                     }
 
                     fileContents += nContigFlags;
+                    nBytesRead += (nContigFlags + (6 * nEdits));
                 }
 
                 // waypoints
                 {
                     u08 nWayp = *fileContents++;
+                    ++nBytesRead;
 
                     ForLoop(nWayp)
                     {
@@ -6522,6 +7038,30 @@ LoadState(u64 headerHash)
                         AddWayPoint({x, y});
                         Waypoint_Editor->activeWaypoints.next->z = z;
                         Waypoint_Editor->activeWaypoints.next->index = (u32)id;
+                    }
+
+                    nBytesRead += (13 * nWayp);
+                }
+
+                // extensions
+                {
+                    TraverseLinkedList(Extensions.head, extension_node)
+                    {
+                        switch (node->type)
+                        {
+                            case extension_coverage:
+                                {
+                                    if ((nBytesRead + 32) > nBytesFile) break;
+
+                                    ForLoop(32)
+                                    {
+                                        ((u08 *)node->extension)[index + 88] = *fileContents++;
+                                    }
+
+                                    nBytesRead += 32;
+                                }
+                                break;
+                        }
                     }
                 }
             }
@@ -6669,6 +7209,7 @@ MainArgs
     glCullFace(GL_BACK);
     glEnable(GL_CULL_FACE);
     glEnable(GL_BLEND);
+    glEnable(GL_LINE_SMOOTH);
     glBlendEquation(GL_FUNC_ADD);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -7209,6 +7750,67 @@ MainArgs
 
                                 nk_tree_pop(NK_Context);
                             }
+                        }
+                        
+                        {
+                            if (Extensions.head)
+                            {
+                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
+                                if (nk_tree_push(NK_Context, NK_TREE_TAB, "Extensions", NK_MINIMIZED))
+                                {
+                                    char buff[128];
+
+                                    nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
+                                    TraverseLinkedList(Extensions.head, extension_node)
+                                    {
+                                        switch (node->type)
+                                        {
+                                            case extension_coverage:
+                                                {
+                                                    coverage *cov = (coverage *)node->extension;
+                                                    
+                                                    stbsp_snprintf(buff, sizeof(buff), "Coverage: %s", (char *)cov->name);
+                                                    
+                                                    bounds = nk_widget_bounds(NK_Context);
+                                                    cov->on = nk_check_label(NK_Context, buff, (s32)cov->on) ? 1 : 0;
+                                                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 150, Screen_Scale.y * 600), bounds))
+                                                    {
+                                                        struct nk_colorf colour = cov->colour;
+
+                                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                                                        nk_label(NK_Context, "Plot Colour", NK_TEXT_CENTERED);
+
+                                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 200, 1);
+                                                        colour = nk_color_picker(NK_Context, colour, NK_RGBA);
+
+                                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                                                        if (nk_button_label(NK_Context, "Default")) colour = DefaultCoverageColour;
+
+                                                        cov->colour = colour;
+
+                                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                                                        nk_label(NK_Context, "Plot Height", NK_TEXT_CENTERED);
+                                                        nk_slider_float(NK_Context, -16.0f * DefaultCoverageBase, &cov->base, 32.0f * DefaultCoverageBase, 16.0f);
+                                                        if (nk_button_label(NK_Context, "Default")) cov->base = DefaultCoverageBase;
+
+                                                        nk_label(NK_Context, "Plot Scale", NK_TEXT_CENTERED);
+                                                        nk_slider_float(NK_Context, 0.1f, &cov->scale, 8.0f * DefaultCoverageScale, 0.01f);
+                                                        if (nk_button_label(NK_Context, "Default")) cov->scale = DefaultCoverageScale;
+
+                                                        nk_label(NK_Context, "Line Width", NK_TEXT_CENTERED);
+                                                        nk_slider_float(NK_Context, 0.1f, &cov->lineSize, 8.0f * DefaultCoverageLineSize, 0.01f);
+                                                        if (nk_button_label(NK_Context, "Default")) cov->lineSize = DefaultCoverageLineSize;
+
+                                                        nk_contextual_end(NK_Context);
+                                                    }
+                                                } break;
+                                        }
+                                    }
+                                    nk_tree_pop(NK_Context);
+                                }
+                            }
+
+
                         }
                     }
 
