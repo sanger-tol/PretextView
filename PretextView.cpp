@@ -2379,7 +2379,7 @@ Render()
                             f32 factor1 = 1.0f / (2.0f * Camera_Position.z);
                             f32 factor2 = 2.0f / height;
 
-                            f32 wy = (factor1 * (1.0f - (factor2 * (height - cov->base) * Screen_Scale.y))) + Camera_Position.y;
+                            f32 wy = (factor1 * (1.0f - (factor2 * (height - cov->base)))) + Camera_Position.y;
 
                             glUseProgram(cov->shader->shaderProgram);
                             glUniform4fv(cov->shader->colorLocation, 1, (GLfloat *)&cov->colour);
