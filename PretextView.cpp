@@ -5097,6 +5097,7 @@ InvertMap(u32 pixelFrom, u32 pixelTo)
     
     u16 *tmpBuffer = PushArray(Working_Set, u16, copySize);
     u16 *tmpBuffer2 = PushArray(Working_Set, u16, copySize);
+    u16 *tmpBuffer3 = PushArray(Working_Set, u16, copySize);
 
     glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
     u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, 0, nPixels * sizeof(u16), GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
@@ -5107,18 +5108,21 @@ InvertMap(u32 pixelFrom, u32 pixelTo)
         {
             tmpBuffer[index] = buffer[pixelFrom + index];
             tmpBuffer2[index] = Map_State->contigRelCoords[pixelFrom + index];
+            tmpBuffer3[index] = Map_State->originalContigIds[pixelFrom + index];
         }
 
         ForLoop(copySize)
         {
             buffer[pixelFrom + index] = buffer[pixelTo - index];
             Map_State->contigRelCoords[pixelFrom + index] = Map_State->contigRelCoords[pixelTo - index];
+            Map_State->originalContigIds[pixelFrom + index] = Map_State->originalContigIds[pixelTo - index];
         }
 
         ForLoop(copySize)
         {
             buffer[pixelTo - index] = tmpBuffer[index];
             Map_State->contigRelCoords[pixelTo - index] = tmpBuffer2[index];
+            Map_State->originalContigIds[pixelTo - index] = tmpBuffer3[index];
         }
     }
     else
@@ -5130,6 +5134,7 @@ InvertMap(u32 pixelFrom, u32 pixelTo)
     glBindBuffer(GL_TEXTURE_BUFFER, 0);
     FreeLastPush(Working_Set); // tmpBuffer
     FreeLastPush(Working_Set); // tmpBuffer2
+    FreeLastPush(Working_Set); // tmpBuffer3
 
     UpdateContigsFromMapState();
 
