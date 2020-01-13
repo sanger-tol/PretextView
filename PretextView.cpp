@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.1.1"
+#define PretextView_Version "PretextView Version 0.1.2"
 
 #include "Header.h"
 
@@ -742,6 +742,8 @@ edit_pixels
     pointui pixels;
     point2f worldCoords;
     u32 editing;
+    u32 selecting;
+    pointui selectPixels;
     u32 snap;
 };
 
@@ -1669,7 +1671,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
 
             u16 contig = Map_State->contigIds[pixel1];
 
-            if (!Edit_Pixels.editing && Map_State->contigIds[pixel2] != contig)
+            if (!Edit_Pixels.editing && !Edit_Pixels.selecting && Map_State->contigIds[pixel2] != contig)
             {
                 u32 testPixel = pixel1;
                 u32 testContig = contig;
@@ -1681,6 +1683,26 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                 pixel2 = pixel1 < pixel2 ? testPixel - 1 : testPixel + 1;
             }
             
+            if (Edit_Pixels.selecting)
+            {
+                pixel1 = Max(pixel1, Edit_Pixels.selectPixels.x);
+                while(  pixel1 < (Number_of_Pixels_1D - 1) &&
+                        Map_State->contigIds[pixel1] == Map_State->contigIds[1 + pixel1])
+                {
+                    ++pixel1;
+                }
+
+                pixel2 = Min(pixel2, Edit_Pixels.selectPixels.y);
+                while(  pixel2 > 0 &&
+                        Map_State->contigIds[pixel2] == Map_State->contigIds[pixel2 - 1])
+                {
+                    --pixel2;
+                }
+
+                Edit_Pixels.selectPixels.x = pixel1;
+                Edit_Pixels.selectPixels.y = pixel2;
+            }
+
             if (Edit_Pixels.editing)
             {
                 u32 midPixel = (pixel1 + pixel2) >> 1;
@@ -1852,32 +1874,16 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
             Edit_Pixels.editing = !Edit_Pixels.editing;
             MouseMove(window, x, y);
         }
-        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_PRESS && !Edit_Pixels.editing)
+        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && !Edit_Pixels.editing)
         {
             Edit_Pixels.editing = 1;
-
-            Edit_Pixels.pixels.y = Edit_Pixels.pixels.x;
-
-            while(  Edit_Pixels.pixels.x < (Number_of_Pixels_1D - 1) &&
-                    Map_State->contigIds[Edit_Pixels.pixels.x] == Map_State->contigIds[1 + Edit_Pixels.pixels.x])
-            {
-                ++Edit_Pixels.pixels.x;
-            }
-
-            while(  Edit_Pixels.pixels.y > 0 &&
-                    Map_State->contigIds[Edit_Pixels.pixels.y] == Map_State->contigIds[Edit_Pixels.pixels.y - 1])
-            {
-                --Edit_Pixels.pixels.y;
-            }
-
-            u32 nPixels = Number_of_Pixels_1D;
-
-            f32 wx = (f32)(((f64)((2 * Edit_Pixels.pixels.x) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
-            f32 wy = (f32)(((f64)((2 * Edit_Pixels.pixels.y) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
-
-            Edit_Pixels.worldCoords.x = wx;
-            Edit_Pixels.worldCoords.y = wy;
-
+            Edit_Pixels.selecting = 0;
+            MouseMove(window, x, y);
+        }
+        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_PRESS && !Edit_Pixels.editing)
+        {
+            Edit_Pixels.selecting = 1;
+            Edit_Pixels.selectPixels = Edit_Pixels.pixels;
             MouseMove(window, x, y);
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && Edit_Pixels.editing && action == GLFW_PRESS)
@@ -2101,7 +2107,7 @@ ColourGenerator(u32 index, f32 *rgb)
 }
 
 struct
-coverage
+graph
 {
     u32 name[16];
     u32 *data;
@@ -2118,14 +2124,14 @@ coverage
 enum
 extension_type
 {
-    extension_coverage,
+    extension_graph,
 };
 
 global_variable
 char
 extension_magic_bytes[][4] = 
 {
-    {'p', 's', 'c', 'v'}
+    {'p', 's', 'g', 'h'}
 };
 
 struct
@@ -2200,11 +2206,11 @@ Render()
         {
             switch (node->type)
             {
-                case extension_coverage:
+                case extension_graph:
                     {
-                        coverage *cov = (coverage *)node->extension;
-                        glUseProgram(cov->shader->shaderProgram);
-                        glUniformMatrix4fv(cov->shader->matLocation, 1, GL_FALSE, mat);
+                        graph *gph = (graph *)node->extension;
+                        glUseProgram(gph->shader->shaderProgram);
+                        glUniformMatrix4fv(gph->shader->matLocation, 1, GL_FALSE, mat);
                     }
                     break;
             }
@@ -2370,25 +2376,25 @@ Render()
         {
             switch (node->type)
             {
-                case extension_coverage:
+                case extension_graph:
                     {
-                        coverage *cov = (coverage *)node->extension;
+                        graph *gph = (graph *)node->extension;
 
-                        if (cov->on)
+                        if (gph->on)
                         {
                             f32 factor1 = 1.0f / (2.0f * Camera_Position.z);
                             f32 factor2 = 2.0f / height;
 
-                            f32 wy = (factor1 * (1.0f - (factor2 * (height - cov->base)))) + Camera_Position.y;
+                            f32 wy = (factor1 * (1.0f - (factor2 * (height - gph->base)))) + Camera_Position.y;
 
-                            glUseProgram(cov->shader->shaderProgram);
-                            glUniform4fv(cov->shader->colorLocation, 1, (GLfloat *)&cov->colour);
-                            glUniform1f(cov->shader->yScaleLocation, cov->scale);
-                            glUniform1f(cov->shader->yTopLocation, wy);
-                            glUniform1f(cov->shader->lineSizeLocation, cov->lineSize / Camera_Position.z);
+                            glUseProgram(gph->shader->shaderProgram);
+                            glUniform4fv(gph->shader->colorLocation, 1, (GLfloat *)&gph->colour);
+                            glUniform1f(gph->shader->yScaleLocation, gph->scale);
+                            glUniform1f(gph->shader->yTopLocation, wy);
+                            glUniform1f(gph->shader->lineSizeLocation, gph->lineSize / Camera_Position.z);
 
-                            glBindBuffer(GL_ARRAY_BUFFER, cov->vbo);
-                            glBindVertexArray(cov->vao);
+                            glBindBuffer(GL_ARRAY_BUFFER, gph->vbo);
+                            glBindVertexArray(gph->vao);
                             glDrawArrays(GL_LINE_STRIP, 0, (GLsizei)Number_of_Pixels_1D);
                         }
                     }
@@ -3049,15 +3055,15 @@ Render()
                     {
                         switch (node->type)
                         {
-                            case extension_coverage:
+                            case extension_graph:
                                 {
-                                    coverage *cov = (coverage *)node->extension;
-                                    if (cov->on)
+                                    graph *gph = (graph *)node->extension;
+                                    if (gph->on)
                                     {
                                         glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
                                         u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u16), sizeof(u16), GL_MAP_READ_BIT);
 
-                                        stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)cov->name, cov->data[*buffer]);
+                                        stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)gph->name, gph->data[*buffer]);
                                         ++nExtra;
                                         longestExtraLineLength = Max(longestExtraLineLength, fonsTextBounds(FontStash_Context, 0, 0, buff, 0, NULL));
 
@@ -3131,15 +3137,15 @@ Render()
                     {
                         switch (node->type)
                         {
-                            case extension_coverage:
+                            case extension_graph:
                                 {
-                                    coverage *cov = (coverage *)node->extension;
-                                    if (cov->on)
+                                    graph *gph = (graph *)node->extension;
+                                    if (gph->on)
                                     {
                                         glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
                                         u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u16), sizeof(u16), GL_MAP_READ_BIT);
 
-                                        stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)cov->name, cov->data[*buffer]);
+                                        stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)gph->name, gph->data[*buffer]);
 
                                         fonsDrawText(FontStash_Context, ModelXToScreen(Tool_Tip_Move.worldCoords.x) + spacing, 
                                                 ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + ((2.0f + (f32)(++count)) * (lh + 1.0f)), buff, 0);
@@ -3360,7 +3366,7 @@ Render()
                 
                 if (Edit_Pixels.editing)
                 {
-                    stbsp_snprintf(line2, 64, "%s - %$.2fbp", cont->name, bpStart);
+                    stbsp_snprintf(line2, 64, "%s[%$.2fbp]", cont->name, bpStart);
                 }
                 else if (line1Done)
                 {
@@ -3370,7 +3376,8 @@ Render()
                 if (!line1Done)
                 {
                     f64 bpEnd = bpPerPixel * (f64)Map_State->contigRelCoords[pix2];
-                    stbsp_snprintf(line1, 64, "%s - %$.2fbp to %$.2fbp", cont->name, bpStart, bpEnd);
+                    original_contig *cont2 = Original_Contigs + Map_State->originalContigIds[pix2];
+                    stbsp_snprintf(line1, 64, "%s[%$.2fbp] to %s[%$.2fbp]", cont->name, bpStart, cont2->name, bpEnd);
                     if (Edit_Pixels.editing)
                     {
                         line1Done = 1;
@@ -3897,13 +3904,13 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         {
             switch (node->type)
             {
-                case extension_coverage:
+                case extension_graph:
                     {
-                        coverage *cov = (coverage *)node->extension;
-                        glDeleteVertexArrays(1, &cov->vao);
-                        glDeleteBuffers(1, &cov->vbo);
-                        glDeleteBuffers(1, &cov->shader->yValuesBuffer);
-                        glDeleteTextures(1, &cov->shader->yValuesBufferTex);
+                        graph *gph = (graph *)node->extension;
+                        glDeleteVertexArrays(1, &gph->vao);
+                        glDeleteBuffers(1, &gph->vbo);
+                        glDeleteBuffers(1, &gph->shader->yValuesBuffer);
+                        glDeleteTextures(1, &gph->shader->yValuesBufferTex);
                     }
                     break;
             }
@@ -4104,24 +4111,24 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                             u32 extensionSize = 0;
                             switch (type)
                             {
-                                case extension_coverage:
+                                case extension_graph:
                                     {
                                         u32 compSize;
                                         fread(&compSize, 1, sizeof(u32), file);
-                                        coverage *cov = PushStructP(arena, coverage);
+                                        graph *gph = PushStructP(arena, graph);
                                         extension_node *node = PushStructP(arena, extension_node);
-                                        u08 *dataPlusName = PushArrayP(arena, u08, ((sizeof(u32) * Number_of_Pixels_1D) + sizeof(cov->name) ));
+                                        u08 *dataPlusName = PushArrayP(arena, u08, ((sizeof(u32) * Number_of_Pixels_1D) + sizeof(gph->name) ));
 #pragma clang diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-align"
-                                        cov->data = (u32 *)(dataPlusName + sizeof(cov->name));
+                                        gph->data = (u32 *)(dataPlusName + sizeof(gph->name));
 #pragma clang diagnostic pop                                       
                                         extensionSize += (compSize + sizeof(u32));
                                         u08 *compBuffer = PushArrayP(arena, u08, compSize);
                                         fread(compBuffer, 1, compSize, file);
-                                        if (libdeflate_deflate_decompress(Decompressor, (const void *)compBuffer, compSize, (void *)dataPlusName, (sizeof(u32) * Number_of_Pixels_1D) + sizeof(cov->name), NULL))
+                                        if (libdeflate_deflate_decompress(Decompressor, (const void *)compBuffer, compSize, (void *)dataPlusName, (sizeof(u32) * Number_of_Pixels_1D) + sizeof(gph->name), NULL))
                                         {
                                             FreeLastPushP(arena); // data
-                                            FreeLastPushP(arena); // coverage
+                                            FreeLastPushP(arena); // graph
                                             FreeLastPushP(arena); // node
                                         }
                                         else
@@ -4130,13 +4137,13 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 #pragma GCC diagnostic ignored "-Wcast-align"
                                             u32 *namePtr = (u32 *)dataPlusName;
 #pragma clang diagnostic pop
-                                            ForLoop2(ArrayCount(cov->name))
+                                            ForLoop2(ArrayCount(gph->name))
                                             {
-                                                cov->name[index2] = *(namePtr + index2);
+                                                gph->name[index2] = *(namePtr + index2);
                                             }
 
                                             node->type = type;
-                                            node->extension = cov;
+                                            node->extension = gph;
                                             AddExtension(node);
                                         }
                                         FreeLastPushP(arena); // compBuffer
@@ -4429,32 +4436,32 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         {
             switch (node->type)
             {
-                case extension_coverage:
+                case extension_graph:
                     {
-                        coverage *cov = (coverage *)node->extension;
-#define DefaultCoverageScale 0.4f
-#define DefaultCoverageBase 32.0f
-#define DefaultCoverageLineSize 1.0f
-#define DefaultCoverageColour {0.1f, 0.8f, 0.7f, 1.0f}
-                        cov->scale = DefaultCoverageScale;
-                        cov->base = DefaultCoverageBase;
-                        cov->lineSize = DefaultCoverageLineSize;
-                        cov->colour = DefaultCoverageColour;
-                        cov->on = 0;
+                        graph *gph = (graph *)node->extension;
+#define DefaultGraphScale 0.4f
+#define DefaultGraphBase 32.0f
+#define DefaultGraphLineSize 1.0f
+#define DefaultGraphColour {0.1f, 0.8f, 0.7f, 1.0f}
+                        gph->scale = DefaultGraphScale;
+                        gph->base = DefaultGraphBase;
+                        gph->lineSize = DefaultGraphLineSize;
+                        gph->colour = DefaultGraphColour;
+                        gph->on = 0;
 
-                        cov->shader = PushStructP(arena, editable_plot_shader);
-                        cov->shader->shaderProgram = CreateShader(FragmentSource_EditablePlot, VertexSource_EditablePlot, GeometrySource_EditablePlot);
+                        gph->shader = PushStructP(arena, editable_plot_shader);
+                        gph->shader->shaderProgram = CreateShader(FragmentSource_EditablePlot, VertexSource_EditablePlot, GeometrySource_EditablePlot);
 
-                        glUseProgram(cov->shader->shaderProgram);
-                        glBindFragDataLocation(cov->shader->shaderProgram, 0, "outColor");
-                        cov->shader->matLocation = glGetUniformLocation(cov->shader->shaderProgram, "matrix");
-                        cov->shader->colorLocation = glGetUniformLocation(cov->shader->shaderProgram, "color");
-                        cov->shader->yScaleLocation = glGetUniformLocation(cov->shader->shaderProgram, "yscale");
-                        cov->shader->yTopLocation = glGetUniformLocation(cov->shader->shaderProgram, "ytop");
-                        cov->shader->lineSizeLocation = glGetUniformLocation(cov->shader->shaderProgram, "linewidth");
+                        glUseProgram(gph->shader->shaderProgram);
+                        glBindFragDataLocation(gph->shader->shaderProgram, 0, "outColor");
+                        gph->shader->matLocation = glGetUniformLocation(gph->shader->shaderProgram, "matrix");
+                        gph->shader->colorLocation = glGetUniformLocation(gph->shader->shaderProgram, "color");
+                        gph->shader->yScaleLocation = glGetUniformLocation(gph->shader->shaderProgram, "yscale");
+                        gph->shader->yTopLocation = glGetUniformLocation(gph->shader->shaderProgram, "ytop");
+                        gph->shader->lineSizeLocation = glGetUniformLocation(gph->shader->shaderProgram, "linewidth");
 
-                        glUniform1i(glGetUniformLocation(cov->shader->shaderProgram, "pixrearrangelookup"), 3);
-                        glUniform1i(glGetUniformLocation(cov->shader->shaderProgram, "yvalues"), 4);
+                        glUniform1i(glGetUniformLocation(gph->shader->shaderProgram, "pixrearrangelookup"), 3);
+                        glUniform1i(glGetUniformLocation(gph->shader->shaderProgram, "yvalues"), 4);
 
                         u32 nValues = Number_of_Pixels_1D;
                         f32 *xValues = PushArrayP(arena, f32, nValues);
@@ -4463,13 +4470,13 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                         u32 max = 0;
                         ForLoop(Number_of_Pixels_1D)
                         {
-                            max = Max(max, cov->data[index]);
+                            max = Max(max, gph->data[index]);
                         }
 
                         ForLoop(Number_of_Pixels_1D)
                         {
                             xValues[index] = (f32)index;
-                            yValues[index] = (f32)cov->data[index] / (f32)max;
+                            yValues[index] = (f32)gph->data[index] / (f32)max;
                         }
 
                         glActiveTexture(GL_TEXTURE4);
@@ -4484,16 +4491,16 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                         glBindTexture(GL_TEXTURE_BUFFER, yValTex);
                         glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, yVal);
 
-                        cov->shader->yValuesBuffer = yVal;
-                        cov->shader->yValuesBufferTex = yValTex;
+                        gph->shader->yValuesBuffer = yVal;
+                        gph->shader->yValuesBufferTex = yValTex;
                         
-                        glGenVertexArrays(1, &cov->vao);
-                        glBindVertexArray(cov->vao);
-                        glGenBuffers(1, &cov->vbo);
-                        glBindBuffer(GL_ARRAY_BUFFER, cov->vbo);
+                        glGenVertexArrays(1, &gph->vao);
+                        glBindVertexArray(gph->vao);
+                        glGenBuffers(1, &gph->vbo);
+                        glBindBuffer(GL_ARRAY_BUFFER, gph->vbo);
                         glBufferData(GL_ARRAY_BUFFER, sizeof(f32) * nValues, xValues, GL_STATIC_DRAW);
 
-                        GLuint posAttrib = (GLuint)glGetAttribLocation(cov->shader->shaderProgram, "position");
+                        GLuint posAttrib = (GLuint)glGetAttribLocation(gph->shader->shaderProgram, "position");
                         glEnableVertexAttribArray(posAttrib);
                         glVertexAttribPointer(posAttrib, 1, GL_FLOAT, GL_FALSE, 0, 0);
 
@@ -5421,7 +5428,7 @@ global_function
 void
 KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
 {
-    if (!Loading && action != GLFW_RELEASE)
+    if (!Loading && (action != GLFW_RELEASE || key == GLFW_KEY_SPACE))
     {
         if (UI_On)
         {
@@ -5497,42 +5504,28 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     break;
                 
                 case GLFW_KEY_SPACE:
-                    if (Edit_Mode && !Edit_Pixels.editing)
+                    if (Edit_Mode && !Edit_Pixels.editing && action == GLFW_PRESS)
                     {
-                        Edit_Pixels.editing = 1;
-
-                        Edit_Pixels.pixels.y = Edit_Pixels.pixels.x;
-
-                        while(  Edit_Pixels.pixels.x < (Number_of_Pixels_1D - 1) &&
-                                Map_State->contigIds[Edit_Pixels.pixels.x] == Map_State->contigIds[1 + Edit_Pixels.pixels.x])
-                        {
-                            ++Edit_Pixels.pixels.x;
-                        }
-
-                        while(  Edit_Pixels.pixels.y > 0 &&
-                                Map_State->contigIds[Edit_Pixels.pixels.y] == Map_State->contigIds[Edit_Pixels.pixels.y - 1])
-                        {
-                            --Edit_Pixels.pixels.y;
-                        }
-
-                        u32 nPixels = Number_of_Pixels_1D;
-
-                        f32 wx = (f32)(((f64)((2 * Edit_Pixels.pixels.x) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
-                        f32 wy = (f32)(((f64)((2 * Edit_Pixels.pixels.y) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
-
-                        Edit_Pixels.worldCoords.x = wx;
-                        Edit_Pixels.worldCoords.y = wy;
-
+                        Edit_Pixels.selecting = 1;
+                        Edit_Pixels.selectPixels = Edit_Pixels.pixels;
                         f64 x, y;
                         glfwGetCursorPos(window, &x, &y);
                         MouseMove(window, x, y);
                     }
-                    else if (Edit_Mode && Edit_Pixels.editing)
+                    else if (Edit_Mode && !Edit_Pixels.editing && action == GLFW_RELEASE)
+                    {
+                        Edit_Pixels.editing = 1;
+                        Edit_Pixels.selecting = 0;
+                        f64 x, y;
+                        glfwGetCursorPos(window, &x, &y);
+                        MouseMove(window, x, y);
+                    }
+                    else if (Edit_Mode && Edit_Pixels.editing && action == GLFW_PRESS)
                     {
                         InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
                         Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
                     }
-                    else if (Waypoint_Edit_Mode && Selected_Waypoint)
+                    else if (Waypoint_Edit_Mode && Selected_Waypoint && action == GLFW_PRESS)
                     {
                         f64 x, y;
                         glfwGetCursorPos(window, &x, &y);
@@ -6482,20 +6475,20 @@ SaveState(u64 headerHash)
         u32 nEdits = Min(Edits_Stack_Size, Map_Editor->nEdits);
         u32 nWayp = Waypoint_Editor->nWaypointsActive;
 
-        u32 nCoveragePlots = 0;
+        u32 nGraphPlots = 0;
         TraverseLinkedList(Extensions.head, extension_node)
         {
             switch (node->type)
             {
-                case extension_coverage:
+                case extension_graph:
                     {
-                        ++nCoveragePlots;
+                        ++nGraphPlots;
                     }
                     break;
             }
         }
 
-        u32 nFileBytes = 309 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nCoveragePlots);
+        u32 nFileBytes = 309 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots);
 
         u08 *fileContents = PushArrayP(Loading_Arena, u08, nFileBytes);
         u08 *fileWriter = fileContents;
@@ -6683,12 +6676,12 @@ SaveState(u64 headerHash)
             {
                 switch (node->type)
                 {
-                    case extension_coverage:
+                    case extension_graph:
                         {
-                            coverage *cov = (coverage *)node->extension;
+                            graph *gph = (graph *)node->extension;
                             ForLoop(32)
                             {
-                                *fileWriter++ = ((u08 *)cov)[index + 88];
+                                *fileWriter++ = ((u08 *)gph)[index + 88];
                             }
                         }
                         break;
@@ -7049,7 +7042,7 @@ LoadState(u64 headerHash)
                     {
                         switch (node->type)
                         {
-                            case extension_coverage:
+                            case extension_graph:
                                 {
                                     if ((nBytesRead + 32) > nBytesFile) break;
 
@@ -7095,7 +7088,7 @@ CopyEditsToClipBoard(GLFWwindow *window)
 
     if (nEdits)
     {
-        u32 bufferSize = 128 * nEdits;
+        u32 bufferSize = 256 * nEdits;
         u08 *buffer = PushArray(Working_Set, u08, bufferSize);
         u32 bufferPtr = 0;
 
@@ -7118,11 +7111,12 @@ CopyEditsToClipBoard(GLFWwindow *window)
 
             u32 oldFrom = Map_State->contigRelCoords[start];
             u32 oldTo = Map_State->contigRelCoords[end];
-            u32 *name = (Original_Contigs + Map_State->originalContigIds[start])->name;
+            u32 *name1 = (Original_Contigs + Map_State->originalContigIds[start])->name;
+            u32 *name2 = (Original_Contigs + Map_State->originalContigIds[end])->name;
             u32 *newName = (Original_Contigs + Map_State->originalContigIds[to])->name;
 
-            bufferPtr += (u32)stbsp_snprintf((char *)buffer + bufferPtr, (s32)(bufferSize - bufferPtr), "Edit %d:\n       %s - %$.2fbp to %$.2fbp\n%s\n       %s - %$.2fbp\n",
-                    index + 1, (char *)name, (f64)oldFrom * bpPerPixel, (f64)oldTo * bpPerPixel,
+            bufferPtr += (u32)stbsp_snprintf((char *)buffer + bufferPtr, (s32)(bufferSize - bufferPtr), "Edit %d:\n       %s[%$.2fbp] to %s[%$.2fbp]\n%s\n       %s[%$.2fbp]\n",
+                    index + 1, (char *)name1, (f64)oldFrom * bpPerPixel, (char *)name2, (f64)oldTo * bpPerPixel,
                     edit->finalPix1 > edit->finalPix2 ? (const char *)"       inverted and moved to" : (const char *)"       moved to",
                     (char *)newName, (f64)Map_State->contigRelCoords[to] * bpPerPixel);
         }
@@ -7159,6 +7153,7 @@ MainArgs
     Edit_Pixels.worldCoords.x = 0;
     Edit_Pixels.worldCoords.y = 0;
     Edit_Pixels.editing = 0;
+    Edit_Pixels.selecting = 0;
 
     Camera_Position.x = 0.0f;
     Camera_Position.y = 0.0f;
@@ -7686,7 +7681,7 @@ MainArgs
 
                                     map_edit *edit = Map_Editor->edits + editStackPtr;
 
-                                    char buff[64];
+                                    char buff[128];
                                     
                                     u16 start = Min(edit->finalPix1, edit->finalPix2);
                                     u16 end = Max(edit->finalPix1, edit->finalPix2);
@@ -7694,20 +7689,21 @@ MainArgs
 
                                     u32 oldFrom = Map_State->contigRelCoords[start];
                                     u32 oldTo = Map_State->contigRelCoords[end];
-                                    u32 *name = (Original_Contigs + Map_State->originalContigIds[start])->name;
+                                    u32 *name1 = (Original_Contigs + Map_State->originalContigIds[start])->name;
+                                    u32 *name2 = (Original_Contigs + Map_State->originalContigIds[end])->name;
                                     u32 *newName = (Original_Contigs + Map_State->originalContigIds[to])->name;
                                     
-                                    stbsp_snprintf((char *)buff, 64, "Edit %d:", index + 1);
+                                    stbsp_snprintf((char *)buff, sizeof(buff), "Edit %d:", index + 1);
                                     nk_label(NK_Context, (const char *)buff, NK_TEXT_LEFT);
-                                    stbsp_snprintf((char *)buff, 64, "       %s - %$.2fbp to %$.2fbp",
-                                            (char *)name, (f64)oldFrom * bpPerPixel,
-                                            (f64)oldTo * bpPerPixel);
+                                    stbsp_snprintf((char *)buff, sizeof(buff), "       %s[%$.2fbp] to %s[%$.2fbp]",
+                                            (char *)name1, (f64)oldFrom * bpPerPixel,
+                                            (char *)name2, (f64)oldTo * bpPerPixel);
                                     nk_label(NK_Context, (const char *)buff, NK_TEXT_LEFT);
 
                                     nk_label(NK_Context, edit->finalPix1 > edit->finalPix2 ? (const char *)"       inverted and moved to" : 
                                             (const char *)"       moved to", NK_TEXT_LEFT);
 
-                                    stbsp_snprintf((char *)buff, 64, "       %s - %$.2fbp",
+                                    stbsp_snprintf((char *)buff, sizeof(buff), "       %s[%$.2fbp]",
                                             (char *)newName, (f64)Map_State->contigRelCoords[to] * bpPerPixel);
                                     nk_label(NK_Context, (const char *)buff, NK_TEXT_LEFT);
 
@@ -7765,17 +7761,17 @@ MainArgs
                                     {
                                         switch (node->type)
                                         {
-                                            case extension_coverage:
+                                            case extension_graph:
                                                 {
-                                                    coverage *cov = (coverage *)node->extension;
+                                                    graph *gph = (graph *)node->extension;
                                                     
-                                                    stbsp_snprintf(buff, sizeof(buff), "Coverage: %s", (char *)cov->name);
+                                                    stbsp_snprintf(buff, sizeof(buff), "Graph: %s", (char *)gph->name);
                                                     
                                                     bounds = nk_widget_bounds(NK_Context);
-                                                    cov->on = nk_check_label(NK_Context, buff, (s32)cov->on) ? 1 : 0;
+                                                    gph->on = nk_check_label(NK_Context, buff, (s32)gph->on) ? 1 : 0;
                                                     if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 150, Screen_Scale.y * 600), bounds))
                                                     {
-                                                        struct nk_colorf colour = cov->colour;
+                                                        struct nk_colorf colour = gph->colour;
 
                                                         nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
                                                         nk_label(NK_Context, "Plot Colour", NK_TEXT_CENTERED);
@@ -7784,22 +7780,22 @@ MainArgs
                                                         colour = nk_color_picker(NK_Context, colour, NK_RGBA);
 
                                                         nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
-                                                        if (nk_button_label(NK_Context, "Default")) colour = DefaultCoverageColour;
+                                                        if (nk_button_label(NK_Context, "Default")) colour = DefaultGraphColour;
 
-                                                        cov->colour = colour;
+                                                        gph->colour = colour;
 
                                                         nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
                                                         nk_label(NK_Context, "Plot Height", NK_TEXT_CENTERED);
-                                                        nk_slider_float(NK_Context, -16.0f * DefaultCoverageBase, &cov->base, 32.0f * DefaultCoverageBase, 16.0f);
-                                                        if (nk_button_label(NK_Context, "Default")) cov->base = DefaultCoverageBase;
+                                                        nk_slider_float(NK_Context, -16.0f * DefaultGraphBase, &gph->base, 32.0f * DefaultGraphBase, 16.0f);
+                                                        if (nk_button_label(NK_Context, "Default")) gph->base = DefaultGraphBase;
 
                                                         nk_label(NK_Context, "Plot Scale", NK_TEXT_CENTERED);
-                                                        nk_slider_float(NK_Context, 0.1f, &cov->scale, 8.0f * DefaultCoverageScale, 0.01f);
-                                                        if (nk_button_label(NK_Context, "Default")) cov->scale = DefaultCoverageScale;
+                                                        nk_slider_float(NK_Context, 0.1f, &gph->scale, 8.0f * DefaultGraphScale, 0.01f);
+                                                        if (nk_button_label(NK_Context, "Default")) gph->scale = DefaultGraphScale;
 
                                                         nk_label(NK_Context, "Line Width", NK_TEXT_CENTERED);
-                                                        nk_slider_float(NK_Context, 0.1f, &cov->lineSize, 2.0f * DefaultCoverageLineSize, 0.001f);
-                                                        if (nk_button_label(NK_Context, "Default")) cov->lineSize = DefaultCoverageLineSize;
+                                                        nk_slider_float(NK_Context, 0.1f, &gph->lineSize, 2.0f * DefaultGraphLineSize, 0.001f);
+                                                        if (nk_button_label(NK_Context, "Default")) gph->lineSize = DefaultGraphLineSize;
 
                                                         nk_contextual_end(NK_Context);
                                                     }
