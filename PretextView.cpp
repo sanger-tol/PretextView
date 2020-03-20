@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.1.2"
+#define PretextView_Version "PretextView Version 0.1.3"
 
 #include "Header.h"
 
@@ -1685,22 +1685,22 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             
             if (Edit_Pixels.selecting)
             {
-                pixel1 = Max(pixel1, Edit_Pixels.selectPixels.x);
-                while(  pixel1 < (Number_of_Pixels_1D - 1) &&
-                        Map_State->contigIds[pixel1] == Map_State->contigIds[1 + pixel1])
+                Edit_Pixels.selectPixels.x = Max(pixel1, Max(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y));
+                while(  Edit_Pixels.selectPixels.x < (Number_of_Pixels_1D - 1) &&
+                        Map_State->contigIds[Edit_Pixels.selectPixels.x] == Map_State->contigIds[1 + Edit_Pixels.selectPixels.x])
                 {
-                    ++pixel1;
+                    ++Edit_Pixels.selectPixels.x;
                 }
 
-                pixel2 = Min(pixel2, Edit_Pixels.selectPixels.y);
-                while(  pixel2 > 0 &&
-                        Map_State->contigIds[pixel2] == Map_State->contigIds[pixel2 - 1])
+                Edit_Pixels.selectPixels.y = Min(pixel1, Min(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y));
+                while(  Edit_Pixels.selectPixels.y > 0 &&
+                        Map_State->contigIds[Edit_Pixels.selectPixels.y] == Map_State->contigIds[Edit_Pixels.selectPixels.y - 1])
                 {
-                    --pixel2;
+                    --Edit_Pixels.selectPixels.y;
                 }
 
-                Edit_Pixels.selectPixels.x = pixel1;
-                Edit_Pixels.selectPixels.y = pixel2;
+                pixel1 = Edit_Pixels.selectPixels.x;
+                pixel2 = Edit_Pixels.selectPixels.y;
             }
 
             if (Edit_Pixels.editing)
@@ -1844,10 +1844,17 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
     }
 }
 
+global_variable
+u08
+Mouse_Invert = 0;
+
 global_function
 void
 Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
 {
+    s32 primaryMouse = Mouse_Invert ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
+    s32 secondaryMouse = Mouse_Invert ? GLFW_MOUSE_BUTTON_LEFT : GLFW_MOUSE_BUTTON_RIGHT;    
+    
     if (Loading)
     {
         return;
@@ -1869,7 +1876,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
     }
     else
     {
-        if (button == GLFW_MOUSE_BUTTON_LEFT && Edit_Mode && action == GLFW_PRESS)
+        if (button == primaryMouse && Edit_Mode && action == GLFW_PRESS)
         {
             Edit_Pixels.editing = !Edit_Pixels.editing;
             MouseMove(window, x, y);
@@ -1894,7 +1901,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
 
             Redisplay = 1;
         }
-        else if (button == GLFW_MOUSE_BUTTON_LEFT && Waypoint_Edit_Mode && action == GLFW_PRESS)
+        else if (button == primaryMouse && Waypoint_Edit_Mode && action == GLFW_PRESS)
         {
             AddWayPoint(Tool_Tip_Move.worldCoords);
             MouseMove(window, x, y);
@@ -1907,7 +1914,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
                 MouseMove(window, x, y);
             }
         }
-        else if (button == GLFW_MOUSE_BUTTON_RIGHT)
+        else if (button == secondaryMouse)
         {
             if (action == GLFW_PRESS)
             {
@@ -6510,6 +6517,7 @@ SaveState(u64 headerHash)
             settings |= Grid->on ? (1 << 3) : 0;
             settings |= Contig_Ids->on ? (1 << 4) : 0;
             settings |= Tool_Tip->on ? (1 << 5) : 0;
+            settings |= Mouse_Invert ? (1 << 6) : 0;
 
             *fileWriter++ = settings;
         }
@@ -6861,6 +6869,7 @@ LoadState(u64 headerHash)
                 Grid->on = settings & (1 << 3);
                 Contig_Ids->on = settings & (1 << 4);
                 Tool_Tip->on = settings & (1 << 5);
+                Mouse_Invert = settings & (1 << 6);
 
                 nBytesRead += 2;
             }
@@ -7609,6 +7618,8 @@ MainArgs
 
                         nk_contextual_end(NK_Context);
                     }
+
+                    Mouse_Invert = nk_check_label(NK_Context, "Invert Mouse Buttons", (s32)Mouse_Invert) ? 1 : 0;
 
                     nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
                     nk_label(NK_Context, "Gamma Min", NK_TEXT_LEFT);
