@@ -1040,7 +1040,7 @@ waypoint
     waypoint_quadtree_node *node;
 };
 
-#define Edits_Stack_Size 128
+#define Edits_Stack_Size 32768
 #define Waypoints_Stack_Size 128
 
 struct
