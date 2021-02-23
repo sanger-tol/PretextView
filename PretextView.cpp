@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.1.4"
+#define PretextView_Version "PretextView Version 0.1.5"
 
 #include "Header.h"
 
@@ -4439,6 +4439,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
     // Extensions
     {
+        u32 exIndex = 0;
         TraverseLinkedList(Extensions.head, extension_node)
         {
             switch (node->type)
@@ -4446,7 +4447,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                 case extension_graph:
                     {
                         graph *gph = (graph *)node->extension;
-#define DefaultGraphScale 0.4f
+#define DefaultGraphScale 0.2f
 #define DefaultGraphBase 32.0f
 #define DefaultGraphLineSize 1.0f
 #define DefaultGraphColour {0.1f, 0.8f, 0.7f, 1.0f}
@@ -4468,7 +4469,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                         gph->shader->lineSizeLocation = glGetUniformLocation(gph->shader->shaderProgram, "linewidth");
 
                         glUniform1i(glGetUniformLocation(gph->shader->shaderProgram, "pixrearrangelookup"), 3);
-                        glUniform1i(glGetUniformLocation(gph->shader->shaderProgram, "yvalues"), 4);
+                        glUniform1i(glGetUniformLocation(gph->shader->shaderProgram, "yvalues"), 4 + (s32)exIndex);
 
                         u32 nValues = Number_of_Pixels_1D;
                         f32 *xValues = PushArrayP(arena, f32, nValues);
@@ -4486,7 +4487,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                             yValues[index] = (f32)gph->data[index] / (f32)max;
                         }
 
-                        glActiveTexture(GL_TEXTURE4);
+                        glActiveTexture(GL_TEXTURE4 + exIndex++);
 
                         GLuint yVal, yValTex;
 
@@ -7806,7 +7807,7 @@ MainArgs
                                                         if (nk_button_label(NK_Context, "Default")) gph->base = DefaultGraphBase;
 
                                                         nk_label(NK_Context, "Plot Scale", NK_TEXT_CENTERED);
-                                                        nk_slider_float(NK_Context, 0.1f, &gph->scale, 8.0f * DefaultGraphScale, 0.01f);
+                                                        nk_slider_float(NK_Context, 0, &gph->scale, 8.0f * DefaultGraphScale, 0.005f);
                                                         if (nk_button_label(NK_Context, "Default")) gph->scale = DefaultGraphScale;
 
                                                         nk_label(NK_Context, "Line Width", NK_TEXT_CENTERED);
