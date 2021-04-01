@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.1.5"
+#define PretextView_Version "PretextView Version 0.1.6"
 
 #include "Header.h"
 
@@ -5482,6 +5482,7 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
             {
                 UI_On = !UI_On;
                 ++NK_Device->lastContextMemory[0];
+                Redisplay = 1;
             }
         }
         else
@@ -7864,8 +7865,9 @@ MainArgs
         else
         {
             glfwSetCursor(window, crossCursor);
-            glfwWaitEvents();
         }
+
+        if (!Redisplay) glfwWaitEvents();
     }
 
     if (currFileName) SaveState(headerHash);
