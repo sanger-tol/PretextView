@@ -7,17 +7,19 @@ function die {
 	exit 1
 }
 
-if [ "$#" -ne 2 ]; then
-	die "Usage: `basename $0` AppNameHere icon-file.svg"
+if [ "$#" -ne 3 ]; then
+	die "Usage: `basename $0` AppNameHere AppVersion icon-file.svg"
 fi
 
 APPNAME=$1
-ICONNAME=$2
+APPVERSION=$2
+ICONNAME=$3
 
 if [ ! -f $ICONNAME ]; then
 	die "Image file for icon not found"
 fi
 
+[ -d $APPNAME.app ] && rm -rf $APPNAME.app
 mkdir -p "$APPNAME.app/Contents/"{MacOS,Resources}
 
 cat > "$APPNAME.app/Contents/Info.plist" <<END
@@ -36,7 +38,7 @@ cat > "$APPNAME.app/Contents/Info.plist" <<END
   <key>CFBundleIconFile</key>
   <string>icon.icns</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.01</string>
+  <string>$APPVERSION</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundlePackageType</key>

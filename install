@@ -162,8 +162,21 @@ if p.returncode != 0:
 
 if "darwin" in sys.platform:
     print("Building Mac App")
-    
-    p = Popen(["./setup.sh", "PretextView", "pretextview_icon.svg"], stdin=PIPE, stdout=PIPE, stderr=PIPE)
+    #define PretextView_Version "PretextView Version 0.1.6"
+
+    version = None
+    with open("PretextView.cpp", "r") as f:
+        for line in f:
+            if line.startswith('#define PretextView_Version "PretextView Version '):
+                version = line.split(" ")[-1][:-2]
+                break
+
+    if version is None:
+        raise SystemExit("Could not determine version")
+
+    print("Version: " + version)
+
+    p = Popen(["./setup.sh", "PretextView", version, "pretextview_icon.svg"], stdin=PIPE, stdout=PIPE, stderr=PIPE)
     output, err = p.communicate()
     if p.returncode != 0:
         raise SystemExit("Error making PretextView: " + err.decode('utf-8'))
