@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.1.6"
+#define PretextView_Version "PretextView Version 0.1.7"
 
 #include "Header.h"
 
@@ -1529,6 +1529,8 @@ global_function
 void
 AddWayPoint(point2f coords)
 {
+    coords = {Max(coords.x, 0.0f), Max(coords.y, 0.0f)};
+
     u32 nFree = Waypoints_Stack_Size - Waypoint_Editor->nWaypointsActive;
 
     if (nFree)
@@ -6466,7 +6468,7 @@ SetSaveStatePaths()
 }
 
 global_variable
-u08 SaveState_Magic[5] = {'p', 't', 's', 'x', '1'};
+u08 SaveState_Magic[5] = {'p', 't', 's', 'x', '2'};
 
 global_function
 void
@@ -6502,7 +6504,7 @@ SaveState(u64 headerHash)
             }
         }
 
-        u32 nFileBytes = 309 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots);
+        u32 nFileBytes = 312 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots);
 
         u08 *fileContents = PushArrayP(Loading_Arena, u08, nFileBytes);
         u08 *fileWriter = fileContents;
@@ -6615,8 +6617,11 @@ SaveState(u64 headerHash)
 
         // edits
         {
-            *fileWriter++ = (u08)nEdits;
-            
+            ForLoop(4)
+            {
+                *fileWriter++ = ((u08 *)&nEdits)[index];
+            }
+
             u32 editStackPtr = Map_Editor->editStackPtr == nEdits ? 0 : Map_Editor->editStackPtr;
             u32 nContigFlags = (nEdits + 7) >> 3;
             u08 *contigFlags = fileWriter + (6 * nEdits);
@@ -6758,7 +6763,7 @@ LoadState(u64 headerHash)
             *(SaveState_Name + index) = c;
         }
         
-        u32 fullLoad = 1;
+        u32 fullLoad = 2;
         FILE *file = 0;
         if ((file = fopen((const char *)SaveState_Path, "rb")))
         {
@@ -6767,13 +6772,23 @@ LoadState(u64 headerHash)
             u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
             if (bytesRead == sizeof(magicTest))
             {
-                ForLoop(sizeof(SaveState_Magic))
+                ForLoop(sizeof(SaveState_Magic) - 1)
                 {
                     if (SaveState_Magic[index] != magicTest[index])
                     {
                         fclose(file);
                         file = 0;
                         break;
+                    }
+                }
+                if (file)
+                {
+                    if (magicTest[sizeof(SaveState_Magic)-1] == '2') fullLoad = 2;
+                    else if (magicTest[sizeof(SaveState_Magic)-1] == '1') fullLoad = 1;
+                    else
+                    {
+                        fclose(file);
+                        file = 0;
                     }
                 }
             }
@@ -6983,10 +6998,23 @@ LoadState(u64 headerHash)
 
                 // edits
                 {
-                    u08 nEdits = *fileContents++;
+                    u32 nEdits;
+                    if (fullLoad == 2)
+                    {
+                        ForLoop(4)
+                        {
+                            ((u08 *)&nEdits)[index] = *fileContents++;
+                        }
+                        nBytesRead += 4;
+                    }
+                    else
+                    {
+                        nEdits = (u32)*fileContents++;
+                        ++nBytesRead;
+                    }
+
                     u08 *contigFlags = fileContents + (6 * nEdits);
                     u32 nContigFlags = ((u32)nEdits + 7) >> 3;
-                    ++nBytesRead;
 
                     ForLoop(nEdits)
                     {
