@@ -1,3 +1,4 @@
+![GitHub all releases](https://img.shields.io/github/downloads/wtsi-hpag/PretextView/total?style=plastic)
 # PretextView
 Paired REad TEXTure Viewer. OpenGL Powered Pretext Contact Map Viewer.<br/>
 
