@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.1.7"
+#define PretextView_Version "PretextView Version 0.2.0-dev"
 
 #include "Header.h"
 
@@ -3864,7 +3864,7 @@ void
 SaveState(u64 headerHash);
 
 global_function
-void
+u08
 LoadState(u64 headerHash);
 
 global_function
@@ -4570,7 +4570,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
     FenceIn(File_Loaded = 1);
 
-    LoadState(*headerHash);
+    if (LoadState(*headerHash)) LoadState(*headerHash + 1);
     return(ok);
 }
 
@@ -6069,7 +6069,7 @@ FileBrowserInit(struct file_browser *browser, struct media *media)
 
 global_function
 u32
-FileBrowserRun(struct file_browser *browser, struct nk_context *ctx, u32 show)
+FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context *ctx, u32 show)
 {
 #ifndef _WIN32
     char pathSep = '/';
@@ -6077,7 +6077,7 @@ FileBrowserRun(struct file_browser *browser, struct nk_context *ctx, u32 show)
     char pathSep = '\\';
 #endif
    
-    struct nk_window *window = nk_window_find(ctx, "File Browser");
+    struct nk_window *window = nk_window_find(ctx, name);
     u32 doesExist = window != 0;
 
     if (!show && !doesExist)
@@ -6094,7 +6094,7 @@ FileBrowserRun(struct file_browser *browser, struct nk_context *ctx, u32 show)
     struct media *media = browser->media;
     struct nk_rect total_space;
 
-    if (nk_begin(ctx, "File Browser", nk_rect(Screen_Scale.x * 50, Screen_Scale.y * 50, Screen_Scale.x * 800, Screen_Scale.y * 600),
+    if (nk_begin(ctx, name, nk_rect(Screen_Scale.x * 50, Screen_Scale.y * 50, Screen_Scale.x * 800, Screen_Scale.y * 600),
                 NK_WINDOW_BORDER|NK_WINDOW_NO_SCROLLBAR|NK_WINDOW_MOVABLE|NK_WINDOW_TITLE|NK_WINDOW_CLOSABLE))
     {
         static f32 ratio[] = {0.25f, NK_UNDEFINED};
@@ -6474,6 +6474,10 @@ global_function
 void
 SaveState(u64 headerHash)
 {
+    static u08 flipFlop = 0;
+    headerHash += (u64)flipFlop;
+    flipFlop = (flipFlop + 1) & 1;
+
     if (!SaveState_Path)
     {
         SetSaveStatePaths();
@@ -6746,7 +6750,7 @@ SaveState(u64 headerHash)
 }
 
 global_function
-void
+u08
 LoadState(u64 headerHash)
 {
     if (!SaveState_Path)
@@ -6869,7 +6873,7 @@ LoadState(u64 headerHash)
             {
                 FreeLastPushP(Loading_Arena); // comp buffer
                 FreeLastPushP(Loading_Arena); // fileContents
-                return;
+                return(1);
             }
             FreeLastPushP(Loading_Arena); // comp buffer
 
@@ -7107,6 +7111,8 @@ LoadState(u64 headerHash)
             FreeLastPushP(Loading_Arena); // fileContents
         }
     }
+
+    return(0);
 }
 
 global_variable
@@ -7281,6 +7287,8 @@ MainArgs
 
     // file browser
     struct file_browser browser;
+    struct file_browser saveBrowser;
+    struct file_browser loadBrowser;
     struct media media;
     {
         media.icons.home = IconLoad(IconHome, IconHome_Size);
@@ -7290,6 +7298,8 @@ MainArgs
         media.icons.img_file = IconLoad(IconImage, IconImage_Size);
         MediaInit(&media);
         FileBrowserInit(&browser, &media);
+        FileBrowserInit(&saveBrowser, &media);
+        FileBrowserInit(&loadBrowser, &media);
     }
     
     {
@@ -7306,6 +7316,7 @@ MainArgs
             Render();
             glfwSwapBuffers(window);
             Redisplay = 0;
+            if (currFileName) SaveState(headerHash);
         }
 
         if (Loading)
@@ -7369,6 +7380,8 @@ MainArgs
 
             s32 showFileBrowser = 0;
             s32 showAboutScreen = 0;
+            s32 showSaveStateScreen = 0;
+            s32 showLoadStateScreen = 0;
             static u32 currGroup1 = 0;
             static u32 currGroup2 = 0;
             static s32 currSelected1 = -1;
@@ -7397,8 +7410,10 @@ MainArgs
                         nk_contextual_end(NK_Context); 
                     } 
 
-                    nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
-                    showFileBrowser = nk_button_label(NK_Context, "Load File");
+                    nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 4);
+                    showFileBrowser = nk_button_label(NK_Context, "Load Map");
+                    showSaveStateScreen = nk_button_label(NK_Context, "Save State");
+                    showLoadStateScreen = nk_button_label(NK_Context, "Load State");
                     showAboutScreen = nk_button_label(NK_Context, "About");
 
                     nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
@@ -7859,7 +7874,7 @@ MainArgs
                     nk_end(NK_Context);
                 }
 
-                if (FileBrowserRun(&browser, NK_Context, (u32)showFileBrowser))
+                if (FileBrowserRun("Load Map", &browser, NK_Context, (u32)showFileBrowser))
                 {
                     if (!File_Loaded || !AreNullTerminatedStringsEqual(currFile, (u08 *)browser.file))
                     {
@@ -7875,6 +7890,9 @@ MainArgs
                         }
                     }
                 }
+
+                FileBrowserRun("Save State", &saveBrowser, NK_Context, (u32)showSaveStateScreen);
+                FileBrowserRun("Load State", &loadBrowser, NK_Context, (u32)showLoadStateScreen);
 
                 AboutWindowRun(NK_Context, (u32)showAboutScreen);
 
