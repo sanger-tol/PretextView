@@ -111,7 +111,7 @@ SOFTWARE.
 #define NK_INCLUDE_DEFAULT_ALLOCATOR
 #define NK_IMPLEMENTATION
 #define NK_INCLUDE_STANDARD_VARARGS
-#define NK_KEYSTATE_BASED_INPUT
+//#define NK_KEYSTATE_BASED_INPUT
 #ifndef DEBUG
 #define NK_ASSERT(x)
 #endif
@@ -3860,12 +3860,8 @@ TestFile(const char *fileName, u64 *fileSize = 0)
 }
 
 global_function
-void
-SaveState(u64 headerHash);
-
-global_function
 u08
-LoadState(u64 headerHash);
+LoadState(u64 headerHash, char *path = 0);
 
 global_function
 load_file_result
@@ -5439,6 +5435,22 @@ GLFWKeyAndScancode
 LastPressedKey = {0, 0};
 #endif
 
+global_variable
+nk_keys
+NK_Pressed_Keys[1024] = {};
+
+global_variable
+u32
+NK_Pressed_Keys_Ptr = 0;
+
+global_variable
+u32
+GatheringTextInput = 0;
+
+global_variable
+u08
+Deferred_Close_UI = 0;
+
 global_function
 void
 KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
@@ -5480,11 +5492,79 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
             }
 #endif
+            /*nk_input_key(NK_Context, NK_KEY_DEL, glfwGetKey(window, GLFW_KEY_DELETE) == GLFW_PRESS);
+            nk_input_key(NK_Context, NK_KEY_ENTER, glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS);
+            nk_input_key(NK_Context, NK_KEY_TAB, glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS);
+            nk_input_key(NK_Context, NK_KEY_BACKSPACE, glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS);
+            nk_input_key(NK_Context, NK_KEY_LEFT, glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS);
+            nk_input_key(NK_Context, NK_KEY_RIGHT, glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS);
+            nk_input_key(NK_Context, NK_KEY_UP, glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS);
+            nk_input_key(NK_Context, NK_KEY_DOWN, glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS);
+
+            if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS)
+            {
+                nk_input_key(NK_Context, NK_KEY_COPY, glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
+                nk_input_key(NK_Context, NK_KEY_PASTE, glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS);
+                nk_input_key(NK_Context, NK_KEY_CUT, glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
+                nk_input_key(NK_Context, NK_KEY_CUT, glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS);
+                nk_input_key(NK_Context, NK_KEY_SHIFT, 1);
+            } 
+            else
+            {
+                nk_input_key(NK_Context, NK_KEY_COPY, 0);
+                nk_input_key(NK_Context, NK_KEY_PASTE, 0);
+                nk_input_key(NK_Context, NK_KEY_CUT, 0);
+                nk_input_key(NK_Context, NK_KEY_SHIFT, 0);
+            }*/
+
+
             else if (key == GLFW_KEY_U)
             {
-                UI_On = !UI_On;
-                ++NK_Device->lastContextMemory[0];
-                Redisplay = 1;
+                Deferred_Close_UI = 1;
+            }
+            else if (action != GLFW_RELEASE && !GatheringTextInput)
+            {
+                nk_keys addKey = NK_KEY_NONE;
+                switch (key)
+                {
+                    case GLFW_KEY_DELETE:
+                        addKey = NK_KEY_DEL;
+                        break;
+
+                    case GLFW_KEY_ENTER:
+                        addKey = NK_KEY_ENTER;
+                        break;
+
+                    case GLFW_KEY_TAB:
+                        addKey = NK_KEY_TAB;
+                        break;
+
+                    case GLFW_KEY_BACKSPACE:
+                        addKey = NK_KEY_BACKSPACE;
+                        break;
+
+                    case GLFW_KEY_LEFT:
+                        addKey = NK_KEY_LEFT;
+                        break;
+
+                    case GLFW_KEY_RIGHT:
+                        addKey = NK_KEY_RIGHT;
+                        break;
+
+                    case GLFW_KEY_UP:
+                        addKey = NK_KEY_UP;
+                        break;
+
+                    case GLFW_KEY_DOWN:
+                        addKey = NK_KEY_DOWN;
+                        break;
+                }
+
+                if (addKey != NK_KEY_NONE)
+                {
+                    NK_Pressed_Keys[NK_Pressed_Keys_Ptr++] = addKey;
+                    if (NK_Pressed_Keys_Ptr == ArrayCount(NK_Pressed_Keys)) NK_Pressed_Keys_Ptr = 0;
+                }
             }
         }
         else
@@ -6067,9 +6147,26 @@ FileBrowserInit(struct file_browser *browser, struct media *media)
     }
 }
 
+global_variable
+char
+Save_State_Name_Buffer[1024] = {0};
+
+global_function
+void
+SetSaveStateNameBuffer(char *name)
+{
+    u32 ptr = 0;
+    while (*name) Save_State_Name_Buffer[ptr++] = *name++;
+    
+    name = (char *)".savestate_1";
+    while (*name) Save_State_Name_Buffer[ptr++] = *name++;
+
+    Save_State_Name_Buffer[ptr] = 0;
+}
+
 global_function
 u32
-FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context *ctx, u32 show)
+FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context *ctx, u32 show, u08 save = 0)
 {
 #ifndef _WIN32
     char pathSep = '/';
@@ -6128,8 +6225,9 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
         ctx->style.window.spacing.x = spacing_x;
 
         /* window layout */
+        f32 endSpace = save ? 50.0f : 0;
         total_space = nk_window_get_content_region(ctx);
-        nk_layout_row(ctx, NK_DYNAMIC, total_space.h, 2, ratio);
+        nk_layout_row(ctx, NK_DYNAMIC, total_space.h - endSpace, 2, ratio);
         nk_group_begin(ctx, "Special", NK_WINDOW_NO_SCROLLBAR);
         {
             struct nk_image home = media->icons.home;
@@ -6183,7 +6281,7 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                             struct nk_image *icon;
                             size_t fileIndex = ((size_t)j - browser->dir_count);
                             icon = MediaIconForFile(media,browser->files[fileIndex]);
-                            if (nk_button_image(ctx, *icon))
+                            if (nk_button_image(ctx, *icon) && !save)
                             {
                                 strncpy(browser->file, browser->directory, MAX_PATH_LEN);
                                 n = strlen(browser->file);
@@ -6208,9 +6306,36 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                 }
                 FileBrowserReloadDirectoryContent(browser, browser->directory);
             }
+            
             nk_group_end(ctx);
         }
 
+        if (save)
+        {
+            Deferred_Close_UI = 0;
+
+            nk_layout_row(ctx, NK_DYNAMIC, endSpace - 5.0f, 1, ratio + 1);
+            nk_group_begin(ctx, "File", NK_WINDOW_NO_SCROLLBAR);
+            {
+                f32 fileRatio[] = {0.8f, 0.1f, NK_UNDEFINED};
+                nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 35.0f, 3, fileRatio);
+
+                nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, Save_State_Name_Buffer, sizeof(Save_State_Name_Buffer), 0);
+                static u08 overwrite = 0;
+                overwrite = (u08)nk_check_label(ctx, "Override", overwrite);
+                
+                if (nk_button_label(ctx, "Save"))
+                {
+                    strncpy(browser->file, browser->directory, MAX_PATH_LEN);
+                    size_t n = strlen(browser->file);
+                    strncpy(browser->file + n, Save_State_Name_Buffer, MAX_PATH_LEN - n);
+                    ret = overwrite ? 2 : 1;
+                }
+
+                nk_group_end(ctx);
+            }
+        }
+        
         nk_style_set_font(ctx, &NK_Font->handle);
     }
     nk_end(ctx);
@@ -6471,27 +6596,33 @@ global_variable
 u08 SaveState_Magic[5] = {'p', 't', 's', 'x', '2'};
 
 global_function
-void
-SaveState(u64 headerHash)
+u08
+SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
 {
-    static u08 flipFlop = 0;
-    headerHash += (u64)flipFlop;
-    flipFlop = (flipFlop + 1) & 1;
-
-    if (!SaveState_Path)
+    if (!path)
     {
-        SetSaveStatePaths();
+        static u08 flipFlop = 0;
+        headerHash += (u64)flipFlop;
+        flipFlop = (flipFlop + 1) & 1;
+
+        if (!SaveState_Path)
+        {
+            SetSaveStatePaths();
+        }
     }
     
-    if (SaveState_Path)
+    if (path || SaveState_Path)
     {
-        ForLoop(16)
+        if (!path)
         {
-            u08 x = (u08)((headerHash >> (4 * index)) & 0xF);
-            u08 c = 'a' + x;
-            *(SaveState_Name + index) = c;
+            ForLoop(16)
+            {
+                u08 x = (u08)((headerHash >> (4 * index)) & 0xF);
+                u08 c = 'a' + x;
+                *(SaveState_Name + index) = c;
+            }
         }
-
+        
         u32 nEdits = Min(Edits_Stack_Size, Map_Editor->nEdits);
         u32 nWayp = Waypoint_Editor->nWaypointsActive;
 
@@ -6723,8 +6854,29 @@ SaveState(u64 headerHash)
             exit(1);
         }
 
-        FILE *file = fopen((const char *)SaveState_Path, "wb");
-        fwrite(SaveState_Magic, 1, sizeof(SaveState_Magic), file);
+        FILE *file;
+        if (path)
+        {
+            if (!overwrite)
+            {
+                if ((file = fopen((const char *)path, "rb")))
+                {
+                    fclose(file);
+                    return(1);
+                }
+            }
+
+            file = fopen((const char *)path, "wb");
+            fwrite(SaveState_Magic, 1, sizeof(SaveState_Magic) - 1, file);
+            fwrite("3", 1, 1, file);
+            fwrite(&headerHash, 1, 8, file);
+        }
+        else
+        {
+            file = fopen((const char *)SaveState_Path, "wb");
+            fwrite(SaveState_Magic, 1, sizeof(SaveState_Magic), file);
+        }
+        
         fwrite(&nCommpressedBytes, 1, 4, file);
         fwrite(&nFileBytes, 1, 4, file);
         fwrite(compBuff, 1, nCommpressedBytes, file);
@@ -6733,79 +6885,11 @@ SaveState(u64 headerHash)
         FreeLastPushP(Loading_Arena); // compBuff
         FreeLastPushP(Loading_Arena); // fileContents
 
-        u08 nameCache[17];
-        CopyNullTerminatedString((u08 *)SaveState_Name, (u08 *)nameCache);
-
-        *(SaveState_Name + 0) = 'p';
-        *(SaveState_Name + 1) = 't';
-        *(SaveState_Name + 2) = 'l';
-        *(SaveState_Name + 3) = 's';
-        *(SaveState_Name + 4) = 'n';
-        *(SaveState_Name + 5) = '\0';
-
-        file = fopen((const char *)SaveState_Path, "wb");
-        fwrite((u08 *)nameCache, 1, sizeof(nameCache), file);
-        fclose(file);
-    }
-}
-
-global_function
-u08
-LoadState(u64 headerHash)
-{
-    if (!SaveState_Path)
-    {
-        SetSaveStatePaths();
-    }
-    
-    if (SaveState_Path)
-    {
-        ForLoop(16)
+        if (!path)
         {
-            u08 x = (u08)((headerHash >> (4 * index)) & 0xF);
-            u08 c = 'a' + x;
-            *(SaveState_Name + index) = c;
-        }
-        
-        u32 fullLoad = 2;
-        FILE *file = 0;
-        if ((file = fopen((const char *)SaveState_Path, "rb")))
-        {
-            u08 magicTest[sizeof(SaveState_Magic)];
+            u08 nameCache[17];
+            CopyNullTerminatedString((u08 *)SaveState_Name, (u08 *)nameCache);
 
-            u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
-            if (bytesRead == sizeof(magicTest))
-            {
-                ForLoop(sizeof(SaveState_Magic) - 1)
-                {
-                    if (SaveState_Magic[index] != magicTest[index])
-                    {
-                        fclose(file);
-                        file = 0;
-                        break;
-                    }
-                }
-                if (file)
-                {
-                    if (magicTest[sizeof(SaveState_Magic)-1] == '2') fullLoad = 2;
-                    else if (magicTest[sizeof(SaveState_Magic)-1] == '1') fullLoad = 1;
-                    else
-                    {
-                        fclose(file);
-                        file = 0;
-                    }
-                }
-            }
-            else
-            {
-                fclose(file);
-                file = 0;
-            }
-        }
-        else
-        {
-            fullLoad = 0;
-            u08 nameCache[16];
             *(SaveState_Name + 0) = 'p';
             *(SaveState_Name + 1) = 't';
             *(SaveState_Name + 2) = 'l';
@@ -6813,40 +6897,65 @@ LoadState(u64 headerHash)
             *(SaveState_Name + 4) = 'n';
             *(SaveState_Name + 5) = '\0';
 
-            if ((file = fopen((const char *)SaveState_Path, "rb")))
-            {
-                if (fread((u08 *)nameCache, 1, sizeof(nameCache), file) == sizeof(nameCache))
-                {
-                    fclose(file);
-                    file = 0;
-                    ForLoop(16)
-                    {
-                        *(SaveState_Name + index) = nameCache[index];
-                    }
-                    if ((file = fopen((const char *)SaveState_Path, "rb")))
-                    {
-                        u08 magicTest[sizeof(SaveState_Magic)];
+            file = fopen((const char *)SaveState_Path, "wb");
+            fwrite((u08 *)nameCache, 1, sizeof(nameCache), file);
+            fclose(file);
+        }
+    }
 
-                        u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
-                        if (bytesRead == sizeof(magicTest))
+    return(0);
+}
+
+global_function
+u08
+LoadState(u64 headerHash, char *path)
+{
+    if (!path && !SaveState_Path)
+    {
+        SetSaveStatePaths();
+    }
+    
+    if (path || SaveState_Path)
+    {
+        FILE *file = 0;
+        u32 fullLoad = 2;
+        
+        if (path)
+        {
+            if ((file = fopen((const char *)path, "rb")))
+            {
+                u08 magicTest[sizeof(SaveState_Magic)];
+
+                u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
+                if (bytesRead == sizeof(magicTest))
+                {
+                    ForLoop(sizeof(SaveState_Magic) - 1)
+                    {
+                        if (SaveState_Magic[index] != magicTest[index])
                         {
-                            ForLoop(sizeof(SaveState_Magic))
-                            {
-                                if (SaveState_Magic[index] != magicTest[index])
-                                {
-                                    fclose(file);
-                                    file = 0;
-                                    break;
-                                }
-                            }
+                            fclose(file);
+                            file = 0;
+                            break;
                         }
-                        else
+                    }
+                    if (file)
+                    {
+                        if (magicTest[sizeof(SaveState_Magic)-1] != '3')
                         {
                             fclose(file);
                             file = 0;
                         }
+                        else
+                        {
+                            u64 hashTest;
+                            bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
+                            if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
+                            {
+                                fclose(file);
+                                file = 0;
+                            }
+                        }
                     }
-
                 }
                 else
                 {
@@ -6855,7 +6964,103 @@ LoadState(u64 headerHash)
                 }
             }
         }
+        else
+        {
+            ForLoop(16)
+            {
+                u08 x = (u08)((headerHash >> (4 * index)) & 0xF);
+                u08 c = 'a' + x;
+                *(SaveState_Name + index) = c;
+            }
 
+            if ((file = fopen((const char *)SaveState_Path, "rb")))
+            {
+                u08 magicTest[sizeof(SaveState_Magic)];
+
+                u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
+                if (bytesRead == sizeof(magicTest))
+                {
+                    ForLoop(sizeof(SaveState_Magic) - 1)
+                    {
+                        if (SaveState_Magic[index] != magicTest[index])
+                        {
+                            fclose(file);
+                            file = 0;
+                            break;
+                        }
+                    }
+                    if (file)
+                    {
+                        if (magicTest[sizeof(SaveState_Magic)-1] == '2') fullLoad = 2;
+                        else if (magicTest[sizeof(SaveState_Magic)-1] == '1') fullLoad = 1;
+                        else
+                        {
+                            fclose(file);
+                            file = 0;
+                        }
+                    }
+                }
+                else
+                {
+                    fclose(file);
+                    file = 0;
+                }
+            }
+            else
+            {
+                fullLoad = 0;
+                u08 nameCache[16];
+                *(SaveState_Name + 0) = 'p';
+                *(SaveState_Name + 1) = 't';
+                *(SaveState_Name + 2) = 'l';
+                *(SaveState_Name + 3) = 's';
+                *(SaveState_Name + 4) = 'n';
+                *(SaveState_Name + 5) = '\0';
+
+                if ((file = fopen((const char *)SaveState_Path, "rb")))
+                {
+                    if (fread((u08 *)nameCache, 1, sizeof(nameCache), file) == sizeof(nameCache))
+                    {
+                        fclose(file);
+                        file = 0;
+                        ForLoop(16)
+                        {
+                            *(SaveState_Name + index) = nameCache[index];
+                        }
+                        if ((file = fopen((const char *)SaveState_Path, "rb")))
+                        {
+                            u08 magicTest[sizeof(SaveState_Magic)];
+
+                            u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
+                            if (bytesRead == sizeof(magicTest))
+                            {
+                                ForLoop(sizeof(SaveState_Magic))
+                                {
+                                    if (SaveState_Magic[index] != magicTest[index])
+                                    {
+                                        fclose(file);
+                                        file = 0;
+                                        break;
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                fclose(file);
+                                file = 0;
+                            }
+                        }
+
+                    }
+                    else
+                    {
+                        fclose(file);
+                        file = 0;
+                    }
+                }
+            }
+        }
+        
         if (file)
         {
             u32 nBytesComp;
@@ -7020,6 +7225,7 @@ LoadState(u64 headerHash)
                     u08 *contigFlags = fileContents + (6 * nEdits);
                     u32 nContigFlags = ((u32)nEdits + 7) >> 3;
 
+                    ForLoop(Min(Edits_Stack_Size, Map_Editor->nEdits)) UndoMapEdit();
                     ForLoop(nEdits)
                     {
                         u16 x;
@@ -7053,6 +7259,12 @@ LoadState(u64 headerHash)
 
                 // waypoints
                 {
+                    TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
+                    {
+                        waypoint *tmp = node->prev;
+                        RemoveWayPoint(node);
+                        node = tmp;
+                    }
                     u08 nWayp = *fileContents++;
                     ++nBytesRead;
 
@@ -7117,16 +7329,24 @@ LoadState(u64 headerHash)
 
 global_variable
 u32
-GatheringTextInput = 0;
+Global_Text_Buffer[1024] = {0};
+
+global_variable
+u32
+Global_Text_Buffer_Ptr = 0;
 
 global_function
 void
 TextInput(GLFWwindow* window, u32 codepoint)
 {
-    if (GatheringTextInput)
+    if (!GatheringTextInput)
     {
         (void)window;
-        nk_input_unicode(NK_Context, codepoint); 
+        
+        Global_Text_Buffer[Global_Text_Buffer_Ptr++] = codepoint;
+        
+        if (Global_Text_Buffer_Ptr == ArrayCount(Global_Text_Buffer)) Global_Text_Buffer_Ptr = 0;
+        //nk_input_unicode(NK_Context, codepoint); 
     }
 }
 
@@ -7278,7 +7498,11 @@ MainArgs
     if (initWithFile)
     {
         UI_On = LoadFile((const char *)currFile, Loading_Arena, (char **)&currFileName, &headerHash) == ok ? 0 : 1;
-        if (currFileName) glfwSetWindowTitle(window, (const char *)currFileName);
+        if (currFileName)
+        {
+            glfwSetWindowTitle(window, (const char *)currFileName);
+            FenceIn(SetSaveStateNameBuffer((char *)currFileName));
+        }
     }
     else
     {
@@ -7323,7 +7547,11 @@ MainArgs
         {
             if (currFileName) SaveState(headerHash);
             LoadFile((const char *)currFile, Loading_Arena, (char **)&currFileName, &headerHash);
-            if (currFileName) glfwSetWindowTitle(window, (const char *)currFileName);
+            if (currFileName)
+            {
+                glfwSetWindowTitle(window, (const char *)currFileName);
+                FenceIn(SetSaveStateNameBuffer((char *)currFileName));
+            }
             glfwPollEvents();
             Loading = 0;
             Redisplay = 1;
@@ -7337,7 +7565,7 @@ MainArgs
             GatheringTextInput = 1;
             glfwPollEvents();
 
-            nk_input_key(NK_Context, NK_KEY_DEL, glfwGetKey(window, GLFW_KEY_DELETE) == GLFW_PRESS);
+            /*nk_input_key(NK_Context, NK_KEY_DEL, glfwGetKey(window, GLFW_KEY_DELETE) == GLFW_PRESS);
             nk_input_key(NK_Context, NK_KEY_ENTER, glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS);
             nk_input_key(NK_Context, NK_KEY_TAB, glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS);
             nk_input_key(NK_Context, NK_KEY_BACKSPACE, glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS);
@@ -7360,7 +7588,7 @@ MainArgs
                 nk_input_key(NK_Context, NK_KEY_PASTE, 0);
                 nk_input_key(NK_Context, NK_KEY_CUT, 0);
                 nk_input_key(NK_Context, NK_KEY_SHIFT, 0);
-            }
+            }*/
             
             nk_input_scroll(NK_Context, NK_Scroll);
             NK_Scroll.x = 0;
@@ -7374,7 +7602,13 @@ MainArgs
             nk_input_button(NK_Context, NK_BUTTON_LEFT, (s32)x, (s32)y, glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
             nk_input_button(NK_Context, NK_BUTTON_MIDDLE, (s32)x, (s32)y, glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS);
             nk_input_button(NK_Context, NK_BUTTON_RIGHT, (s32)x, (s32)y, glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
-           
+          
+            ForLoop(NK_Pressed_Keys_Ptr) nk_input_key(NK_Context, NK_Pressed_Keys[index], 1);
+            NK_Pressed_Keys_Ptr = 0;
+            
+            ForLoop(Global_Text_Buffer_Ptr) nk_input_unicode(NK_Context, Global_Text_Buffer[index]);
+            Global_Text_Buffer_Ptr = 0;
+
             GatheringTextInput = 0;
             nk_input_end(NK_Context);
 
@@ -7412,8 +7646,11 @@ MainArgs
 
                     nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 4);
                     showFileBrowser = nk_button_label(NK_Context, "Load Map");
-                    showSaveStateScreen = nk_button_label(NK_Context, "Save State");
-                    showLoadStateScreen = nk_button_label(NK_Context, "Load State");
+                    if (currFileName)
+                    {
+                        showSaveStateScreen = nk_button_label(NK_Context, "Save State");
+                        showLoadStateScreen = nk_button_label(NK_Context, "Load State");
+                    }
                     showAboutScreen = nk_button_label(NK_Context, "About");
 
                     nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
@@ -7891,10 +8128,27 @@ MainArgs
                     }
                 }
 
-                FileBrowserRun("Save State", &saveBrowser, NK_Context, (u32)showSaveStateScreen);
-                FileBrowserRun("Load State", &loadBrowser, NK_Context, (u32)showLoadStateScreen);
+                if (currFileName)
+                {
+                    u32 state;
+                    if ((state = FileBrowserRun("Save State", &saveBrowser, NK_Context, (u32)showSaveStateScreen, 1))) 
+                    {
+                        SaveState(headerHash, saveBrowser.file, state == 2 ? 1 : 0);
+                        FileBrowserReloadDirectoryContent(&saveBrowser, saveBrowser.directory);
+                    }
+                    
+                    if (FileBrowserRun("Load State", &loadBrowser, NK_Context, (u32)showLoadStateScreen)) LoadState(headerHash, loadBrowser.file);
+                }
 
                 AboutWindowRun(NK_Context, (u32)showAboutScreen);
+
+                if (Deferred_Close_UI)
+                {
+                    UI_On = 0;
+                    ++NK_Device->lastContextMemory[0];
+                    Redisplay = 1;
+                    Deferred_Close_UI = 0;
+                }
 
                 void *cmds = nk_buffer_memory(&NK_Context->memory);
                 if (memcmp(cmds, NK_Device->lastContextMemory, NK_Context->memory.allocated))
