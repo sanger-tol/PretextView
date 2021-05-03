@@ -916,6 +916,9 @@ struct
 original_contig
 {
     u32 name[16];
+    u16 *contigMapPixels;
+    u32 nContigs;
+    u32 pad;
 };
 
 global_variable
@@ -971,18 +974,23 @@ UpdateContigsFromMapState()
     u16 startCoord = lastCoord;
     u08 inverted = Map_State->contigRelCoords[1] < lastCoord;
     Map_State->contigIds[0] = 0;
+    
+    u32 pixelIdx;
+    ForLoop(Number_of_Original_Contigs) (Original_Contigs + index)->nContigs = 0;
     ForLoop(Number_of_Pixels_1D - 1)
     {
         if (contigPtr == Max_Number_of_Contigs) break;
 
         ++length;
 
-        u32 pixelIdx = index + 1;
+        pixelIdx = index + 1;
         u16 id = Map_State->originalContigIds[pixelIdx];
         u16 coord = Map_State->contigRelCoords[pixelIdx];
 
         if (id != lastId || (inverted && coord != (lastCoord - 1)) || (!inverted && coord != (lastCoord + 1)))
         {
+            (Original_Contigs + lastId)->contigMapPixels[(Original_Contigs + lastId)->nContigs++] = pixelIdx - 1;
+
             contig *cont = Contigs->contigs + contigPtr++;
             cont->originalContigId = lastId;
             cont->length = inverted ? -length : length;
@@ -1000,6 +1008,8 @@ UpdateContigsFromMapState()
 
     if (contigPtr < Max_Number_of_Contigs)
     {
+        (Original_Contigs + lastId)->contigMapPixels[(Original_Contigs + lastId)->nContigs++] = pixelIdx - 1;
+
         ++length;
         contig *cont = Contigs->contigs + contigPtr++;
         cont->originalContigId = lastId;
@@ -4012,6 +4022,9 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             {
                 Original_Contigs[index].name[index2] = name[index2];
             }
+
+            (Original_Contigs + index)->contigMapPixels = PushArrayP(arena, u16, Number_of_Pixels_1D);
+            (Original_Contigs + index)->nContigs = 0;
         }
 
         u08 textureRes = *header++;
@@ -8055,7 +8068,39 @@ MainArgs
                                 nk_tree_pop(NK_Context);
                             }
                         }
-                        
+                       
+                        {
+                            nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
+                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "GoTo", NK_MINIMIZED))
+                            {
+                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
+
+                                ForLoop(Number_of_Original_Contigs)
+                                {
+                                    original_contig *cont = Original_Contigs + index;
+
+                                    if (nk_tree_push_id(NK_Context, NK_TREE_TAB, (char *)cont->name, NK_MINIMIZED, index))
+                                    {
+                                        ForLoop2(cont->nContigs)
+                                        {
+                                            char buff[4];
+                                            stbsp_snprintf((char *)buff, sizeof(buff), "%u", index2 + 1);
+                                            if (nk_button_label(NK_Context, (char *)buff))
+                                            {
+                                                f32 pos = (f32)((f64)cont->contigMapPixels[index2] / (f64)Number_of_Pixels_1D) - 0.5f;
+                                                Camera_Position.x = pos;
+                                                Camera_Position.y = -pos;
+                                            }
+                                        }
+                                        
+                                        nk_tree_pop(NK_Context);
+                                    }
+                                }
+
+                                nk_tree_pop(NK_Context);
+                            }
+                        }
+
                         {
                             if (Extensions.head)
                             {
@@ -8113,8 +8158,6 @@ MainArgs
                                     nk_tree_pop(NK_Context);
                                 }
                             }
-
-
                         }
                     }
 
