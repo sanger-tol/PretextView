@@ -1529,8 +1529,6 @@ global_function
 void
 AddWayPoint(point2f coords)
 {
-    coords = {Max(coords.x, 0.0f), Max(coords.y, 0.0f)};
-
     u32 nFree = Waypoints_Stack_Size - Waypoint_Editor->nWaypointsActive;
 
     if (nFree)
@@ -1850,6 +1848,10 @@ global_variable
 u08
 Mouse_Invert = 0;
 
+global_variable
+u08
+Deferred_Close_UI = 0;
+
 global_function
 void
 Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
@@ -1871,9 +1873,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
     {
         if (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS)
         {
-            UI_On = !UI_On;
-            Mouse_Move.x = Mouse_Move.y = -1;
-            ++NK_Device->lastContextMemory[0];
+            Deferred_Close_UI = 1;
         }
     }
     else
@@ -2585,7 +2585,7 @@ Render()
     }
 
     // Text / UI Rendering
-    if (Contig_Name_Labels->on || Scale_Bars->on || Tool_Tip->on || UI_On || Loading || Edit_Mode || Waypoint_Edit_Mode)
+    if (Contig_Name_Labels->on || Scale_Bars->on || Tool_Tip->on || UI_On || Loading || Edit_Mode || Waypoint_Edit_Mode || Waypoints_Always_Visible)
     {
         f32 textNormalMat[16];
         f32 textRotMat[16];
@@ -5447,10 +5447,6 @@ global_variable
 u32
 GatheringTextInput = 0;
 
-global_variable
-u08
-Deferred_Close_UI = 0;
-
 global_function
 void
 KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
@@ -6281,12 +6277,19 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                             struct nk_image *icon;
                             size_t fileIndex = ((size_t)j - browser->dir_count);
                             icon = MediaIconForFile(media,browser->files[fileIndex]);
-                            if (nk_button_image(ctx, *icon) && !save)
+                            if (nk_button_image(ctx, *icon))
                             {
-                                strncpy(browser->file, browser->directory, MAX_PATH_LEN);
-                                n = strlen(browser->file);
-                                strncpy(browser->file + n, browser->files[fileIndex], MAX_PATH_LEN - n);
-                                ret = 1;
+                                if (save)
+                                {
+                                    strncpy(Save_State_Name_Buffer, browser->files[fileIndex], sizeof(Save_State_Name_Buffer));
+                                }
+                                else
+                                {
+                                    strncpy(browser->file, browser->directory, MAX_PATH_LEN);
+                                    n = strlen(browser->file);
+                                    strncpy(browser->file + n, browser->files[fileIndex], MAX_PATH_LEN - n);
+                                    ret = 1;
+                                }
                             }
                             nk_label(ctx,browser->files[fileIndex],NK_TEXT_LEFT);
                         }
@@ -6320,11 +6323,11 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                 f32 fileRatio[] = {0.8f, 0.1f, NK_UNDEFINED};
                 nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 35.0f, 3, fileRatio);
 
-                nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD, Save_State_Name_Buffer, sizeof(Save_State_Name_Buffer), 0);
+                u08 saveViaEnter = (nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, Save_State_Name_Buffer, sizeof(Save_State_Name_Buffer), 0) & NK_EDIT_COMMITED) ? 1 : 0;
                 static u08 overwrite = 0;
                 overwrite = (u08)nk_check_label(ctx, "Override", overwrite);
                 
-                if (nk_button_label(ctx, "Save"))
+                if (nk_button_label(ctx, "Save") || saveViaEnter)
                 {
                     strncpy(browser->file, browser->directory, MAX_PATH_LEN);
                     size_t n = strlen(browser->file);
@@ -6872,7 +6875,8 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
                 }
             }
 
-            file = fopen((const char *)path, "wb");
+            if (!(file = fopen((const char *)path, "wb"))) return(1);
+
             fwrite(SaveState_Magic, 1, sizeof(SaveState_Magic) - 1, file);
             fwrite("3", 1, 1, file);
             fwrite(&headerHash, 1, 8, file);
