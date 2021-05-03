@@ -6798,8 +6798,14 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
         // waypoints
         {
             *fileWriter++ = (u08)nWayp;
+#ifdef DEBUG
+            u08 breakHere = 0;
+            if (path)
+                breakHere = 1;
+            (void)breakHere;
+#endif
 
-            u32 ptr = 309 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
+            u32 ptr = 312 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
             TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
             {
                 f32 x = node->coords.x;
