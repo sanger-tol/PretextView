@@ -933,13 +933,14 @@ struct
 contig
 {
     u16 originalContigId;
-    s16 length;
+    u16 length;
     u16 startCoord;
 };
 
 struct
 contigs
 {
+    u08 *contigInvertFlags;
     contig *contigs;
     u32 numberOfContigs;
     u32 pad;
@@ -948,6 +949,13 @@ contigs
 global_variable
 contigs *
 Contigs;
+
+global_function
+u08
+IsContigInverted(u32 index)
+{
+    return(Contigs->contigInvertFlags[index >> 3] & (1 << (index & 7)));
+}
 
 #define Max_Number_of_Contigs 4096
 
@@ -970,12 +978,12 @@ UpdateContigsFromMapState()
     u16 lastId = Map_State->originalContigIds[0];
     u16 lastCoord = Map_State->contigRelCoords[0];
     u32 contigPtr = 0;
-    s16 length = 0;
+    u16 length = 0;
     u16 startCoord = lastCoord;
     u08 inverted = Map_State->contigRelCoords[1] < lastCoord;
     Map_State->contigIds[0] = 0;
     
-    u32 pixelIdx;
+    u32 pixelIdx = 0;
     ForLoop(Number_of_Original_Contigs) (Original_Contigs + index)->nContigs = 0;
     ForLoop(Number_of_Pixels_1D - 1)
     {
@@ -989,12 +997,21 @@ UpdateContigsFromMapState()
 
         if (id != lastId || (inverted && coord != (lastCoord - 1)) || (!inverted && coord != (lastCoord + 1)))
         {
-            (Original_Contigs + lastId)->contigMapPixels[(Original_Contigs + lastId)->nContigs++] = pixelIdx - 1;
+            (Original_Contigs + lastId)->contigMapPixels[(Original_Contigs + lastId)->nContigs++] = pixelIdx - 1 - (length >> 1);
 
             contig *cont = Contigs->contigs + contigPtr++;
             cont->originalContigId = lastId;
-            cont->length = inverted ? -length : length;
+            cont->length = length;
             cont->startCoord = startCoord;
+    
+            if (IsContigInverted(contigPtr - 1))
+            {
+                if (!inverted) Contigs->contigInvertFlags[(contigPtr - 1) >> 3] &= ~(1 << ((contigPtr - 1) & 7));
+            }
+            else
+            {
+                if (inverted) Contigs->contigInvertFlags[(contigPtr - 1) >> 3] |= (1 << ((contigPtr - 1) & 7));
+            }
 
             startCoord = coord;
             length = 0;
@@ -1008,13 +1025,22 @@ UpdateContigsFromMapState()
 
     if (contigPtr < Max_Number_of_Contigs)
     {
-        (Original_Contigs + lastId)->contigMapPixels[(Original_Contigs + lastId)->nContigs++] = pixelIdx - 1;
+        (Original_Contigs + lastId)->contigMapPixels[(Original_Contigs + lastId)->nContigs++] = pixelIdx - 1 - (length >> 1);
 
         ++length;
         contig *cont = Contigs->contigs + contigPtr++;
         cont->originalContigId = lastId;
-        cont->length = inverted ? -length : length;
+        cont->length = length;
         cont->startCoord = startCoord;
+
+        if (IsContigInverted(contigPtr - 1))
+        {
+            if (!inverted) Contigs->contigInvertFlags[(contigPtr - 1) >> 3] &= ~(1 << ((contigPtr - 1) & 7));
+        }
+        else
+        {
+            if (inverted) Contigs->contigInvertFlags[(contigPtr - 1) >> 3] |= (1 << ((contigPtr - 1) & 7));
+        }
     }
 
     Contigs->numberOfContigs = contigPtr;
@@ -2453,7 +2479,7 @@ Render()
         {
             contig *cont = Contigs->contigs + index;
 
-            position += ((f32)Abs(cont->length) / (f32)Number_of_Pixels_1D);
+            position += ((f32)cont->length / (f32)Number_of_Pixels_1D);
             f32 px = x + lineWidth;
             x = position - (0.5f * (lineWidth + 1.0f));
 
@@ -2510,7 +2536,7 @@ Render()
         {
             contig *cont = Contigs->contigs + index;
 
-            position += ((f32)Abs(cont->length) / (f32)Number_of_Pixels_1D);
+            position += ((f32)cont->length / (f32)Number_of_Pixels_1D);
             f32 py = y - lineWidth;
             y = 1.0f - position + (0.5f * (lineWidth - 1.0f));
 
@@ -2566,13 +2592,13 @@ Render()
         {
             contig *cont = Contigs->contigs + index;
 
-            position += ((f32)Abs(cont->length) / (f32)Number_of_Pixels_1D);
+            position += ((f32)cont->length / (f32)Number_of_Pixels_1D);
             f32 py = y - lineWidth;
             y = 1.0f - position + (0.5f * (lineWidth - 1.0f));
 
             if (y < py)
             {
-                u32 invert = cont->length < 0;
+                u32 invert = IsContigInverted(index);
 
                 vert[0].x = -py;
                 vert[0].y = invert ? y : (py + lineWidth);
@@ -2658,7 +2684,7 @@ Render()
             {
                 contig *cont = Contigs->contigs + index;
                 
-                totalLength += (f32)((f64)Abs(cont->length) / (f64)Number_of_Pixels_1D);
+                totalLength += (f32)((f64)cont->length / (f64)Number_of_Pixels_1D);
 
                 f32 rightPixel = ModelXToScreen(totalLength - 0.5f);
 
@@ -2711,7 +2737,7 @@ Render()
             {
                 contig *cont = Contigs->contigs + index;
                 
-                totalLength += (f32)((f64)Abs(cont->length) / (f64)Number_of_Pixels_1D);
+                totalLength += (f32)((f64)cont->length / (f64)Number_of_Pixels_1D);
 
                 f32 bottomPixel = ModelYToScreen(0.5f - totalLength);
 
@@ -2800,11 +2826,11 @@ Render()
             {
                 contig *cont = Contigs->contigs + index;
                 
-                totalLength += (f32)((f64)Abs(cont->length) / (f64)Number_of_Pixels_1D);
+                totalLength += (f32)((f64)cont->length / (f64)Number_of_Pixels_1D);
                 rightPixel = ModelXToScreen(totalLength - 0.5f);
 
                 f32 pixelLength = rightPixel - leftPixel;
-                f32 startCoord = (f32)((f64)(cont->length > 0 ? cont->startCoord : (s16)cont->startCoord + cont->length) * (f64)Total_Genome_Length / (f64)Number_of_Pixels_1D);
+                f32 startCoord = (f32)((f64)(IsContigInverted(index) ? (cont->startCoord - cont->length) : cont->startCoord) * (f64)Total_Genome_Length / (f64)Number_of_Pixels_1D);
 
                 u32 labelLevels = SubDivideScaleBar(leftPixel, rightPixel, (leftPixel + rightPixel) * 0.5f, bpPerPixel, startCoord);
                 u32 labels = 0;
@@ -2875,7 +2901,7 @@ Render()
                             glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
                             char buff[16];
-                            stbsp_snprintf(buff, 16, "%$.2f", (f64)(startCoord + (pixelLength * (cont->length > 0 ? distance : (1.0f - distance)) * bpPerPixel)));
+                            stbsp_snprintf(buff, 16, "%$.2f", (f64)(startCoord + (pixelLength * (IsContigInverted(index) ? (1.0f - distance) : distance) * bpPerPixel)));
                             glUseProgram(UI_Shader->shaderProgram);
                             fonsDrawText(FontStash_Context, x, y + scaleBarWidth + tickLength + 1.0f, buff, 0);
                         }
@@ -4072,6 +4098,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         Contigs = PushStructP(arena, contigs);
         Contigs->contigs = PushArrayP(arena, contig, Max_Number_of_Contigs);
+        Contigs->contigInvertFlags = PushArrayP(arena, u08, (Max_Number_of_Contigs + 7) >> 3);
 
         UpdateContigsFromMapState();
 
@@ -5220,7 +5247,8 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
             if (targetContigId)
             {
                 contig *targetContig = Contigs->contigs + targetContigId - 1;
-                u16 targetCoord = (u16)((s16)targetContig->startCoord + targetContig->length + (targetContig->length > 0 ? -1 : 1));
+                
+                u16 targetCoord = IsContigInverted(targetContigId - 1) ? (targetContig->startCoord - targetContig->length + 1) : (targetContig->startCoord + targetContig->length - 1);
                 while (delta > 0 && (Map_State->contigIds[target] != targetContigId - 1 || Map_State->contigRelCoords[target] != targetCoord))
                 {
                     --target;
@@ -7986,9 +8014,12 @@ MainArgs
                         {
                             nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
 
-                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "Edits", NK_MINIMIZED))
+                            u32 nEdits = Min(Edits_Stack_Size, Map_Editor->nEdits);
+                            char buff[128];
+                            stbsp_snprintf((char *)buff, sizeof(buff), "Edits (%u)", nEdits);
+                            
+                            if (nk_tree_push(NK_Context, NK_TREE_TAB, (char *)buff, NK_MINIMIZED))
                             {
-                                u32 nEdits = Min(Edits_Stack_Size, Map_Editor->nEdits);
                                 u32 editStackPtr = Map_Editor->editStackPtr == nEdits ? 0 : Map_Editor->editStackPtr;
 
                                 f64 bpPerPixel = (f64)Total_Genome_Length / (f64)(Number_of_Textures_1D * Texture_Resolution);
@@ -8002,8 +8033,6 @@ MainArgs
 
                                     map_edit *edit = Map_Editor->edits + editStackPtr;
 
-                                    char buff[128];
-                                    
                                     u16 start = Min(edit->finalPix1, edit->finalPix2);
                                     u16 end = Max(edit->finalPix1, edit->finalPix2);
                                     u16 to = start ? start - 1 : (end < (Number_of_Pixels_1D - 1) ? end + 1 : end);
@@ -8079,11 +8108,13 @@ MainArgs
                                 {
                                     original_contig *cont = Original_Contigs + index;
 
-                                    if (nk_tree_push_id(NK_Context, NK_TREE_TAB, (char *)cont->name, NK_MINIMIZED, index))
+                                    char buff[128];
+                                    stbsp_snprintf((char *)buff, sizeof(buff), "%s (%u)", (char *)cont->name, cont->nContigs);
+
+                                    if (nk_tree_push_id(NK_Context, NK_TREE_TAB, (char *)buff, NK_MINIMIZED, index))
                                     {
                                         ForLoop2(cont->nContigs)
                                         {
-                                            char buff[4];
                                             stbsp_snprintf((char *)buff, sizeof(buff), "%u", index2 + 1);
                                             if (nk_button_label(NK_Context, (char *)buff))
                                             {
