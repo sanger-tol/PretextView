@@ -1046,6 +1046,118 @@ UpdateContigsFromMapState()
     Contigs->numberOfContigs = contigPtr;
 }
 
+global_function
+void
+AddMapEdit(s32 delta, pointui finalPixels, u32 invert);
+
+global_function
+void
+RebuildContig(u16 pixel)
+{
+    for (;;)
+    {
+        u16 contigId = Map_State->contigIds[pixel];
+        u16 origContigId = Map_State->originalContigIds[pixel];
+
+        u32 top = (u32)pixel;
+        while (top && (Map_State->contigIds[top - 1] == contigId)) --top;
+
+        u32 bottom = (u32)pixel;
+        while ((bottom < (Number_of_Pixels_1D - 1)) && (Map_State->contigIds[bottom + 1] == contigId)) ++bottom;
+
+        if (IsContigInverted(contigId))
+        {
+            InvertMap(top, bottom);
+            AddMapEdit(0, {top, bottom}, 1);
+            continue;
+        }
+
+        u08 fragmented = 0;
+        ForLoop(Number_of_Pixels_1D)
+        {
+            if ((Map_State->contigIds[index] != contigId) && (Map_State->originalContigIds[index] == origContigId))
+            {
+                fragmented = 1;
+                break;
+            }
+        }
+
+        if (fragmented)
+        {
+            u16 contigTopCoord = Map_State->contigRelCoords[top];
+            if (contigTopCoord)
+            {
+                u32 otherPixel = 0;
+                ForLoop(Number_of_Pixels_1D)
+                {
+                    if ((Map_State->originalContigIds[index] == origContigId) && (Map_State->contigRelCoords[index] == (contigTopCoord - 1)))
+                    {
+                        otherPixel = index;
+                        break;
+                    }
+                }
+
+                u08 invert = !otherPixel || (Map_State->contigIds[otherPixel - 1] != Map_State->contigIds[otherPixel]);
+                u32 otherPixel2 = otherPixel;
+
+                if (invert)
+                {
+                    while ((otherPixel < (Number_of_Pixels_1D - 1)) && (Map_State->contigIds[otherPixel + 1] == Map_State->contigIds[otherPixel2])) ++otherPixel;
+                }
+                else
+                {
+                    while (otherPixel2 && (Map_State->contigIds[otherPixel2 - 1] == Map_State->contigIds[otherPixel])) --otherPixel2;
+                }
+
+                s32 delta = (s32)top - (s32)otherPixel;
+                if (delta > 0) --delta;
+                else delta = (s32)top - (s32)otherPixel2;
+                pointui finalPixels = {(u32)((s32)otherPixel2 + delta), (u32)((s32)otherPixel + delta)};
+                RearrangeMap(otherPixel2, otherPixel, delta);
+                if (invert) InvertMap(finalPixels.x, finalPixels.y);
+                AddMapEdit(delta, finalPixels, invert);
+            }
+            else
+            {
+                u16 contigBottomCoord = Map_State->contigRelCoords[bottom];
+
+                u32 otherPixel = 0;
+                ForLoop(Number_of_Pixels_1D)
+                {
+                    if ((Map_State->originalContigIds[index] == origContigId) && (Map_State->contigRelCoords[index] == (contigBottomCoord + 1)))
+                    {
+                        otherPixel = index;
+                        break;
+                    }
+                }
+
+                u08 invert = (otherPixel == (Number_of_Pixels_1D - 1)) || (Map_State->contigIds[otherPixel + 1] != Map_State->contigIds[otherPixel]);
+                u32 otherPixel2 = otherPixel;
+
+                if (!invert)
+                {
+                    while ((otherPixel < (Number_of_Pixels_1D - 1)) && (Map_State->contigIds[otherPixel + 1] == Map_State->contigIds[otherPixel2])) ++otherPixel;
+                }
+                else
+                {
+                    while (otherPixel2 && (Map_State->contigIds[otherPixel2 - 1] == Map_State->contigIds[otherPixel])) --otherPixel2;
+                }
+
+                s32 delta = (s32)bottom - (s32)otherPixel2;
+                if (delta < 0) ++delta;
+                else delta = (s32)bottom - (s32)otherPixel;
+                pointui finalPixels = {(u32)((s32)otherPixel2 + delta), (u32)((s32)otherPixel + delta)};
+                RearrangeMap(otherPixel2, otherPixel, delta);
+                if (invert) InvertMap(finalPixels.x, finalPixels.y);
+                AddMapEdit(delta, finalPixels, invert);
+            }
+
+            continue;
+        }
+        else break;
+    }
+}
+
 struct
 map_edit
 {
@@ -8113,6 +8225,8 @@ MainArgs
 
                                     if (nk_tree_push_id(NK_Context, NK_TREE_TAB, (char *)buff, NK_MINIMIZED, index))
                                     {
+                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
+
                                         ForLoop2(cont->nContigs)
                                         {
                                             stbsp_snprintf((char *)buff, sizeof(buff), "%u", index2 + 1);
@@ -8122,6 +8236,8 @@ MainArgs
                                                 Camera_Position.x = pos;
                                                 Camera_Position.y = -pos;
                                             }
+
+                                            if (nk_button_label(NK_Context, "Rebuild")) RebuildContig(cont->contigMapPixels[index2]);
                                         }
                                         
                                         nk_tree_pop(NK_Context);
