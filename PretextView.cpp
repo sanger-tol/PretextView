@@ -618,6 +618,10 @@ Contig_ColourBar_Data;
 
 global_variable
 quad_data *
+Scaff_Bar_Data;
+
+global_variable
+quad_data *
 Edit_Mode_Data;
 
 global_variable
@@ -795,6 +799,10 @@ global_variable
 u32
 Waypoints_Always_Visible = 1;
 
+global_variable
+u08
+Scaffs_Always_Visible = 1;
+
 struct
 ui_colour_element
 {
@@ -849,6 +857,18 @@ global_variable
 waypoint_mode_data *
 Waypoint_Mode_Data;
 
+struct
+scaff_mode_data
+{
+    nk_colorf text;
+    nk_colorf bg;
+    f32 size;
+};
+
+global_variable
+scaff_mode_data *
+Scaff_Mode_Data;
+
 global_variable
 u32
 UI_On = 0;
@@ -858,7 +878,8 @@ global_mode
 {
     mode_normal = 0,
     mode_edit = 1,
-    mode_waypoint_edit = 2
+    mode_waypoint_edit = 2,
+    mode_scaff_edit = 3
 };
 
 global_variable
@@ -868,6 +889,7 @@ Global_Mode = mode_normal;
 #define Edit_Mode (Global_Mode == mode_edit)
 #define Normal_Mode (Global_Mode == mode_normal)
 #define Waypoint_Edit_Mode (Global_Mode == mode_waypoint_edit)
+#define Scaff_Edit_Mode (Global_Mode == mode_scaff_edit)
 
 global_variable
 s32
@@ -912,6 +934,14 @@ global_variable
 u32
 Global_Edit_Invert_Flag = 0;
 
+global_variable
+u08
+Scaff_Painting_Flag = 0;
+
+global_variable
+u16
+Scaff_Painting_Id = 0;
+
 struct
 original_contig
 {
@@ -935,6 +965,7 @@ contig
     u16 originalContigId;
     u16 length;
     u16 startCoord;
+    u16 scaffId;
 };
 
 struct
@@ -965,6 +996,7 @@ map_state
     u16 *contigIds;
     u16 *originalContigIds;
     u16 *contigRelCoords;
+    u16 *scaffIds;
 };
 
 global_variable
@@ -975,6 +1007,8 @@ global_function
 void
 UpdateContigsFromMapState()
 {
+    u16 lastScaffID = Map_State->scaffIds[0];
+    u16 scaffId = lastScaffID ? 1 : 0;
     u16 lastId = Map_State->originalContigIds[0];
     u16 lastCoord = Map_State->contigRelCoords[0];
     u32 contigPtr = 0;
@@ -1003,7 +1037,11 @@ UpdateContigsFromMapState()
             cont->originalContigId = lastId;
             cont->length = length;
             cont->startCoord = startCoord;
-    
+
+            u16 thisScaffID = Map_State->scaffIds[pixelIdx - 1];
+            cont->scaffId = thisScaffID ? ((thisScaffID == lastScaffID) ? (scaffId) : (++scaffId)) : 0;
+            lastScaffID = thisScaffID;
+
             if (IsContigInverted(contigPtr - 1))
             {
                 if (!inverted) Contigs->contigInvertFlags[(contigPtr - 1) >> 3] &= ~(1 << ((contigPtr - 1) & 7));
@@ -1032,7 +1070,10 @@ UpdateContigsFromMapState()
         cont->originalContigId = lastId;
         cont->length = length;
         cont->startCoord = startCoord;
-
+            
+        u16 thisScaffID = Map_State->scaffIds[pixelIdx];
+        cont->scaffId = thisScaffID ? ((thisScaffID == lastScaffID) ? (scaffId) : (++scaffId)) : 0;
+        
         if (IsContigInverted(contigPtr - 1))
         {
             if (!inverted) Contigs->contigInvertFlags[(contigPtr - 1) >> 3] &= ~(1 << ((contigPtr - 1) & 7));
@@ -1869,8 +1910,8 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
 
                 diff = forward ? Min(diffx, diffy) : Max(diffx, diffy);
                 
-                newX = (s32)Edit_Pixels.pixels.x + diff;
-                newY = (s32)Edit_Pixels.pixels.y + diff;
+                //newX = (s32)Edit_Pixels.pixels.x + diff;
+                //newY = (s32)Edit_Pixels.pixels.y + diff;
                 
                 diff = RearrangeMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y, diff, Edit_Pixels.snap);
                 netDelta += diff;
@@ -1905,7 +1946,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
 
             redisplay = 1;
         }
-        else if (Tool_Tip->on || Waypoint_Edit_Mode)
+        else if (Tool_Tip->on || Waypoint_Edit_Mode || Scaff_Edit_Mode)
         {
             s32 w, h;
             glfwGetWindowSize(window, &w, &h);
@@ -1960,6 +2001,57 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                 }
 
                 FreeLastPush(Working_Set); // searchBuffer
+            }
+            else if (Scaff_Edit_Mode && Scaff_Painting_Flag)
+            {
+                if (Scaff_Painting_Flag == 1)
+                {
+                    if (!Scaff_Painting_Id)
+                    {
+                        if (Map_State->scaffIds[Tool_Tip_Move.pixels.x])
+                        {
+                            Scaff_Painting_Id = Map_State->scaffIds[Tool_Tip_Move.pixels.x];
+                        }
+                        else
+                        {
+                            u16 max = 0;
+                            ForLoop(Number_of_Pixels_1D) max = Max(max, Map_State->scaffIds[index]);
+                            Scaff_Painting_Id = max + 1;
+                        }
+                    }
+
+                    if (Map_State->scaffIds[Tool_Tip_Move.pixels.x] != Scaff_Painting_Id)
+                    {
+                        u32 pixel = Tool_Tip_Move.pixels.x;
+                        u16 contigId = Map_State->contigIds[pixel];
+                        Map_State->scaffIds[pixel] = Scaff_Painting_Id;
+
+                        u32 testPixel = pixel;
+                        while (testPixel && (Map_State->contigIds[testPixel - 1] == contigId)) Map_State->scaffIds[--testPixel] = Scaff_Painting_Id;
+
+                        testPixel = pixel;
+                        while ((testPixel < (Number_of_Pixels_1D - 1)) && (Map_State->contigIds[testPixel + 1] == contigId)) Map_State->scaffIds[++testPixel] = Scaff_Painting_Id;
+                    }
+                }
+                else if (Scaff_Painting_Flag == 2)
+                {
+                    Scaff_Painting_Id = 0;
+                    
+                    if (Map_State->scaffIds[Tool_Tip_Move.pixels.x] != Scaff_Painting_Id)
+                    {
+                        u32 pixel = Tool_Tip_Move.pixels.x;
+                        u16 contigId = Map_State->contigIds[pixel];
+                        Map_State->scaffIds[pixel] = Scaff_Painting_Id;
+
+                        u32 testPixel = pixel;
+                        while (testPixel && (Map_State->contigIds[testPixel - 1] == contigId)) Map_State->scaffIds[--testPixel] = Scaff_Painting_Id;
+
+                        testPixel = pixel;
+                        while ((testPixel < (Number_of_Pixels_1D - 1)) && (Map_State->contigIds[testPixel + 1] == contigId)) Map_State->scaffIds[++testPixel] = Scaff_Painting_Id;
+                    }
+                }
+
+                UpdateContigsFromMapState();
             }
 
             redisplay = 1;
@@ -2030,6 +2122,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         {
             Edit_Pixels.editing = !Edit_Pixels.editing;
             MouseMove(window, x, y);
+            if (!Edit_Pixels.editing) ForLoop(Number_of_Pixels_1D) Map_State->scaffIds[index] = (Contigs->contigs + Map_State->contigIds[index])->scaffId;
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && !Edit_Pixels.editing)
         {
@@ -2063,6 +2156,23 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
                 RemoveWayPoint(Selected_Waypoint);
                 MouseMove(window, x, y);
             }
+        }
+        else if (button == primaryMouse && Scaff_Edit_Mode && action == GLFW_PRESS)
+        {
+            Scaff_Painting_Flag = 1;
+            MouseMove(window, x, y);
+        }
+        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Scaff_Edit_Mode && action == GLFW_PRESS)
+        {
+            Scaff_Painting_Flag = 2;
+            MouseMove(window, x, y);
+        }
+        else if ((button == GLFW_MOUSE_BUTTON_MIDDLE || button == primaryMouse) && Scaff_Edit_Mode && action == GLFW_RELEASE)
+        {
+            Scaff_Painting_Flag = 0;
+            Scaff_Painting_Id = 0;
+            MouseMove(window, x, y);
+            ForLoop(Number_of_Pixels_1D) Map_State->scaffIds[index] = (Contigs->contigs + Map_State->contigIds[index])->scaffId;
         }
         else if (button == secondaryMouse)
         {
@@ -2700,7 +2810,7 @@ Render()
         f32 position = 0.0f;
 
         f32 y = 0.5f;
-        ForLoop(Contigs->numberOfContigs - 1)
+        ForLoop(Contigs->numberOfContigs)
         {
             contig *cont = Contigs->contigs + index;
 
@@ -2733,7 +2843,7 @@ Render()
     }
 
     // Text / UI Rendering
-    if (Contig_Name_Labels->on || Scale_Bars->on || Tool_Tip->on || UI_On || Loading || Edit_Mode || Waypoint_Edit_Mode || Waypoints_Always_Visible)
+    if (Contig_Name_Labels->on || Scale_Bars->on || Tool_Tip->on || UI_On || Loading || Edit_Mode || Waypoint_Edit_Mode || Waypoints_Always_Visible || Scaff_Edit_Mode || Scaffs_Always_Visible)
     {
         f32 textNormalMat[16];
         f32 textRotMat[16];
@@ -3177,7 +3287,152 @@ Render()
                 fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight + textY, helpText4, 0);
             }
         }
-        
+       
+        // Scaff Bars
+        if (File_Loaded && (Scaff_Edit_Mode || Scaffs_Always_Visible))
+        {
+            glUseProgram(Flat_Shader->shaderProgram);
+            glUniformMatrix4fv(Flat_Shader->matLocation, 1, GL_FALSE, textNormalMat);
+            glUseProgram(UI_Shader->shaderProgram);
+            glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textNormalMat);
+
+            glViewport(0, 0, (s32)width, (s32)height);
+
+            u32 ptr = 0;
+            vertex vert[4];
+            f32 barColour[4] = {1.0f, 1.0f, 1.0f, 0.5f};
+
+            f32 lh = 0.0f;   
+            fonsClearState(FontStash_Context);
+#define DefaultScaffSize 40.0f
+            fonsSetSize(FontStash_Context, Scaff_Mode_Data->size * Screen_Scale.x);
+            fonsSetAlign(FontStash_Context, FONS_ALIGN_MIDDLE | FONS_ALIGN_TOP);
+            fonsSetFont(FontStash_Context, Font_Bold);
+            fonsVertMetrics(FontStash_Context, 0, 0, &lh);
+
+            char buff[128];
+            f32 position = 0.0f;
+            f32 start = 0.0f;
+            u16 scaffId = Contigs->contigs->scaffId;
+            ForLoop(Contigs->numberOfContigs)
+            {
+                contig *cont = Contigs->contigs + index;
+
+                if (cont->scaffId != scaffId)
+                {
+                    if (scaffId)
+                    {
+                        vert[0].x = ModelXToScreen(start - 0.5f);
+                        vert[0].y = ModelYToScreen(0.5f - start);
+                        vert[1].x = ModelXToScreen(start - 0.5f);
+                        vert[1].y = ModelYToScreen(0.5f - position);
+                        vert[2].x = ModelXToScreen(position - 0.5f);
+                        vert[2].y = ModelYToScreen(0.5f - position);
+                        vert[3].x = ModelXToScreen(position - 0.5f);
+                        vert[3].y = ModelYToScreen(0.5f - start);
+
+                        ColourGenerator((u32)scaffId, (f32 *)barColour);
+                        u32 colour = FourFloatColorToU32(*((nk_colorf *)barColour)) | 0xff000000;
+
+                        glUseProgram(Flat_Shader->shaderProgram);
+                        glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&barColour);
+
+                        glBindBuffer(GL_ARRAY_BUFFER, Scaff_Bar_Data->vbos[ptr]);
+                        glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
+                        glBindVertexArray(Scaff_Bar_Data->vaos[ptr++]);
+                        glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
+
+                        glUseProgram(UI_Shader->shaderProgram);
+                        fonsSetColor(FontStash_Context, colour);
+
+                        stbsp_snprintf(buff, sizeof(buff), "Scaffold %u", scaffId);
+                        f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, buff, 0, NULL);
+                        fonsDrawText(FontStash_Context, ModelXToScreen(0.5f * (position + start - 1.0f)) - (0.5f * textWidth), ModelYToScreen(0.5f - start) - lh, buff, 0);
+                    }
+
+                    start = position;
+                    scaffId = cont->scaffId;
+                }
+
+                position += ((f32)cont->length / (f32)Number_of_Pixels_1D);
+            }
+
+            if (scaffId)
+            {
+                vert[0].x = ModelXToScreen(start - 0.5f);
+                vert[0].y = ModelYToScreen(0.5f - start);
+                vert[1].x = ModelXToScreen(start - 0.5f);
+                vert[1].y = ModelYToScreen(0.5f - position);
+                vert[2].x = ModelXToScreen(position - 0.5f);
+                vert[2].y = ModelYToScreen(0.5f - position);
+                vert[3].x = ModelXToScreen(position - 0.5f);
+                vert[3].y = ModelYToScreen(0.5f - start);
+
+                ColourGenerator((u32)scaffId, (f32 *)barColour);
+                u32 colour = FourFloatColorToU32(*((nk_colorf *)barColour));
+
+                glUseProgram(Flat_Shader->shaderProgram);
+                glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&barColour);
+
+                glBindBuffer(GL_ARRAY_BUFFER, Scaff_Bar_Data->vbos[ptr]);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
+                glBindVertexArray(Scaff_Bar_Data->vaos[ptr++]);
+                glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
+
+                glUseProgram(UI_Shader->shaderProgram);
+                fonsSetColor(FontStash_Context, colour);
+
+                stbsp_snprintf(buff, sizeof(buff), "Scaffold %u", scaffId);
+                f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, buff, 0, NULL);
+                fonsDrawText(FontStash_Context, ModelXToScreen(0.5f * (position + start - 1.0f)) - (0.5f * textWidth), ModelYToScreen(0.5f - start) - lh, buff, 0);
+            }
+
+            if (Scaff_Edit_Mode && !UI_On)
+            {
+                fonsSetSize(FontStash_Context, 24.0f * Screen_Scale.x);
+                fonsVertMetrics(FontStash_Context, 0, 0, &lh);
+                fonsSetColor(FontStash_Context, FourFloatColorToU32(Scaff_Mode_Data->text));
+
+                f32 textBoxHeight = lh;
+                textBoxHeight *= 4.0f;
+                textBoxHeight += 3.0f;
+                f32 spacing = 10.0f;
+
+                char *helpText1 = (char *)"Scaffold Edit Mode";
+                char *helpText2 = (char *)"S: exit";
+                char *helpText3 = (char *)"Left Click: place";
+                char *helpText4 = (char *)"Middle Click / Spacebar: delete";
+
+                f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, helpText4, 0, NULL);
+
+                glUseProgram(Flat_Shader->shaderProgram);
+                glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Scaff_Mode_Data->bg);
+
+                vert[0].x = width - spacing - textWidth;
+                vert[0].y = height - spacing - textBoxHeight;
+                vert[1].x = width - spacing - textWidth;
+                vert[1].y = height - spacing;
+                vert[2].x = width - spacing;
+                vert[2].y = height - spacing;
+                vert[3].x = width - spacing;
+                vert[3].y = height - spacing - textBoxHeight;
+
+                glBindBuffer(GL_ARRAY_BUFFER, Waypoint_Data->vbos[ptr]);
+                glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
+                glBindVertexArray(Waypoint_Data->vaos[ptr++]);
+                glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
+
+                glUseProgram(UI_Shader->shaderProgram);
+                fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight, helpText1, 0);
+                f32 textY = 1.0f + lh;
+                fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight + textY, helpText2, 0);
+                textY += (1.0f + lh);
+                fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight + textY, helpText3, 0);
+                textY += (1.0f + lh);
+                fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight + textY, helpText4, 0);
+            }
+        }
+
         // Tool Tip
         if (File_Loaded && Tool_Tip->on && !Edit_Mode && !UI_On)
         {
@@ -4097,7 +4352,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 #endif
 
         while (*++tmp) {}
-        while (*--tmp != sep) {}
+        while ((*--tmp != sep) && *tmp) {}
 
         *fileName = tmp + 1;
 
@@ -4179,6 +4434,8 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         Map_State->contigIds = PushArrayP(arena, u16, Number_of_Pixels_1D);
         Map_State->originalContigIds = PushArrayP(arena, u16, Number_of_Pixels_1D);
         Map_State->contigRelCoords = PushArrayP(arena, u16, Number_of_Pixels_1D);
+        Map_State->scaffIds = PushArrayP(arena, u16, Number_of_Pixels_1D);
+        memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u16));
         f32 total = 0.0f;
         u16 lastPixel = 0;
         u16 relCoord = 0;
@@ -4587,6 +4844,11 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         PushGenericBuffer(&Contig_ColourBar_Data, Max_Number_of_Contigs);
     }
 
+    //Scaff Bars
+    {
+        PushGenericBuffer(&Scaff_Bar_Data, Max_Number_of_Contigs);
+    }
+
     // Extensions
     {
         u32 exIndex = 0;
@@ -4967,6 +5229,14 @@ Setup()
         Waypoint_Mode_Data->text = Yellow_Text_Float;
         Waypoint_Mode_Data->bg = Grey_Background;
         Waypoint_Mode_Data->size = DefaultWaypointSize;
+    }
+
+    // Scaff Mode Colours
+    {
+        Scaff_Mode_Data = PushStruct(Working_Set, scaff_mode_data);
+        Scaff_Mode_Data->text = Yellow_Text_Float;
+        Scaff_Mode_Data->bg = Grey_Background;
+        Scaff_Mode_Data->size = DefaultScaffSize;
     }
 
 #ifdef Internal
@@ -5414,6 +5684,7 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
         u16 *tmpBuffer = PushArray(Working_Set, u16, copySize);
         u16 *tmpBuffer2 = PushArray(Working_Set, u16, copySize);
         u16 *tmpBuffer3 = PushArray(Working_Set, u16, copySize);
+        u16 *tmpBuffer4 = PushArray(Working_Set, u16, copySize);
 
         glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
         u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, 0, nPixels * sizeof(u16), GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
@@ -5425,6 +5696,7 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
                 tmpBuffer[index] = buffer[GetRealBufferLocation(index + startCopyFromRange)];
                 tmpBuffer2[index] = Map_State->originalContigIds[GetRealBufferLocation(index + startCopyFromRange)];
                 tmpBuffer3[index] = Map_State->contigRelCoords[GetRealBufferLocation(index + startCopyFromRange)];
+                tmpBuffer4[index] = Map_State->scaffIds[GetRealBufferLocation(index + startCopyFromRange)];
             }
 
             if (forward)
@@ -5434,6 +5706,7 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
                     buffer[GetRealBufferLocation(pixelTo + (u32)delta - index)] = buffer[GetRealBufferLocation(pixelTo - index)];
                     Map_State->originalContigIds[GetRealBufferLocation(pixelTo + (u32)delta - index)] = Map_State->originalContigIds[GetRealBufferLocation(pixelTo - index)];
                     Map_State->contigRelCoords[GetRealBufferLocation(pixelTo + (u32)delta - index)] = Map_State->contigRelCoords[GetRealBufferLocation(pixelTo - index)];
+                    Map_State->scaffIds[GetRealBufferLocation(pixelTo + (u32)delta - index)] = Map_State->scaffIds[GetRealBufferLocation(pixelTo - index)];
                 }
             }
             else
@@ -5443,6 +5716,7 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
                     buffer[GetRealBufferLocation((u32)((s32)pixelFrom + delta) + index)] = buffer[GetRealBufferLocation(pixelFrom + index)];
                     Map_State->originalContigIds[GetRealBufferLocation((u32)((s32)pixelFrom + delta) + index)] = Map_State->originalContigIds[GetRealBufferLocation(pixelFrom + index)];
                     Map_State->contigRelCoords[GetRealBufferLocation((u32)((s32)pixelFrom + delta) + index)] = Map_State->contigRelCoords[GetRealBufferLocation(pixelFrom + index)];
+                    Map_State->scaffIds[GetRealBufferLocation((u32)((s32)pixelFrom + delta) + index)] = Map_State->scaffIds[GetRealBufferLocation(pixelFrom + index)];
                 }
             }
 
@@ -5451,6 +5725,7 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
                 buffer[GetRealBufferLocation(index + startCopyToRange)] = tmpBuffer[index];
                 Map_State->originalContigIds[GetRealBufferLocation(index + startCopyToRange)] = tmpBuffer2[index];
                 Map_State->contigRelCoords[GetRealBufferLocation(index + startCopyToRange)] = tmpBuffer3[index];
+                Map_State->scaffIds[GetRealBufferLocation(index + startCopyToRange)] = tmpBuffer4[index];
             }
         }
         else
@@ -5463,6 +5738,7 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
         FreeLastPush(Working_Set); // tmpBuffer
         FreeLastPush(Working_Set); // tmpBuffer2
         FreeLastPush(Working_Set); // tmpBuffer3
+        FreeLastPush(Working_Set); // tmpBuffer4
 
         UpdateContigsFromMapState();
         
@@ -5523,6 +5799,39 @@ ToggleWaypointMode(GLFWwindow* window)
     else if (Normal_Mode)
     {
         Global_Mode = mode_waypoint_edit;
+        f64 mousex, mousey;
+        glfwGetCursorPos(window, &mousex, &mousey);
+        MouseMove(window, mousex, mousey);
+    }
+    else
+    {
+        result = 0;
+    }
+
+    return(result);
+}
+
+global_function
+u32
+ToggleScaffMode(GLFWwindow* window)
+{
+    u32 result = 1;
+
+    if (Scaff_Edit_Mode && !Scaff_Painting_Flag)
+    {
+        Global_Mode = mode_normal;
+        Scaff_Painting_Flag = 0;
+        Scaff_Painting_Id = 0;
+        if (Tool_Tip->on)
+        {
+            f64 mousex, mousey;
+            glfwGetCursorPos(window, &mousex, &mousey);
+            MouseMove(window, mousex, mousey);
+        }
+    }
+    else if (Normal_Mode)
+    {
+        Global_Mode = mode_scaff_edit;
         f64 mousex, mousey;
         glfwGetCursorPos(window, &mousex, &mousey);
         MouseMove(window, mousex, mousey);
@@ -5777,6 +6086,14 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                         RemoveWayPoint(Selected_Waypoint);
                         MouseMove(window, x, y);
                     }
+                    else if (Scaff_Edit_Mode && (action == GLFW_PRESS || action == GLFW_RELEASE))
+                    {
+                        f64 x, y;
+                        glfwGetCursorPos(window, &x, &y);
+                        Scaff_Painting_Flag = action == GLFW_PRESS ? 2 : 0;
+                        MouseMove(window, x, y);
+                        if (action == GLFW_RELEASE) ForLoop(Number_of_Pixels_1D) Map_State->scaffIds[index] = (Contigs->contigs + Map_State->contigIds[index])->scaffId;
+                    }
                     else
                     {
                         keyPressed = 0;
@@ -5806,7 +6123,7 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     }
                     else
                     {
-                        keyPressed = 0;
+                        keyPressed = ToggleScaffMode(window);
                     }
                     break;
 
@@ -7816,7 +8133,8 @@ MainArgs
                     }
                     showAboutScreen = nk_button_label(NK_Context, "About");
 
-                    nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
+                    nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 3);
+                    
                     bounds = nk_widget_bounds(NK_Context);
                     if ((nk_option_label(NK_Context, "Waypoint Edit Mode", Global_Mode == mode_waypoint_edit) ? 1 : 0) != (Global_Mode == mode_waypoint_edit ? 1 : 0)) Global_Mode = Global_Mode == mode_waypoint_edit ? mode_normal : mode_waypoint_edit;
                     if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 750, Screen_Scale.y * 420), bounds))
@@ -7856,6 +8174,39 @@ MainArgs
                         nk_label(NK_Context, "Size", NK_TEXT_CENTERED);
                         nk_slider_float(NK_Context, 1.0f, &Waypoint_Mode_Data->size, 2.0f * DefaultWaypointSize, 4.0f);
                         if (nk_button_label(NK_Context, "Default")) Waypoint_Mode_Data->size = DefaultWaypointSize;
+
+                        nk_contextual_end(NK_Context);
+                    }
+
+                    bounds = nk_widget_bounds(NK_Context);
+                    if ((nk_option_label(NK_Context, "Scaffold Edit Mode", Global_Mode == mode_scaff_edit) ? 1 : 0) != (Global_Mode == mode_scaff_edit ? 1 : 0)) Global_Mode = Global_Mode == mode_scaff_edit ? mode_normal : mode_scaff_edit;
+                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 750, Screen_Scale.y * 420), bounds))
+                    {
+                        struct nk_colorf colour_text = Scaff_Mode_Data->text;
+                        struct nk_colorf colour_bg = Scaff_Mode_Data->bg;
+
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                        nk_label(NK_Context, "Scaffold Mode Colour", NK_TEXT_CENTERED);
+
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 2);
+                        nk_label(NK_Context, "Text", NK_TEXT_CENTERED);
+                        nk_label(NK_Context, "Background", NK_TEXT_CENTERED);
+
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 200, 2);
+                        colour_text = nk_color_picker(NK_Context, colour_text, NK_RGBA);
+                        colour_bg = nk_color_picker(NK_Context, colour_bg, NK_RGBA);
+
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 2);
+                        if (nk_button_label(NK_Context, "Default")) colour_text = Yellow_Text_Float;
+                        if (nk_button_label(NK_Context, "Default")) colour_bg = Grey_Background;
+
+                        Scaff_Mode_Data->text = colour_text;
+                        Scaff_Mode_Data->bg = colour_bg;
+
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                        nk_label(NK_Context, "Size", NK_TEXT_CENTERED);
+                        nk_slider_float(NK_Context, 1.0f, &Scaff_Mode_Data->size, 2.0f * DefaultScaffSize, 4.0f);
+                        if (nk_button_label(NK_Context, "Default")) Scaff_Mode_Data->size = DefaultScaffSize;
 
                         nk_contextual_end(NK_Context);
                     }
@@ -7903,8 +8254,9 @@ MainArgs
                         nk_contextual_end(NK_Context);
                     }
 
-                    nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
+                    nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
                     Waypoints_Always_Visible = nk_check_label(NK_Context, "Waypoints Always Visible", (s32)Waypoints_Always_Visible) ? 1 : 0;
+                    Scaffs_Always_Visible = nk_check_label(NK_Context, "Scaffolds Always Visible", (s32)Scaffs_Always_Visible) ? 1 : 0;
 
                     bounds = nk_widget_bounds(NK_Context);
                     Contig_Name_Labels->on = nk_check_label(NK_Context, "Contig Name Labels", (s32)Contig_Name_Labels->on) ? 1 : 0;
