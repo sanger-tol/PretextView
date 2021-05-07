@@ -1345,8 +1345,13 @@ AddMapEdit(s32 delta, pointui finalPixels, u32 invert)
     edit->delta = (s16)delta;
     edit->finalPix1 = pix1;
     edit->finalPix2 = pix2;
+}
 
-    //MoveWayPoints(edit);
+global_function
+void
+UpdateScaffolds()
+{
+    ForLoop(Number_of_Pixels_1D) Map_State->scaffIds[index] = (Contigs->contigs + Map_State->contigIds[index])->scaffId;
 }
 
 global_function
@@ -1375,7 +1380,7 @@ UndoMapEdit()
 
         RearrangeMap(start, end, -edit->delta);
 
-        //MoveWayPoints(edit, 1);
+        UpdateScaffolds();
     }
 }
 
@@ -1405,7 +1410,7 @@ RedoMapEdit()
             InvertMap((u32)edit->finalPix1, (u32)edit->finalPix2);
         }
         
-        //MoveWayPoints(edit);
+        UpdateScaffolds();
     }
 }
 
@@ -2122,7 +2127,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         {
             Edit_Pixels.editing = !Edit_Pixels.editing;
             MouseMove(window, x, y);
-            if (!Edit_Pixels.editing) ForLoop(Number_of_Pixels_1D) Map_State->scaffIds[index] = (Contigs->contigs + Map_State->contigIds[index])->scaffId;
+            if (!Edit_Pixels.editing) UpdateScaffolds();
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && !Edit_Pixels.editing)
         {
@@ -2172,7 +2177,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
             Scaff_Painting_Flag = 0;
             Scaff_Painting_Id = 0;
             MouseMove(window, x, y);
-            ForLoop(Number_of_Pixels_1D) Map_State->scaffIds[index] = (Contigs->contigs + Map_State->contigIds[index])->scaffId;
+            UpdateScaffolds();
         }
         else if (button == secondaryMouse)
         {
@@ -2396,7 +2401,7 @@ extension_type
 
 global_variable
 char
-extension_magic_bytes[][4] = 
+Extension_Magic_Bytes[][4] = 
 {
     {'p', 's', 'g', 'h'}
 };
@@ -4498,7 +4503,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         // Extensions
         {
-            u08 magicTest[sizeof(extension_magic_bytes[0])];
+            u08 magicTest[sizeof(Extension_Magic_Bytes[0])];
 
             while ((u64)(currLocation + sizeof(magicTest)) < fileSize)
             {
@@ -4506,10 +4511,10 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                 currLocation += bytesRead;
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(ArrayCount(extension_magic_bytes))
+                    ForLoop(ArrayCount(Extension_Magic_Bytes))
                     {
                         u08 foundExtension = 1;
-                        u08 *magic = (u08 *)extension_magic_bytes[index];
+                        u08 *magic = (u08 *)Extension_Magic_Bytes[index];
                         ForLoop2(sizeof(magicTest))
                         {
                             if (magic[index2] != magicTest[index2])
@@ -6092,7 +6097,7 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                         glfwGetCursorPos(window, &x, &y);
                         Scaff_Painting_Flag = action == GLFW_PRESS ? 2 : 0;
                         MouseMove(window, x, y);
-                        if (action == GLFW_RELEASE) ForLoop(Number_of_Pixels_1D) Map_State->scaffIds[index] = (Contigs->contigs + Map_State->contigIds[index])->scaffId;
+                        if (action == GLFW_RELEASE) UpdateScaffolds();
                     }
                     else
                     {
@@ -7066,7 +7071,7 @@ SetSaveStatePaths()
 }
 
 global_variable
-u08 SaveState_Magic[5] = {'p', 't', 's', 'x', '2'};
+u08 SaveState_Magic[5] = {'p', 't', 's', 'x', '4'};
 
 global_function
 u08
@@ -7112,8 +7117,10 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
             }
         }
 
-        u32 nFileBytes = 312 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots);
+        u16 nScaffs = 0;
+        ForLoop(Contigs->numberOfContigs) if ((Contigs->contigs + index)->scaffId) ++nScaffs;
 
+        u32 nFileBytes = 350 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (4 * nScaffs);
         u08 *fileContents = PushArrayP(Loading_Arena, u08, nFileBytes);
         u08 *fileWriter = fileContents;
 
@@ -7130,12 +7137,18 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
             settings |= Contig_Ids->on ? (1 << 4) : 0;
             settings |= Tool_Tip->on ? (1 << 5) : 0;
             settings |= Mouse_Invert ? (1 << 6) : 0;
+            settings |= Scaffs_Always_Visible ? (1 << 7) : 0;
 
             *fileWriter++ = settings;
         }
         
         // colours
         {
+            ForLoop(32)
+            {
+                *fileWriter++ = ((u08 *)Scaff_Mode_Data)[index];
+            }
+
             ForLoop(64)
             {
                 *fileWriter++ = ((u08 *)Waypoint_Mode_Data)[index];
@@ -7169,6 +7182,11 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
 
         // sizes
         {
+            ForLoop(4)
+            {
+                *fileWriter++ = ((u08 *)Scaff_Mode_Data)[index + 32];
+            }
+
             ForLoop(4)
             {
                 *fileWriter++ = ((u08 *)Waypoint_Mode_Data)[index + 64];
@@ -7278,7 +7296,7 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
             (void)breakHere;
 #endif
 
-            u32 ptr = 312 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
+            u32 ptr = 350 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
             TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
             {
                 f32 x = node->coords.x;
@@ -7302,6 +7320,24 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
             }
 
             fileWriter += (13 * nWayp);
+        }
+
+        // scaffs
+        {
+            *fileWriter++ = ((u08 *)&nScaffs)[0];
+            *fileWriter++ = ((u08 *)&nScaffs)[1];
+            ForLoop(Contigs->numberOfContigs)
+            {
+                if ((Contigs->contigs + index)->scaffId)
+                {
+                    u16 cId = (u16)index;
+                    u16 sId = (Contigs->contigs + index)->scaffId;
+                    *fileWriter++ = ((u08 *)&cId)[0];
+                    *fileWriter++ = ((u08 *)&cId)[1];
+                    *fileWriter++ = ((u08 *)&sId)[0];
+                    *fileWriter++ = ((u08 *)&sId)[1];
+                }
+            }
         }
 
         // extensions
@@ -7398,7 +7434,7 @@ LoadState(u64 headerHash, char *path)
     if (path || SaveState_Path)
     {
         FILE *file = 0;
-        u32 fullLoad = 2;
+        u08 fullLoad = 1;
         
         if (path)
         {
@@ -7460,23 +7496,13 @@ LoadState(u64 headerHash, char *path)
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic) - 1)
+                    ForLoop(sizeof(SaveState_Magic))
                     {
                         if (SaveState_Magic[index] != magicTest[index])
                         {
                             fclose(file);
                             file = 0;
                             break;
-                        }
-                    }
-                    if (file)
-                    {
-                        if (magicTest[sizeof(SaveState_Magic)-1] == '2') fullLoad = 2;
-                        else if (magicTest[sizeof(SaveState_Magic)-1] == '1') fullLoad = 1;
-                        else
-                        {
-                            fclose(file);
-                            file = 0;
                         }
                     }
                 }
@@ -7576,12 +7602,18 @@ LoadState(u64 headerHash, char *path)
                 Contig_Ids->on = settings & (1 << 4);
                 Tool_Tip->on = settings & (1 << 5);
                 Mouse_Invert = settings & (1 << 6);
+                Scaffs_Always_Visible = settings & (1 << 7);
 
                 nBytesRead += 2;
             }
 
             // colours
             {
+                ForLoop(32)
+                {
+                    ((u08 *)Scaff_Mode_Data)[index] = *fileContents++;
+                }
+
                 ForLoop(64)
                 {
                     ((u08 *)Waypoint_Mode_Data)[index] = *fileContents++;
@@ -7612,11 +7644,16 @@ LoadState(u64 headerHash, char *path)
                     ((u08 *)Tool_Tip)[index + 4] = *fileContents++;
                 }
 
-                nBytesRead += 256;
+                nBytesRead += 288;
             }
 
             // sizes
             {
+                ForLoop(4)
+                {
+                    ((u08 *)Scaff_Mode_Data)[index + 32] = *fileContents++;
+                }
+
                 ForLoop(4)
                 {
                     ((u08 *)Waypoint_Mode_Data)[index + 64] = *fileContents++;
@@ -7647,7 +7684,7 @@ LoadState(u64 headerHash, char *path)
                     ((u08 *)Tool_Tip)[index + 36] = *fileContents++;
                 }
 
-                nBytesRead += 24;
+                nBytesRead += 28;
             }
 
             // colour map
@@ -7671,7 +7708,7 @@ LoadState(u64 headerHash, char *path)
                 nBytesRead += 12;
 
                 glUseProgram(Contact_Matrix->shaderProgram);
-                glUniform3fv( Color_Maps->cpLocation, 1, Color_Maps->controlPoints);
+                glUniform3fv(Color_Maps->cpLocation, 1, Color_Maps->controlPoints);
             }
 
             if (fullLoad)
@@ -7688,19 +7725,8 @@ LoadState(u64 headerHash, char *path)
                 // edits
                 {
                     u32 nEdits;
-                    if (fullLoad == 2)
-                    {
-                        ForLoop(4)
-                        {
-                            ((u08 *)&nEdits)[index] = *fileContents++;
-                        }
-                        nBytesRead += 4;
-                    }
-                    else
-                    {
-                        nEdits = (u32)*fileContents++;
-                        ++nBytesRead;
-                    }
+                    ForLoop(4) ((u08 *)&nEdits)[index] = *fileContents++;
+                    nBytesRead += 4;
 
                     u08 *contigFlags = fileContents + (6 * nEdits);
                     u32 nContigFlags = ((u32)nEdits + 7) >> 3;
@@ -7774,6 +7800,27 @@ LoadState(u64 headerHash, char *path)
                     }
 
                     nBytesRead += (13 * nWayp);
+                }
+
+                // scaffs
+                {
+                    u16 nScaffs;
+                    ((u08 *)&nScaffs)[0] = *fileContents++;
+                    ((u08 *)&nScaffs)[1] = *fileContents++;
+
+                    ForLoop(nScaffs)
+                    {
+                        u16 cId;
+                        u16 sId;
+                        ((u08 *)&cId)[0] = *fileContents++;
+                        ((u08 *)&cId)[1] = *fileContents++;
+                        ((u08 *)&sId)[0] = *fileContents++;
+                        ((u08 *)&sId)[1] = *fileContents++;
+
+                        (Contigs->contigs + cId)->scaffId = sId;
+                    }
+
+                    if (nScaffs) UpdateScaffolds(); 
                 }
 
                 // extensions
@@ -8180,7 +8227,7 @@ MainArgs
 
                     bounds = nk_widget_bounds(NK_Context);
                     if ((nk_option_label(NK_Context, "Scaffold Edit Mode", Global_Mode == mode_scaff_edit) ? 1 : 0) != (Global_Mode == mode_scaff_edit ? 1 : 0)) Global_Mode = Global_Mode == mode_scaff_edit ? mode_normal : mode_scaff_edit;
-                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 750, Screen_Scale.y * 420), bounds))
+                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 300, Screen_Scale.y * 420), bounds))
                     {
                         struct nk_colorf colour_text = Scaff_Mode_Data->text;
                         struct nk_colorf colour_bg = Scaff_Mode_Data->bg;
@@ -8564,7 +8611,7 @@ MainArgs
                        
                         {
                             nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "GoTo", NK_MINIMIZED))
+                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "Contigs", NK_MINIMIZED))
                             {
                                 nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
 
