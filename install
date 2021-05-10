@@ -16,4 +16,7 @@ END
 env CC=clang CXX=clang meson setup --buildtype=release --prefix=$prefix --bindir=$bindir --unity on builddir
 meson compile -C builddir
 meson install -C builddir
-rm Info.plist
+
+if [ `uname` == Darwin ]; then
+  rm Info.plist
+fi
