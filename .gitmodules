@@ -1,0 +1,6 @@
+[submodule "libdeflate"]
+	path = libdeflate
+	url = https://github.com/ebiggers/libdeflate
+[submodule "subprojects/glfw"]
+	path = subprojects/glfw
+	url = https://github.com/glfw/glfw

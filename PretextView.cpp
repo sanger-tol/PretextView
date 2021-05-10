@@ -20,7 +20,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#define PretextView_Version "PretextView Version 0.2.0-dev"
+#define String_(x) #x
+#define String(x) String_(x)
+
+#define PretextView_Version "PretextView Version " String(PV) 
 
 #include "Header.h"
 
