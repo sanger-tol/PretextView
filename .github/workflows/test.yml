@@ -10,8 +10,8 @@ jobs:
       - run: pip install meson
       - run: meson --version
       - run: | 
-        export clang=clang-11
-        clang --version
+          export clang=clang-11
+          clang --version
 
   windows:
     runs-on: windows-latest
