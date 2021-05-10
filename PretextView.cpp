@@ -3406,7 +3406,7 @@ Render()
                 char *helpText1 = (char *)"Scaffold Edit Mode";
                 char *helpText2 = (char *)"S: exit";
                 char *helpText3 = (char *)"Left Click: place";
-                char *helpText4 = (char *)"Middle Click / Spacebar: delete";
+                char *helpText4 = (char *)"Middle Click / Spacebar: delete; D: delete all";
 
                 f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, helpText4, 0, NULL);
 
@@ -6132,6 +6132,15 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     }
                     break;
 
+                case GLFW_KEY_D:
+                    if (Scaff_Edit_Mode)
+                    {
+                        ForLoop(Contigs->numberOfContigs) (Contigs->contigs + index)->scaffId = 0;
+                        UpdateScaffolds();
+                    }
+                    else keyPressed = 0;
+                    break;
+
                 case GLFW_KEY_I:
                     Contig_Ids->on = !Contig_Ids->on;
                     break;
@@ -6669,6 +6678,7 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
     if (show && doesExist && (window->flags & NK_WINDOW_HIDDEN))
     {
         window->flags &= ~(nk_flags)NK_WINDOW_HIDDEN;
+        FileBrowserReloadDirectoryContent(browser, browser->directory);
     }
 
     u32 ret = 0;
@@ -7737,15 +7747,15 @@ LoadState(u64 headerHash, char *path)
 
                 // edits
                 {
-                    u32 nEdits;
+                    u32 nEdits  = Min(Edits_Stack_Size, Map_Editor->nEdits);
+                    ForLoop(nEdits) UndoMapEdit();
+
                     ForLoop(4) ((u08 *)&nEdits)[index] = *fileContents++;
                     nBytesRead += 4;
 
                     u08 *contigFlags = fileContents + (6 * nEdits);
                     u32 nContigFlags = ((u32)nEdits + 7) >> 3;
 
-                    u32 oldNEdits = Min(Edits_Stack_Size, Map_Editor->nEdits);
-                    ForLoop(oldNEdits) UndoMapEdit();
                     ForLoop(nEdits)
                     {
                         u16 x;
@@ -7822,6 +7832,10 @@ LoadState(u64 headerHash, char *path)
                     ((u08 *)&nScaffs)[0] = *fileContents++;
                     ((u08 *)&nScaffs)[1] = *fileContents++;
 
+                    nBytesRead += 2;
+
+                    if (nScaffs) ForLoop(Contigs->numberOfContigs) (Contigs->contigs + index)->scaffId = 0;
+
                     ForLoop(nScaffs)
                     {
                         u16 cId;
@@ -7834,7 +7848,9 @@ LoadState(u64 headerHash, char *path)
                         (Contigs->contigs + cId)->scaffId = sId;
                     }
 
-                    if (nScaffs) UpdateScaffolds(); 
+                    if (nScaffs) UpdateScaffolds();
+
+                    nBytesRead += (4 * nScaffs);
                 }
 
                 // extensions
@@ -7970,6 +7986,8 @@ GenerateAGP(char *path, u08 overwrite)
                 contig *cont = Contigs->contigs + index;
                 u08 invert = IsContigInverted(index);
                 u16 startCoord = cont->startCoord - (invert ? (cont->length - 1) : 0);
+
+                invert = (!cont->scaffId || (index && (index < (Contigs->numberOfContigs - 1)) && (cont->scaffId != ((cont + 1)->scaffId)) && (cont->scaffId != ((cont - 1)->scaffId))) || (!index && (cont->scaffId != ((cont + 1)->scaffId))) || ((index == (Contigs->numberOfContigs - 1)) && (cont->scaffId != ((cont - 1)->scaffId)))) ? 0 : invert;
 
                 u64 contRealStartCoord = (u64)((f64)startCoord / (f64)Number_of_Pixels_1D * (f64)Total_Genome_Length) + 1;
                 u64 contRealEndCoord = (u64)((f64)(startCoord + cont->length) / (f64)Number_of_Pixels_1D * (f64)Total_Genome_Length);
@@ -8705,7 +8723,7 @@ MainArgs
                        
                         {
                             nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "Contigs", NK_MINIMIZED))
+                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "Input Sequences", NK_MINIMIZED))
                             {
                                 nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
 
