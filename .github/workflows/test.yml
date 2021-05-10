@@ -9,17 +9,21 @@ jobs:
       - run: sudo apt-get install python3.9 clang-11 libc++-11-dev libc++abi-11-dev
       - run: pip install meson
       - run: meson --version
-      - run: export clang=clang-11
-      - run: clang --version
+      - run: | 
+        export clang=clang-11
+        clang --version
 
   windows:
     runs-on: windows-latest
     steps:
       - run: choco install llvm python3
-      - run: RefreshEnv
-      - run: pip install meson
+      - run: | 
+          RefreshEnv
+          pip install meson
       - run: meson --version
-      - run: clang-cl --version
+      - run |
+          RefreshEnv
+          clang-cl --version
 
   mac:
     runs-on: macos-latest
