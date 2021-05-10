@@ -21,7 +21,7 @@ jobs:
           RefreshEnv
           pip install meson
       - run: meson --version
-      - run |
+      - run: |
           RefreshEnv
           clang-cl --version
 
