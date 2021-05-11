@@ -54,7 +54,6 @@ else
 endif
 
 if host_machine.system() == 'darwin' 
-    run_command(find_program('make_macos_app_plist.sh'), meson.project_version(), check : true)
+    custom_target('plist', command : [find_program('make_macos_app_plist.sh'), meson.project_version()], build_by_default : true, build_always_stale : true, output : ['Info.plist'], install : true, install_dir : 'Contents')
     install_data('icon.icns', install_dir : 'Contents/Resources')
-    install_data('Info.plist', install_dir : 'Contents')
 endif
