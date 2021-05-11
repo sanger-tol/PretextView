@@ -485,34 +485,6 @@ FONT SOFTWARE.
 )lic_icons";
 
 global_variable
-u08
-ThirdParty_Mac_App_Shell[] = "Mac App Shell (https://github.com/Xeoncross/macappshell)";
-
-global_variable
-u08
-ThirdParty_Mac_App_Shell_Licence[] = R"lic_macappshell(Copyright (c) 2017 David Pennington
-
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of this software and associated documentation files (the "Software"),
-to deal in the Software without restriction, including without limitation the
-rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
-sell copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
-OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
-NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
-HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
-OTHER DEALINGS IN THE SOFTWARE.
-)lic_macappshell";
-
-global_variable
 u08 *
 ThirdParty[] = {    ThirdParty_LibDeflate, ThirdParty_LibDeflate_Licence,
                     ThirdParty_FontStash, ThirdParty_FontStash_Licence,
@@ -524,8 +496,7 @@ ThirdParty[] = {    ThirdParty_LibDeflate, ThirdParty_LibDeflate_Licence,
                     ThirdParty_STB_Image_Write, ThirdParty_STB_Image_Write_Licence,
                     ThirdParty_Glad, ThirdParty_Glad_Licence,
                     ThirdParty_Fonts, ThirdParty_Fonts_Licence,
-                    ThirdParty_Icons, ThirdParty_Icons_Licence,
-                    ThirdParty_Mac_App_Shell, ThirdParty_Mac_App_Shell_Licence};
+                    ThirdParty_Icons, ThirdParty_Icons_Licence};
 
 #define Number_of_ThirdParties ((ArrayCount(ThirdParty)) >> 1)
 
@@ -541,8 +512,7 @@ ThirdParty_Licence_Sizes[Number_of_ThirdParties][2] = { {560, 800},
                                                         {480, 800},
                                                         {560, 800},
                                                         {4260, 800},
-                                                        {2150, 800},
-                                                        {560, 800} };
+                                                        {2150, 800}};
 
 /* "DroidSerif-Regular.ttf" */
 global_variable

@@ -22,10 +22,18 @@ The Linux app was built on kernel 3.13<br/>
 The Windows app was build on Windows 10, and is known to work on at least Windows 7.
 
 # Third-Party acknowledgements
-PretextView uses the following third-party libraries:<br/>
-* [glfw](https://github.com/glfw/glfw)<br/>
-* [libdeflate](https://github.com/ebiggers/libdeflate)<br/>
-* [stb_sprintf.h](https://github.com/nothings/stb/blob/master/stb_sprintf.h)
+PretextView uses the following third-party libraries:
+* [glfw](https://github.com/glfw/glfw)
+* [libdeflate](https://github.com/ebiggers/libdeflate)
+* [FontStash](https://github.com/memononen/fontstash)
+* [Nuklear](https://github.com/vurtun/nuklear)
+* [glad](https://github.com/Dav1dde/glad)
+* [stb_image](https://github.com/nothings/stb/blob/master/stb_image.h)
+* [stb_image_write](https://github.com/nothings/stb/blob/master/stb_image_write.h)
+* [stb_truetype](https://github.com/nothings/stb/blob/master/stb_truetype.h)
+* [stb_sprintf](https://github.com/nothings/stb/blob/master/stb_sprintf.h)
+* Fonts from the 'Droid Serif' font set
+* [Icons from open-iconic](https://github.com/iconic/open-iconic)
 
 # Installation
 Requires:
