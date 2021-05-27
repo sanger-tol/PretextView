@@ -1,7 +1,7 @@
 project('PretextView', ['c', 'cpp'],
     license: 'MIT',
     meson_version: '>=0.57.1',
-    version: '0.2.0-dev'
+    version: '0.2.0'
 )
 
 flags = ['-Ofast']
