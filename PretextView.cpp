@@ -4316,6 +4316,12 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         glDeleteVertexArrays((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vaos);
         glDeleteBuffers((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vbos);
 
+        glDeleteVertexArrays((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vaos);
+        glDeleteBuffers((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vbos);
+
+        glDeleteVertexArrays((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vaos);
+        glDeleteBuffers((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vbos);
+
         TraverseLinkedList(Extensions.head, extension_node)
         {
             switch (node->type)
