@@ -5491,7 +5491,9 @@ Setup()
         Theme_Name[THEME_DARK] = (u08 *)"Dark";
     }
 
-    Loading_Arena = PushSubArena(Working_Set, MegaByte(128));
+    Loading_Arena = PushStruct(Working_Set, memory_arena);
+    CreateMemoryArena(*Loading_Arena, MegaByte(512));
+    //Loading_Arena = PushSubArena(Working_Set, MegaByte(128));
 }
 
 #if 0
