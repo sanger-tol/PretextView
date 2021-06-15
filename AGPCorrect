@@ -5,6 +5,16 @@ import gzip
 from Bio import SeqIO
 from binascii import hexlify
 
+if len(sys.argv) == 1 or (sys.argv[1] in ("-h", "--help")):
+    print(
+        "Usage: AGPCorrect ref.fa(.gz) scaffs.agp >corrected_scaffs.agp",
+        file=sys.stderr,
+    )
+    sys.exit(0)
+
+if len(sys.argv) != 3:
+    sys.exit("Usage: AGPCorrect ref.fa(.gz) scaffs.agp >corrected_scaffs.agp")
+
 
 def Open(file_name):
     with open(file_name, "rb") as f:
@@ -48,13 +58,17 @@ with open(sys.argv[2], "r") as f:
 
             line[1] = str(int(line[1]) + correct)
 
-            if line[4] == "W":
-                this_l = int(line[-2])
-                acc_l = seqs[line[-4]]
+            if line[4] == "W" and ((this_l := int(line[-2])) == seen[line[-4]]):
+                correct += (acc_l := seqs[line[-4]]) - this_l
 
-                if (this_l > acc_l) or (this_l == seen[line[-4]]):
-                    correct += acc_l - this_l
-                    line[-2] = str(acc_l)
+                if int(line[-3]) >= acc_l:
+                    sys.exit(
+                        "Error with line: {}\n{} > {}".format(
+                            "\t".join(line), line[-3], acc_l
+                        )
+                    )
+
+                line[-2] = str(acc_l)
 
             line[2] = str(int(line[2]) + correct)
 
@@ -65,10 +79,16 @@ with open(sys.argv[2], "r") as f:
                 line += "\tModified by PretextView_AGPCorrect"
             print(line)
 
-for s in (s for s in seqs.keys() if s not in set(seen.keys())):
-    maxn += 1
-    print(
-        "\t".join(
-            (f"Scaffold_{maxn}", "1", str(seqs[s]), "1", "W", s, "1", str(seqs[s]), "+")
+    if curr_scaff:
+        print(f"{curr_scaff}: {correct} bp correction", file=sys.stderr)
+
+maxn += 1
+print(
+    *(
+        "\t".join((f"Scaffold_{maxn + k}", "1", str(n), "1", "W", s, "1", str(n), "+"))
+        for k, (s, n) in enumerate(
+            (s, n) for s, n in seqs.items() if s not in set(seen.keys())
         )
-    )
+    ),
+    sep="\n",
+)
