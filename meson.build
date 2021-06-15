@@ -5,9 +5,10 @@ project('PretextView', ['c', 'cpp'],
 )
 
 flags = ['-Ofast']
-link_flags = []
+link_flags = ['-Ofast']
 if get_option('buildtype') == 'debug'
     flags = ['-O0', '-g', '-DDEBUG']
+    link_flags = ['-O0']
 endif
 flags += ['-DPV=' + meson.project_version()]
 
