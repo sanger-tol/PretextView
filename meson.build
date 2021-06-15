@@ -5,6 +5,7 @@ project('PretextView', ['c', 'cpp'],
 )
 
 flags = ['-Ofast']
+link_flags = []
 if get_option('buildtype') == 'debug'
     flags = ['-O0', '-g', '-DDEBUG']
 endif
@@ -17,6 +18,7 @@ if host_machine.system() == 'linux'
     deps += [meson.get_compiler('cpp').find_library('X11', required : true)] 
 elif host_machine.system() == 'darwin'
     flags += ['-mmacosx-version-min=10.10']
+    link_flags = ['-mmacosx-version-min=10.10']
     deps += [dependency('appleframeworks', modules : 'Cocoa')]
     deps += [dependency('appleframeworks', modules : 'OpenGL')]
     deps += [dependency('appleframeworks', modules : 'IOKit')]
@@ -44,13 +46,14 @@ if host_machine.system() == 'windows'
 else
     glfw_ops.append_compile_args('c', flags)
     glfw_ops.append_compile_args('cpp', flags)
+    glfw_ops.append_link_args(link_flags)
 endif
 deps += [cmake.subproject('glfw', options : glfw_ops).dependency('glfw')]
 
 if host_machine.system() == 'windows'
     executable('PretextView', ['PretextView.cpp', 'glad.c'] + import('windows').compile_resources('PretextView.rc'), dependencies : deps, cpp_args : flags, link_with : libdeflate, include_directories : ['include', 'libdeflate'], install : true, link_args : '/ENTRY:mainCRTStartup', win_subsystem : 'windows')
 else
-    executable('PretextView', ['PretextView.cpp', 'glad.c'], dependencies : deps, cpp_args : flags, link_with : libdeflate, include_directories : ['include', 'libdeflate'], install : true)
+    executable('PretextView', ['PretextView.cpp', 'glad.c'], dependencies : deps, cpp_args : flags, c_args : flags, link_args : link_flags, link_with : libdeflate, include_directories : ['include', 'libdeflate'], install : true)
 endif
 
 if host_machine.system() == 'darwin' 
