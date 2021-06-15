@@ -11,6 +11,22 @@ Activate edit mode with the GUI, or use the 'e' key. Pickup a region of a contig
 Activate waypoint mode with the GUI, or use the 'w' key. Place a waypoint with the left mouse button, delete a waypoint with the middle mouse button or spacebar. Exit waypoint mode with the 'w' key. Use the GUI to see a list of waypoints, click on a waypoint in the list to vist it.<br/>
 Enter scaffolding mode with the 's' key.
 
+# Saving
+Map state is automatically saved (`$XDG_CONFIG_DIR` or `~/.config` on Unix, and the `%APPDATA%` folder on Windows) while the app runs, and is loaded on map load.<br/>
+You can also manually save/load state via the UI.
+
+# AGP Output
+Map state can be output in [AGP](https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification/) format via the UI. Objects are first created according to the scaffolds defined in scaffolding mode, with remaining sequences output as singletons.<br/>
+## AGP Correction
+Note that object/part sizes will only be accurate up to the size of an individual map texel, and that any input sequences smaller than an individual texel will not be output.<br/>
+AGP files can be corrected by the included python script [AGPCorrect](https://github.com/wtsi-hpag/PretextView/blob/AGPCorrect/AGPCorrect), which requires access to the input sequences in (gzipped) FASTA format.
+```bash
+AGPCorrect ref.fa(.gz) map.agp >corrected_scaffs.agp
+```
+The script requires
+* Python >= 3.8
+* [Biopython](https://biopython.org/)
+
 # Requirments, running
 OpenGL 3.3<br/>
 2G of RAM<br/>
