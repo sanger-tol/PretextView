@@ -19,7 +19,7 @@ if host_machine.system() == 'linux'
     deps += [meson.get_compiler('cpp').find_library('X11', required : true)] 
 elif host_machine.system() == 'darwin'
     flags += ['-mmacosx-version-min=10.10']
-    link_flags = ['-mmacosx-version-min=10.10']
+    link_flags += ['-mmacosx-version-min=10.10']
     deps += [dependency('appleframeworks', modules : 'Cocoa')]
     deps += [dependency('appleframeworks', modules : 'OpenGL')]
     deps += [dependency('appleframeworks', modules : 'IOKit')]
