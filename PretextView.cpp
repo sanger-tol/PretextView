@@ -7809,6 +7809,9 @@ LoadState(u64 headerHash, char *path)
                     u08 nWayp = *fileContents++;
                     ++nBytesRead;
 
+                    fileContents += 2;
+                    nBytesRead += 2;
+
                     ForLoop(nWayp)
                     {
                         f32 x;
