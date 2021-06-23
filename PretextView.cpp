@@ -7105,7 +7105,7 @@ SetSaveStatePaths()
 }
 
 global_variable
-u08 SaveState_Magic[5] = {'p', 't', 's', 'x', '4'};
+u08 SaveState_Magic[5] = {'p', 't', 's', 'x', '6'};
 
 global_function
 u08
@@ -7330,7 +7330,7 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
             (void)breakHere;
 #endif
 
-            u32 ptr = 350 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
+            u32 ptr = 348 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
             TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
             {
                 f32 x = node->coords.x;
@@ -7418,7 +7418,7 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
             if (!(file = fopen((const char *)path, "wb"))) return(1);
 
             fwrite(SaveState_Magic, 1, sizeof(SaveState_Magic) - 1, file);
-            fwrite("3", 1, 1, file);
+            fwrite("5", 1, 1, file);
             fwrite(&headerHash, 1, 8, file);
         }
         else
@@ -7460,6 +7460,8 @@ global_function
 u08
 LoadState(u64 headerHash, char *path)
 {
+    u08 oldSytle = 0;
+
     if (!path && !SaveState_Path)
     {
         SetSaveStatePaths();
@@ -7490,13 +7492,14 @@ LoadState(u64 headerHash, char *path)
                     }
                     if (file)
                     {
-                        if (magicTest[sizeof(SaveState_Magic)-1] != '3')
+                        if (magicTest[sizeof(SaveState_Magic)-1] != '3' && magicTest[sizeof(SaveState_Magic)-1] != '5')
                         {
                             fclose(file);
                             file = 0;
                         }
                         else
                         {
+                            oldSytle = magicTest[sizeof(SaveState_Magic)-1] == '3';
                             u64 hashTest;
                             bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
                             if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
@@ -7530,7 +7533,7 @@ LoadState(u64 headerHash, char *path)
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic))
+                    ForLoop(sizeof(SaveState_Magic) - 1)
                     {
                         if (SaveState_Magic[index] != magicTest[index])
                         {
@@ -7538,6 +7541,15 @@ LoadState(u64 headerHash, char *path)
                             file = 0;
                             break;
                         }
+                    }
+                    if (file)
+                    {
+                        if (magicTest[sizeof(SaveState_Magic)-1] != '4' && magicTest[sizeof(SaveState_Magic)-1] != '6')
+                        {
+                            fclose(file);
+                            file = 0;
+                        }
+                        oldSytle = magicTest[sizeof(SaveState_Magic)-1] == '4';
                     }
                 }
                 else
@@ -7809,8 +7821,8 @@ LoadState(u64 headerHash, char *path)
                     u08 nWayp = *fileContents++;
                     ++nBytesRead;
 
-                    fileContents += 2;
-                    nBytesRead += 2;
+                    if (oldSytle) fileContents += 2;
+                    //nBytesRead += 2;
 
                     ForLoop(nWayp)
                     {
@@ -7832,11 +7844,16 @@ LoadState(u64 headerHash, char *path)
                         ((u08 *)&z)[3] = *fileContents++;
                         u08 id = *fileContents++;
 
+                        if (oldSytle && index == (nWayp - 1)) ((u08 *)&z)[3] = 0;
+
                         AddWayPoint({x, y});
                         Waypoint_Editor->activeWaypoints.next->z = z;
-                        Waypoint_Editor->activeWaypoints.next->index = (u32)id;
+                        
+                        if (!oldSytle || index != (nWayp - 1)) Waypoint_Editor->activeWaypoints.next->index = (u32)id;
                     }
 
+                    if (oldSytle) fileContents -= 2;
+                    
                     nBytesRead += (13 * nWayp);
                 }
 
