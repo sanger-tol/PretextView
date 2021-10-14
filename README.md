@@ -19,7 +19,7 @@ You can also manually save/load state via the UI.
 Map state can be output in [AGP](https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification/) format via the UI. Objects are first created according to the scaffolds defined in scaffolding mode, with remaining sequences output as singletons.<br/>
 ## AGP Correction
 Note that object/part sizes will only be accurate up to the size of an individual map texel, and that any input sequences smaller than an individual texel will not be output.<br/>
-AGP files can be corrected by the included python script [AGPCorrect](https://github.com/wtsi-hpag/PretextView/blob/AGPCorrect/AGPCorrect), which requires access to the input sequences in (gzipped) FASTA format.
+AGP files can be corrected by the included python script [AGPCorrect](https://github.com/wtsi-hpag/PretextView/blob/master/AGPCorrect), which requires access to the input sequences in (gzipped) FASTA format.
 ```bash
 AGPCorrect ref.fa(.gz) map.agp >corrected_scaffs.agp
 ```
