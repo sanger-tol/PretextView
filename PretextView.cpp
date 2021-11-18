@@ -1973,8 +1973,8 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
 
             u32 nPixels = Number_of_Textures_1D * Texture_Resolution;
 
-            u32 pixel1 = (u32)((f64)nPixels * (0.5 + (f64)wx));
-            u32 pixel2 = (u32)((f64)nPixels * (0.5 + (f64)wy));
+            u32 pixel1 = Min((u32)((f64)nPixels * (0.5 + (f64)wx)), (nPixels - 1));
+            u32 pixel2 = Min((u32)((f64)nPixels * (0.5 + (f64)wy)), (nPixels - 1));
 
             Tool_Tip_Move.pixels.x = pixel1;
             Tool_Tip_Move.pixels.y = pixel2;
