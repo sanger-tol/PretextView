@@ -942,6 +942,10 @@ u08
 Scaff_Painting_Flag = 0;
 
 global_variable
+u08
+Scaff_FF_Flag = 0;
+
+global_variable
 u16
 Scaff_Painting_Id = 0;
 
@@ -2012,25 +2016,31 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             }
             else if (Scaff_Edit_Mode && Scaff_Painting_Flag)
             {
-                if (Scaff_Painting_Flag == 1)
+                if (Scaff_Painting_Flag)
                 {
-                    if (!Scaff_Painting_Id)
+                    if (Scaff_Painting_Flag == 1)
                     {
-                        if (Map_State->scaffIds[Tool_Tip_Move.pixels.x])
+                        if (!Scaff_Painting_Id)
                         {
-                            Scaff_Painting_Id = Map_State->scaffIds[Tool_Tip_Move.pixels.x];
-                        }
-                        else
-                        {
-                            u16 max = 0;
-                            ForLoop(Number_of_Pixels_1D) max = Max(max, Map_State->scaffIds[index]);
-                            Scaff_Painting_Id = max + 1;
+                            if (Map_State->scaffIds[Tool_Tip_Move.pixels.x])
+                            {
+                                Scaff_Painting_Id = Map_State->scaffIds[Tool_Tip_Move.pixels.x];
+                            }
+                            else
+                            {
+                                u16 max = 0;
+                                ForLoop(Number_of_Pixels_1D) max = Max(max, Map_State->scaffIds[index]);
+                                Scaff_Painting_Id = max + 1;
+                            }
                         }
                     }
+                    else Scaff_Painting_Id = 0;
 
-                    if (Map_State->scaffIds[Tool_Tip_Move.pixels.x] != Scaff_Painting_Id)
+                    if (Map_State->scaffIds[Tool_Tip_Move.pixels.x] != Scaff_Painting_Id || (Scaff_FF_Flag & 1))
                     {
                         u32 pixel = Tool_Tip_Move.pixels.x;
+
+                        u32 currScaffId = Map_State->scaffIds[pixel];
                         u16 contigId = Map_State->contigIds[pixel];
                         Map_State->scaffIds[pixel] = Scaff_Painting_Id;
 
@@ -2039,23 +2049,12 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
 
                         testPixel = pixel;
                         while ((testPixel < (Number_of_Pixels_1D - 1)) && (Map_State->contigIds[testPixel + 1] == contigId)) Map_State->scaffIds[++testPixel] = Scaff_Painting_Id;
-                    }
-                }
-                else if (Scaff_Painting_Flag == 2)
-                {
-                    Scaff_Painting_Id = 0;
-                    
-                    if (Map_State->scaffIds[Tool_Tip_Move.pixels.x] != Scaff_Painting_Id)
-                    {
-                        u32 pixel = Tool_Tip_Move.pixels.x;
-                        u16 contigId = Map_State->contigIds[pixel];
-                        Map_State->scaffIds[pixel] = Scaff_Painting_Id;
 
-                        u32 testPixel = pixel;
-                        while (testPixel && (Map_State->contigIds[testPixel - 1] == contigId)) Map_State->scaffIds[--testPixel] = Scaff_Painting_Id;
-
-                        testPixel = pixel;
-                        while ((testPixel < (Number_of_Pixels_1D - 1)) && (Map_State->contigIds[testPixel + 1] == contigId)) Map_State->scaffIds[++testPixel] = Scaff_Painting_Id;
+                        if (Scaff_FF_Flag & 1)
+                        {
+                            ++testPixel;
+                            while ((testPixel < Number_of_Pixels_1D) && ((Scaff_FF_Flag & 2) || (Map_State->scaffIds[testPixel] == (Scaff_Painting_Flag == 1 ? 0 : currScaffId)))) Map_State->scaffIds[testPixel++] = Scaff_Painting_Id;
+                        }
                     }
                 }
 
@@ -3402,16 +3401,19 @@ Render()
                 fonsSetColor(FontStash_Context, FourFloatColorToU32(Scaff_Mode_Data->text));
 
                 f32 textBoxHeight = lh;
-                textBoxHeight *= 4.0f;
-                textBoxHeight += 3.0f;
+                textBoxHeight *= 7.0f;
+                textBoxHeight += 6.0f;
                 f32 spacing = 10.0f;
 
                 char *helpText1 = (char *)"Scaffold Edit Mode";
                 char *helpText2 = (char *)"S: exit";
                 char *helpText3 = (char *)"Left Click: place";
-                char *helpText4 = (char *)"Middle Click / Spacebar: delete; D: delete all";
+                char *helpText4 = (char *)"Middle Click / Spacebar: delete";
+                char *helpText5 = (char *)"Shift-D: delete all";
+                char *helpText6 = (char *)"A (Hold): flood fill";
+                char *helpText7 = (char *)"Shift-A (Hold): flood fill and override";
 
-                f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, helpText4, 0, NULL);
+                f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, helpText7, 0, NULL);
 
                 glUseProgram(Flat_Shader->shaderProgram);
                 glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Scaff_Mode_Data->bg);
@@ -3438,6 +3440,12 @@ Render()
                 fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight + textY, helpText3, 0);
                 textY += (1.0f + lh);
                 fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight + textY, helpText4, 0);
+                textY += (1.0f + lh);
+                fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight + textY, helpText5, 0);
+                textY += (1.0f + lh);
+                fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight + textY, helpText6, 0);
+                textY += (1.0f + lh);
+                fonsDrawText(FontStash_Context, width - spacing - textWidth, height - spacing - textBoxHeight + textY, helpText7, 0);
             }
         }
 
@@ -3512,8 +3520,14 @@ Render()
             char *line2 = (char *)"vs";
             char line3[64];
 
-            stbsp_snprintf(line1, 64, "%s %$.2fbp", (Original_Contigs + id1)->name, (f64)coord1 * bpPerPixel);
-            stbsp_snprintf(line3, 64, "%s %$.2fbp", (Original_Contigs + id2)->name, (f64)coord2 * bpPerPixel);
+            auto NicePrint = [bpPerPixel](u16 id, u16 coord, char *buffer)
+            {
+                f64 pos = (f64)coord * bpPerPixel;
+                stbsp_snprintf(buffer, 64, "%s %'u %sbp", (Original_Contigs + id)->name, (u32)(pos / (pos > 1000.0 ? 1000.0 : 1.0)), pos > 1000.0 ? "K" : "");
+            };
+
+            NicePrint(id1, coord1, line1);
+            NicePrint(id2, coord2, line3);
 
             f32 textWidth_1 = fonsTextBounds(FontStash_Context, 0, 0, line1, 0, NULL);
             f32 textWidth_2 = fonsTextBounds(FontStash_Context, 0, 0, line2, 0, NULL);
@@ -5838,6 +5852,7 @@ ToggleScaffMode(GLFWwindow* window)
         Global_Mode = mode_normal;
         Scaff_Painting_Flag = 0;
         Scaff_Painting_Id = 0;
+        Scaff_FF_Flag = 0;
         if (Tool_Tip->on)
         {
             f64 mousex, mousey;
@@ -5929,7 +5944,7 @@ global_function
 void
 KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
 {
-    if (!Loading && (action != GLFW_RELEASE || key == GLFW_KEY_SPACE))
+    if (!Loading && (action != GLFW_RELEASE || key == GLFW_KEY_SPACE || key == GLFW_KEY_A || key == GLFW_KEY_LEFT_SHIFT))
     {
         if (UI_On)
         {
@@ -6143,8 +6158,26 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     }
                     break;
 
-                case GLFW_KEY_D:
+                case GLFW_KEY_A:
                     if (Scaff_Edit_Mode)
+                    {
+                        if (action != GLFW_RELEASE) Scaff_FF_Flag |= 1;
+                        else Scaff_FF_Flag &= ~1;
+                    }
+                    else keyPressed = 0;
+                    break;
+                
+                case GLFW_KEY_LEFT_SHIFT:
+                    if (Scaff_Edit_Mode)
+                    {
+                        if (action != GLFW_RELEASE) Scaff_FF_Flag |= 2;
+                        else Scaff_FF_Flag &= ~2;
+                    }
+                    else keyPressed = 0;
+                    break;
+
+                case GLFW_KEY_D:
+                    if (Scaff_Edit_Mode && (mods & GLFW_MOD_SHIFT))
                     {
                         ForLoop(Contigs->numberOfContigs) (Contigs->contigs + index)->scaffId = 0;
                         UpdateScaffolds();
