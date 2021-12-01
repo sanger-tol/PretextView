@@ -4629,10 +4629,6 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         Number_of_MipMaps = mipMapLevels;
 
         Number_of_Pixels_1D = Number_of_Textures_1D * Texture_Resolution;
-        
-        Meta_Data = PushStructP(arena, meta_data);
-        memset(Meta_Data, 0, sizeof(meta_data));
-        strcpy((char *)Meta_Data->tags[MetaData_Active_Tag], "Haplotig");
 
         Map_State = PushStructP(arena, map_state);
         Map_State->contigIds = PushArrayP(arena, u16, Number_of_Pixels_1D);
@@ -5369,7 +5365,12 @@ Setup()
     }
 
     Texture_Buffer_Queue = PushStruct(Working_Set, texture_buffer_queue);
-    
+
+    Meta_Data = PushStruct(Working_Set, meta_data);
+    memset(Meta_Data, 0, sizeof(meta_data));
+    MetaData_Active_Tag = 0;
+    strcpy((char *)Meta_Data->tags[MetaData_Active_Tag], "Haplotig");
+
     // Contig Name Label UI
     {
         Contig_Name_Labels = PushStruct(Working_Set, ui_colour_element_bg);
@@ -6457,13 +6458,14 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                         u32 nextActive = MetaData_Active_Tag;
                         ForLoop(ArrayCount(Meta_Data->tags))
                         {
-                            if (++nextActive == ArrayCount(Meta_Data->tags)) nextActive = 0;
+                            if (--nextActive > (ArrayCount(Meta_Data->tags) - 1)) nextActive = ArrayCount(Meta_Data->tags) - 1;
                             if (strlen((const char *)Meta_Data->tags[nextActive]))
                             {
                                 MetaData_Active_Tag = nextActive;
                                 break;
                             }
                         }
+
                     }
                     else AdjustColorMap(-1);
                     break;
@@ -6474,7 +6476,7 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                         u32 nextActive = MetaData_Active_Tag;
                         ForLoop(ArrayCount(Meta_Data->tags))
                         {
-                            if (--nextActive > (ArrayCount(Meta_Data->tags) - 1)) nextActive = ArrayCount(Meta_Data->tags) - 1;
+                            if (++nextActive == ArrayCount(Meta_Data->tags)) nextActive = 0;
                             if (strlen((const char *)Meta_Data->tags[nextActive]))
                             {
                                 MetaData_Active_Tag = nextActive;
@@ -7177,6 +7179,8 @@ MetaTagsEditorRun(struct nk_context *ctx, u08 show)
     if (nk_begin(ctx, name, nk_rect(Screen_Scale.x * 50, Screen_Scale.y * 50, Screen_Scale.x * 800, Screen_Scale.y * 600),
                 NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_CLOSABLE|NK_WINDOW_NO_SCROLLBAR))
     {
+        Deferred_Close_UI = 0;
+
         struct nk_rect total_space = nk_window_get_content_region(ctx);
         f32 ratio[] = {0.05f, NK_UNDEFINED};
         nk_layout_row(ctx, NK_DYNAMIC, total_space.h, 1, ratio + 1);
@@ -7467,7 +7471,16 @@ SetSaveStatePaths()
 }
 
 global_variable
-u08 SaveState_Magic[5] = {'p', 't', 's', 'x', '6'};
+u08
+SaveState_Magic[5] = {'p', 't', 's', 'x', 1};
+
+global_variable
+u08
+SaveState_Magic_Tail_Auto = 2;
+
+global_variable
+u08
+SaveState_Magic_Tail_Manual = 3;
 
 global_function
 u08
@@ -7514,9 +7527,26 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
         }
 
         u16 nScaffs = 0;
-        ForLoop(Contigs->numberOfContigs) if ((Contigs->contigs + index)->scaffId) ++nScaffs;
+        u16 nMetaFlags = 0;
+        ForLoop(Contigs->numberOfContigs)
+        {
+            if ((Contigs->contigs + index)->scaffId) ++nScaffs;
+            if (*(Contigs->contigs + index)->metaDataFlags) ++nMetaFlags;
+        }
+        
+        u08 nMetaTags = 0;
+        u32 totalMetaTagSpace = 0;
+        ForLoop(ArrayCount(Meta_Data->tags))
+        {
+            u32 strLen;
+            if ((strLen = (u32)strlen((const char *)Meta_Data->tags[index])) > 0)
+            {
+                ++nMetaTags;
+                totalMetaTagSpace += (strLen + 1);
+            }
+        }
 
-        u32 nFileBytes = 350 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (4 * nScaffs);
+        u32 nFileBytes = 350 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (4 * nScaffs) + sizeof(meta_mode_data) + sizeof(MetaData_Active_Tag) + 2 + (10 * nMetaFlags) + 1 + nMetaTags + totalMetaTagSpace;
         u08 *fileContents = PushArrayP(Loading_Arena, u08, nFileBytes);
         u08 *fileWriter = fileContents;
 
@@ -7685,12 +7715,6 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
         // waypoints
         {
             *fileWriter++ = (u08)nWayp;
-#ifdef DEBUG
-            u08 breakHere = 0;
-            if (path)
-                breakHere = 1;
-            (void)breakHere;
-#endif
 
             u32 ptr = 348 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
             TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
@@ -7732,6 +7756,48 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
                     *fileWriter++ = ((u08 *)&cId)[1];
                     *fileWriter++ = ((u08 *)&sId)[0];
                     *fileWriter++ = ((u08 *)&sId)[1];
+                }
+            }
+        }
+
+        // meta data
+        {
+            memcpy(fileWriter, (const void *)&MetaData_Active_Tag, sizeof(MetaData_Active_Tag));
+            fileWriter += sizeof(MetaData_Active_Tag);
+            
+            memcpy(fileWriter, (const void *)MetaData_Mode_Data, sizeof(meta_mode_data));
+            fileWriter += sizeof(meta_mode_data);
+
+            *fileWriter++ = ((u08 *)&nMetaFlags)[0];
+            *fileWriter++ = ((u08 *)&nMetaFlags)[1];
+            ForLoop(Contigs->numberOfContigs)
+            {
+                if (*(Contigs->contigs + index)->metaDataFlags)
+                {
+                    u16 cId = (u16)index;
+                    u64 flags = *(Contigs->contigs + index)->metaDataFlags;
+                    *fileWriter++ = ((u08 *)&cId)[0];
+                    *fileWriter++ = ((u08 *)&cId)[1];
+                    *fileWriter++ = ((u08 *)&flags)[0];
+                    *fileWriter++ = ((u08 *)&flags)[1];
+                    *fileWriter++ = ((u08 *)&flags)[2];
+                    *fileWriter++ = ((u08 *)&flags)[3];
+                    *fileWriter++ = ((u08 *)&flags)[4];
+                    *fileWriter++ = ((u08 *)&flags)[5];
+                    *fileWriter++ = ((u08 *)&flags)[6];
+                    *fileWriter++ = ((u08 *)&flags)[7];
+                }
+            }
+
+            *fileWriter++ = nMetaTags;
+            ForLoop(ArrayCount(Meta_Data->tags))
+            {
+                u32 strLen;
+                if ((strLen = (u32)strlen((const char *)Meta_Data->tags[index])) > 0)
+                {
+                    *fileWriter++ = (u08)index;
+                    memcpy(fileWriter, (const void *)Meta_Data->tags[index], strLen + 1);
+                    fileWriter += (strLen + 1);
                 }
             }
         }
@@ -7779,14 +7845,15 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
 
             if (!(file = fopen((const char *)path, "wb"))) return(1);
 
-            fwrite(SaveState_Magic, 1, sizeof(SaveState_Magic) - 1, file);
-            fwrite("5", 1, 1, file);
+            fwrite(SaveState_Magic, 1, sizeof(SaveState_Magic), file);
+            fwrite(&SaveState_Magic_Tail_Manual, 1, 1, file);
             fwrite(&headerHash, 1, 8, file);
         }
         else
         {
             file = fopen((const char *)SaveState_Path, "wb");
             fwrite(SaveState_Magic, 1, sizeof(SaveState_Magic), file);
+            fwrite(&SaveState_Magic_Tail_Auto, 1, 1, file);
         }
         
         fwrite(&nCommpressedBytes, 1, 4, file);
@@ -7822,8 +7889,6 @@ global_function
 u08
 LoadState(u64 headerHash, char *path)
 {
-    u08 oldSytle = 0;
-
     if (!path && !SaveState_Path)
     {
         SetSaveStatePaths();
@@ -7838,12 +7903,12 @@ LoadState(u64 headerHash, char *path)
         {
             if ((file = fopen((const char *)path, "rb")))
             {
-                u08 magicTest[sizeof(SaveState_Magic)];
+                u08 magicTest[sizeof(SaveState_Magic) + 1];
 
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic) - 1)
+                    ForLoop(sizeof(SaveState_Magic))
                     {
                         if (SaveState_Magic[index] != magicTest[index])
                         {
@@ -7854,14 +7919,13 @@ LoadState(u64 headerHash, char *path)
                     }
                     if (file)
                     {
-                        if (magicTest[sizeof(SaveState_Magic)-1] != '3' && magicTest[sizeof(SaveState_Magic)-1] != '5')
+                        if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Manual)
                         {
                             fclose(file);
                             file = 0;
                         }
                         else
                         {
-                            oldSytle = magicTest[sizeof(SaveState_Magic)-1] == '3';
                             u64 hashTest;
                             bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
                             if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
@@ -7890,12 +7954,12 @@ LoadState(u64 headerHash, char *path)
 
             if ((file = fopen((const char *)SaveState_Path, "rb")))
             {
-                u08 magicTest[sizeof(SaveState_Magic)];
+                u08 magicTest[sizeof(SaveState_Magic) + 1];
 
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic) - 1)
+                    ForLoop(sizeof(SaveState_Magic))
                     {
                         if (SaveState_Magic[index] != magicTest[index])
                         {
@@ -7906,12 +7970,11 @@ LoadState(u64 headerHash, char *path)
                     }
                     if (file)
                     {
-                        if (magicTest[sizeof(SaveState_Magic)-1] != '4' && magicTest[sizeof(SaveState_Magic)-1] != '6')
+                        if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Auto)
                         {
                             fclose(file);
                             file = 0;
                         }
-                        oldSytle = magicTest[sizeof(SaveState_Magic)-1] == '4';
                     }
                 }
                 else
@@ -7943,7 +8006,7 @@ LoadState(u64 headerHash, char *path)
                         }
                         if ((file = fopen((const char *)SaveState_Path, "rb")))
                         {
-                            u08 magicTest[sizeof(SaveState_Magic)];
+                            u08 magicTest[sizeof(SaveState_Magic) + 1];
 
                             u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                             if (bytesRead == sizeof(magicTest))
@@ -7955,6 +8018,14 @@ LoadState(u64 headerHash, char *path)
                                         fclose(file);
                                         file = 0;
                                         break;
+                                    }
+                                }
+                                if (file)
+                                {
+                                    if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Auto)
+                                    {
+                                        fclose(file);
+                                        file = 0;
                                     }
                                 }
                             }
@@ -8183,9 +8254,6 @@ LoadState(u64 headerHash, char *path)
                     u08 nWayp = *fileContents++;
                     ++nBytesRead;
 
-                    if (oldSytle) fileContents += 2;
-                    //nBytesRead += 2;
-
                     ForLoop(nWayp)
                     {
                         f32 x;
@@ -8206,16 +8274,11 @@ LoadState(u64 headerHash, char *path)
                         ((u08 *)&z)[3] = *fileContents++;
                         u08 id = *fileContents++;
 
-                        if (oldSytle && index == (nWayp - 1)) ((u08 *)&z)[3] = 0;
-
                         AddWayPoint({x, y});
                         Waypoint_Editor->activeWaypoints.next->z = z;
-                        
-                        if (!oldSytle || index != (nWayp - 1)) Waypoint_Editor->activeWaypoints.next->index = (u32)id;
+                        Waypoint_Editor->activeWaypoints.next->index = (u32)id;
                     }
 
-                    if (oldSytle) fileContents -= 2;
-                    
                     nBytesRead += (13 * nWayp);
                 }
 
@@ -8227,7 +8290,7 @@ LoadState(u64 headerHash, char *path)
 
                     nBytesRead += 2;
 
-                    if (nScaffs) ForLoop(Contigs->numberOfContigs) (Contigs->contigs + index)->scaffId = 0;
+                    ForLoop(Contigs->numberOfContigs) (Contigs->contigs + index)->scaffId = 0;
 
                     ForLoop(nScaffs)
                     {
@@ -8241,9 +8304,61 @@ LoadState(u64 headerHash, char *path)
                         (Contigs->contigs + cId)->scaffId = sId;
                     }
 
-                    if (nScaffs) UpdateScaffolds();
+                    UpdateScaffolds();
 
                     nBytesRead += (4 * nScaffs);
+                }
+
+                // meta data
+                {
+                    memcpy(&MetaData_Active_Tag, (const void *)fileContents, sizeof(MetaData_Active_Tag));
+                    fileContents += sizeof(MetaData_Active_Tag);
+                    nBytesRead += sizeof(MetaData_Active_Tag);
+
+                    memcpy(MetaData_Mode_Data, (const void *)fileContents, sizeof(meta_mode_data));
+                    fileContents += sizeof(meta_mode_data);
+                    nBytesRead += sizeof(meta_mode_data);
+
+                    u16 nMetaFlags;
+                    ((u08 *)&nMetaFlags)[0] = *fileContents++;
+                    ((u08 *)&nMetaFlags)[1] = *fileContents++;
+                    nBytesRead += 2;
+
+                    memset(Map_State->metaDataFlags, 0, Number_of_Pixels_1D * sizeof(u64));
+                    ForLoop(nMetaFlags)
+                    {
+                        u16 cId;
+                        u64 flags;
+                        ((u08 *)&cId)[0] = *fileContents++;
+                        ((u08 *)&cId)[1] = *fileContents++;
+                        ((u08 *)&flags)[0] = *fileContents++;
+                        ((u08 *)&flags)[1] = *fileContents++;
+                        ((u08 *)&flags)[2] = *fileContents++;
+                        ((u08 *)&flags)[3] = *fileContents++;
+                        ((u08 *)&flags)[4] = *fileContents++;
+                        ((u08 *)&flags)[5] = *fileContents++;
+                        ((u08 *)&flags)[6] = *fileContents++;
+                        ((u08 *)&flags)[7] = *fileContents++;
+                        nBytesRead += 10;
+
+                        u32 pixel = 0;
+                        while ((pixel < Number_of_Pixels_1D) && (Map_State->contigIds[pixel] != cId)) ++pixel;
+                        while ((pixel < Number_of_Pixels_1D) && (Map_State->contigIds[pixel] == cId)) Map_State->metaDataFlags[pixel++] = flags;
+                    }
+                    UpdateContigsFromMapState();
+
+                    u08 nMetaTags = *fileContents++;
+                    ++nBytesRead;
+
+                    memset(Meta_Data, 0, sizeof(meta_data));
+                    ForLoop(nMetaTags)
+                    {
+                        u08 id = *fileContents++;
+                        strcpy((char *)Meta_Data->tags[id], (const char *)fileContents);
+                        s32 strLenPlusOne = strlen((const char *)Meta_Data->tags[id]) + 1;
+                        fileContents += strLenPlusOne;
+                        nBytesRead += (strLenPlusOne + 1);
+                    }
                 }
 
                 // extensions
@@ -8368,7 +8483,7 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons)
 
         if (formatSingletons)
         {
-            stbsp_snprintf(buffer, sizeof(buffer), "# WARNING: Non-standard AGP, singletons maybe reverse-complemented\n");
+            stbsp_snprintf(buffer, sizeof(buffer), "# WARNING: Non-standard AGP, singletons may be reverse-complemented\n");
             fwrite(buffer, 1, strlen(buffer), file);
         }
 
@@ -8415,15 +8530,38 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons)
                     }
 
                     scaffCoord_End = scaffCoord_Start + contRealSize - 1;
-                    stbsp_snprintf(buffer, sizeof(buffer), "Scaffold_%u\t%" PRIu64 "\t%" PRIu64 "\t%u\tW\t%s\t%" PRIu64 "\t%" PRIu64 "\t%s\n", scaffId, scaffCoord_Start, scaffCoord_End, ++scaffPart, contName, contRealStartCoord, contRealEndCoord, invert ? "-" : "+");
+                    stbsp_snprintf(buffer, sizeof(buffer), "Scaffold_%u\t%" PRIu64 "\t%" PRIu64 "\t%u\tW\t%s\t%" PRIu64 "\t%" PRIu64 "\t%s", scaffId, scaffCoord_Start, scaffCoord_End, ++scaffPart, contName, contRealStartCoord, contRealEndCoord, invert ? "-" : "+");
                     fwrite(buffer, 1, strlen(buffer), file);
-
+                    if (*cont->metaDataFlags)
+                    {
+                        ForLoop2(ArrayCount(Meta_Data->tags))
+                        {
+                            if (*cont->metaDataFlags & (1 << index2))
+                            {
+                                stbsp_snprintf(buffer, sizeof(buffer), "\t%s", (char *)Meta_Data->tags[index2]);
+                                fwrite(buffer, 1, strlen(buffer), file);
+                            }
+                        }
+                    }
+                    fwrite("\n", 1, 1, file);
                     scaffCoord_Start = scaffCoord_End + 1;
                 }
                 else if (!cont->scaffId && type)
                 {
-                    stbsp_snprintf(buffer, sizeof(buffer), "Scaffold_%u\t1\t%" PRIu64 "\t1\tW\t%s\t%" PRIu64 "\t%" PRIu64 "\t%s\n", ++scaffId, contRealSize, contName, contRealStartCoord, contRealEndCoord, invert ? "-" : "+");
+                    stbsp_snprintf(buffer, sizeof(buffer), "Scaffold_%u\t1\t%" PRIu64 "\t1\tW\t%s\t%" PRIu64 "\t%" PRIu64 "\t%s", ++scaffId, contRealSize, contName, contRealStartCoord, contRealEndCoord, invert ? "-" : "+");
                     fwrite(buffer, 1, strlen(buffer), file);
+                    if (*cont->metaDataFlags)
+                    {
+                        ForLoop2(ArrayCount(Meta_Data->tags))
+                        {
+                            if (*cont->metaDataFlags & (1 << index2))
+                            {
+                                stbsp_snprintf(buffer, sizeof(buffer), "\t%s", (char *)Meta_Data->tags[index2]);
+                                fwrite(buffer, 1, strlen(buffer), file);
+                            }
+                        }
+                    }
+                    fwrite("\n", 1, 1, file);
                 }
             }
         }
