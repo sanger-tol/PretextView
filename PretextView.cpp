@@ -8570,6 +8570,41 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons)
     }
 }
 
+global_function
+void
+SortMapByMetaTags()
+{
+    u32 nPixelToConsider = Number_of_Pixels_1D;
+    for (;;)
+    {
+        u64 maxFlag = 0;
+        ForLoop(nPixelToConsider) maxFlag = Max(maxFlag, Map_State->metaDataFlags[index]);
+        if (!maxFlag) break;
+
+        ForLoop(nPixelToConsider)
+        {
+            u32 pixelEnd = nPixelToConsider - index - 1;
+            s32 delta = (s32)(Number_of_Pixels_1D - pixelEnd - 1);
+            if (Map_State->metaDataFlags[pixelEnd] == maxFlag)
+            {
+                u32 pixelStart = pixelEnd;
+                while (pixelStart && Map_State->metaDataFlags[pixelStart - 1] == maxFlag) --pixelStart;
+                
+                if (delta)
+                {
+                    RearrangeMap(pixelStart, pixelEnd, delta);
+                    AddMapEdit(delta, {(u32)((s32)pixelStart + delta), (u32)((s32)pixelEnd + delta)}, 0);
+                }
+
+                nPixelToConsider -= (pixelEnd - pixelStart + 1);
+                break;
+            }
+        }
+
+        if (!nPixelToConsider) break;
+    }
+}
+
 MainArgs
 {
     u32 initWithFile = 0;
@@ -9187,6 +9222,12 @@ MainArgs
                     }
                     MetaData_Always_Visible = nk_check_label(NK_Context, "MetaData Tags Always Visible", (s32)MetaData_Always_Visible) ? 1 : 0;
                     
+                    if (File_Loaded)
+                    {
+                        nk_layout_row_static(NK_Context, Screen_Scale.y * 30.0f, (s32)(Screen_Scale.x * 300), 1);
+                        if (nk_button_label(NK_Context, "Sort Map by Meta Data Tags")) SortMapByMetaTags();
+                    }
+
                     if (nk_tree_push(NK_Context, NK_TREE_TAB, "Colour Maps", NK_MINIMIZED))
                     {
                         nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
@@ -9299,6 +9340,59 @@ MainArgs
                        
                         {
                             nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
+                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "Scaffolds", NK_MINIMIZED))
+                            {
+                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
+
+                                u16 scaffId = 0;
+                                f32 pos = -0.5f;
+                                f32 scaffLen = 0.0f;
+                                u32 nSeq = 0;
+                                ForLoop(Contigs->numberOfContigs)
+                                {
+                                    contig *cont = Contigs->contigs + index;
+                                    
+                                    if (cont->scaffId != scaffId)
+                                    {
+                                        if (scaffId)
+                                        {
+                                            char buff[128];
+                                            stbsp_snprintf((char *)buff, sizeof(buff), "Scaffold %u (%u)", scaffId, nSeq);
+                                            if (nk_button_label(NK_Context, (char *)buff))
+                                            {
+                                                f32 p = pos - (0.5f * scaffLen);
+                                                Camera_Position.x = p;
+                                                Camera_Position.y = -p;
+                                            }
+                                        }
+                                        
+                                        scaffId = cont->scaffId;
+                                        scaffLen = 0.0f;
+                                        nSeq = 0;
+                                    }
+                                    
+                                    ++nSeq;
+                                    pos += (f32)((f64)cont->length / (f64)Number_of_Pixels_1D);
+                                    scaffLen += (f32)((f64)cont->length / (f64)Number_of_Pixels_1D);
+                                }
+                                if (scaffId)
+                                {
+                                    char buff[128];
+                                    stbsp_snprintf((char *)buff, sizeof(buff), "Scaffold %u", scaffId);
+                                    if (nk_button_label(NK_Context, (char *)buff))
+                                    {
+                                        f32 p = pos - (0.5f * scaffLen);
+                                        Camera_Position.x = p;
+                                        Camera_Position.y = -p;
+                                    }
+                                }
+
+                                nk_tree_pop(NK_Context);
+                            }
+                        }
+
+                        {
+                            nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
                             if (nk_tree_push(NK_Context, NK_TREE_TAB, "Input Sequences", NK_MINIMIZED))
                             {
                                 nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
@@ -9328,6 +9422,49 @@ MainArgs
                                         }
                                         
                                         nk_tree_pop(NK_Context);
+                                    }
+                                }
+
+                                nk_tree_pop(NK_Context);
+                            }
+                        }
+
+                        {
+                            nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
+                            if (nk_tree_push(NK_Context, NK_TREE_TAB, "Tagged Sequences", NK_MINIMIZED))
+                            {
+                                ForLoop(ArrayCount(Meta_Data->tags))
+                                {
+                                    if (strlen((const char *)Meta_Data->tags[index]))
+                                    {
+                                        if (nk_tree_push_id(NK_Context, NK_TREE_TAB, (char *)Meta_Data->tags[index], NK_MINIMIZED, index))
+                                        {
+                                            f32 pos = -0.5f;
+                                            ForLoop2(Contigs->numberOfContigs)
+                                            {
+                                                contig *cont = Contigs->contigs + index2;
+                                                f32 contLen = (f32)((f64)cont->length / (f64)Number_of_Pixels_1D);
+
+                                                if (*cont->metaDataFlags & (1 << index))
+                                                {
+                                                    char buff[128];
+                                                    u16 startCoord = cont->startCoord;
+                                                    u16 endCoord = IsContigInverted(index2) ? (startCoord - cont->length + 1) : (startCoord + cont->length);
+
+                                                    stbsp_snprintf((char *)buff, sizeof(buff), "%s [%$" PRIu64 "bp to %$" PRIu64 "bp]", (char *)((Original_Contigs + cont->originalContigId)->name), (u64)((f64)startCoord / (f64)Number_of_Pixels_1D * (f64)Total_Genome_Length), (u64)((f64)(endCoord) / (f64)Number_of_Pixels_1D * (f64)Total_Genome_Length));
+                                                    if (nk_button_label(NK_Context, (char *)buff))
+                                                    {
+                                                        f32 p = pos + (0.5f * contLen);
+                                                        Camera_Position.x = p;
+                                                        Camera_Position.y = -p;
+                                                    }
+                                                }
+
+                                                pos += contLen;
+                                            }
+                                            
+                                            nk_tree_pop(NK_Context);
+                                        }
                                     }
                                 }
 
