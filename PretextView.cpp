@@ -9372,8 +9372,9 @@ MainArgs
                                     }
                                     
                                     ++nSeq;
-                                    pos += (f32)((f64)cont->length / (f64)Number_of_Pixels_1D);
-                                    scaffLen += (f32)((f64)cont->length / (f64)Number_of_Pixels_1D);
+                                    f32 d = (f32)((f64)cont->length / (f64)Number_of_Pixels_1D);
+                                    pos += d;
+                                    scaffLen += d;
                                 }
                                 if (scaffId)
                                 {
