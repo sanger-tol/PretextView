@@ -5346,6 +5346,18 @@ SetTheme(struct nk_context *ctx, enum theme theme)
     Current_Theme = theme;
 }
 
+global_variable
+const char *
+Default_Tags[] = 
+{
+    "Haplotig",
+    "Unloc",
+    "X",
+    "Y",
+    "Z",
+    "W"
+};
+
 global_function
 void
 Setup()
@@ -5369,7 +5381,7 @@ Setup()
     Meta_Data = PushStruct(Working_Set, meta_data);
     memset(Meta_Data, 0, sizeof(meta_data));
     MetaData_Active_Tag = 0;
-    strcpy((char *)Meta_Data->tags[MetaData_Active_Tag], "Haplotig");
+    ForLoop(ArrayCount(Default_Tags)) strcpy((char *)Meta_Data->tags[MetaData_Active_Tag + index], Default_Tags[index]);
 
     // Contig Name Label UI
     {
@@ -8530,7 +8542,7 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons)
                     }
 
                     scaffCoord_End = scaffCoord_Start + contRealSize - 1;
-                    stbsp_snprintf(buffer, sizeof(buffer), "Scaffold_%u\t%" PRIu64 "\t%" PRIu64 "\t%u\tW\t%s\t%" PRIu64 "\t%" PRIu64 "\t%s", scaffId, scaffCoord_Start, scaffCoord_End, ++scaffPart, contName, contRealStartCoord, contRealEndCoord, invert ? "-" : "+");
+                    stbsp_snprintf(buffer, sizeof(buffer), "Scaffold_%u\t%" PRIu64 "\t%" PRIu64 "\t%u\tW\t%s\t%" PRIu64 "\t%" PRIu64 "\t%s\tPainted", scaffId, scaffCoord_Start, scaffCoord_End, ++scaffPart, contName, contRealStartCoord, contRealEndCoord, invert ? "-" : "+");
                     fwrite(buffer, 1, strlen(buffer), file);
                     if (*cont->metaDataFlags)
                     {
@@ -8600,8 +8612,6 @@ SortMapByMetaTags()
                 break;
             }
         }
-
-        if (!nPixelToConsider) break;
     }
 }
 
