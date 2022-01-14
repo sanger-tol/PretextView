@@ -956,14 +956,14 @@ u08
 Scaff_FF_Flag = 0;
 
 global_variable
-u16
+u32
 Scaff_Painting_Id = 0;
 
 struct
 original_contig
 {
     u32 name[16];
-    u16 *contigMapPixels;
+    u32 *contigMapPixels;
     u32 nContigs;
     u32 pad;
 };
@@ -980,10 +980,10 @@ struct
 contig
 {
     u64 *metaDataFlags;
-    u16 originalContigId;
-    u16 length;
-    u16 startCoord;
-    u16 scaffId;
+    u32 originalContigId;
+    u32 length;
+    u32 startCoord;
+    u32 scaffId;
     u32 pad;
 };
 
@@ -1030,10 +1030,10 @@ MetaData_Edit_State = 0;
 struct
 map_state
 {
-    u16 *contigIds;
-    u16 *originalContigIds;
-    u16 *contigRelCoords;
-    u16 *scaffIds;
+    u32 *contigIds;
+    u32 *originalContigIds;
+    u32 *contigRelCoords;
+    u32 *scaffIds;
     u64 *metaDataFlags;
 };
 
@@ -1045,13 +1045,13 @@ global_function
 void
 UpdateContigsFromMapState()
 {
-    u16 lastScaffID = Map_State->scaffIds[0];
-    u16 scaffId = lastScaffID ? 1 : 0;
-    u16 lastId = Map_State->originalContigIds[0];
-    u16 lastCoord = Map_State->contigRelCoords[0];
+    u32 lastScaffID = Map_State->scaffIds[0];
+    u32 scaffId = lastScaffID ? 1 : 0;
+    u32 lastId = Map_State->originalContigIds[0];
+    u32 lastCoord = Map_State->contigRelCoords[0];
     u32 contigPtr = 0;
-    u16 length = 0;
-    u16 startCoord = lastCoord;
+    u32 length = 0;
+    u32 startCoord = lastCoord;
     u08 inverted = Map_State->contigRelCoords[1] < lastCoord;
     Map_State->contigIds[0] = 0;
     
@@ -1064,8 +1064,8 @@ UpdateContigsFromMapState()
         ++length;
 
         pixelIdx = index + 1;
-        u16 id = Map_State->originalContigIds[pixelIdx];
-        u16 coord = Map_State->contigRelCoords[pixelIdx];
+        u32 id = Map_State->originalContigIds[pixelIdx];
+        u32 coord = Map_State->contigRelCoords[pixelIdx];
 
         if (id != lastId || (inverted && coord != (lastCoord - 1)) || (!inverted && coord != (lastCoord + 1)))
         {
@@ -1077,7 +1077,7 @@ UpdateContigsFromMapState()
             cont->startCoord = startCoord;
             cont->metaDataFlags = Map_State->metaDataFlags + pixelIdx - 1;
 
-            u16 thisScaffID = Map_State->scaffIds[pixelIdx - 1];
+            u32 thisScaffID = Map_State->scaffIds[pixelIdx - 1];
             cont->scaffId = thisScaffID ? ((thisScaffID == lastScaffID) ? (scaffId) : (++scaffId)) : 0;
             lastScaffID = thisScaffID;
 
@@ -1095,7 +1095,7 @@ UpdateContigsFromMapState()
             if (pixelIdx < (Number_of_Pixels_1D - 1)) inverted = Map_State->contigRelCoords[pixelIdx + 1] < coord;
         }
 
-        Map_State->contigIds[pixelIdx] = (u16)contigPtr;
+        Map_State->contigIds[pixelIdx] = (u32)contigPtr;
         lastId = id;
         lastCoord = coord;
     }
@@ -1111,7 +1111,7 @@ UpdateContigsFromMapState()
         cont->startCoord = startCoord;
         cont->metaDataFlags = Map_State->metaDataFlags + pixelIdx - 1;
         
-        u16 thisScaffID = Map_State->scaffIds[pixelIdx];
+        u32 thisScaffID = Map_State->scaffIds[pixelIdx];
         cont->scaffId = thisScaffID ? ((thisScaffID == lastScaffID) ? (scaffId) : (++scaffId)) : 0;
         
         if (IsContigInverted(contigPtr - 1))
@@ -1133,17 +1133,17 @@ AddMapEdit(s32 delta, pointui finalPixels, u32 invert);
 
 global_function
 void
-RebuildContig(u16 pixel)
+RebuildContig(u32 pixel)
 {
     for (;;)
     {
-        u16 contigId = Map_State->contigIds[pixel];
-        u16 origContigId = Map_State->originalContigIds[pixel];
+        u32 contigId = Map_State->contigIds[pixel];
+        u32 origContigId = Map_State->originalContigIds[pixel];
 
         u32 top = (u32)pixel;
         while (top && (Map_State->contigIds[top - 1] == contigId)) --top;
 
-        u32 bottom = (u32)pixel;
+        u32 bottom = pixel;
         while ((bottom < (Number_of_Pixels_1D - 1)) && (Map_State->contigIds[bottom + 1] == contigId)) ++bottom;
 
         if (IsContigInverted(contigId))
@@ -1165,7 +1165,7 @@ RebuildContig(u16 pixel)
 
         if (fragmented)
         {
-            u16 contigTopCoord = Map_State->contigRelCoords[top];
+            u32 contigTopCoord = Map_State->contigRelCoords[top];
             if (contigTopCoord)
             {
                 u32 otherPixel = 0;
@@ -1200,7 +1200,7 @@ RebuildContig(u16 pixel)
             }
             else
             {
-                u16 contigBottomCoord = Map_State->contigRelCoords[bottom];
+                u32 contigBottomCoord = Map_State->contigRelCoords[bottom];
 
                 u32 otherPixel = 0;
                 ForLoop(Number_of_Pixels_1D)
@@ -1242,9 +1242,9 @@ RebuildContig(u16 pixel)
 struct
 map_edit
 {
-    u16 finalPix1;
-    u16 finalPix2;
-    s16 delta;
+    u32 finalPix1;
+    u32 finalPix2;
+    s32 delta;
 };
 
 struct
@@ -1379,10 +1379,10 @@ AddMapEdit(s32 delta, pointui finalPixels, u32 invert)
         Map_Editor->editStackPtr = 0;
     }
 
-    u16 pix1 = (u16)(invert ? Max(finalPixels.x, finalPixels.y) : Min(finalPixels.x, finalPixels.y));
-    u16 pix2 = (u16)(invert ? Min(finalPixels.x, finalPixels.y) : Max(finalPixels.x, finalPixels.y));
+    u32 pix1 = (u32)(invert ? Max(finalPixels.x, finalPixels.y) : Min(finalPixels.x, finalPixels.y));
+    u32 pix2 = (u32)(invert ? Min(finalPixels.x, finalPixels.y) : Max(finalPixels.x, finalPixels.y));
 
-    edit->delta = (s16)delta;
+    edit->delta = (s32)delta;
     edit->finalPix1 = pix1;
     edit->finalPix2 = pix2;
 }
@@ -1903,7 +1903,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             u32 pixel1 = (u32)((f64)nPixels * (0.5 + (f64)wx));
             u32 pixel2 = (u32)((f64)nPixels * (0.5 + (f64)wy));
 
-            u16 contig = Map_State->contigIds[pixel1];
+            u32 contig = Map_State->contigIds[pixel1];
 
             if (!Edit_Pixels.editing && !Edit_Pixels.selecting && Map_State->contigIds[pixel2] != contig)
             {
@@ -2059,7 +2059,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                         }
                         else
                         {
-                            u16 max = 0;
+                            u32 max = 0;
                             ForLoop(Number_of_Pixels_1D) max = Max(max, Map_State->scaffIds[index]);
                             Scaff_Painting_Id = max + 1;
                         }
@@ -2072,7 +2072,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                     u32 pixel = Tool_Tip_Move.pixels.x;
 
                     u32 currScaffId = Map_State->scaffIds[pixel];
-                    u16 contigId = Map_State->contigIds[pixel];
+                    u32 contigId = Map_State->contigIds[pixel];
                     Map_State->scaffIds[pixel] = Scaff_Painting_Id;
 
                     u32 testPixel = pixel;
@@ -2093,7 +2093,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             else if (MetaData_Edit_Mode && MetaData_Edit_State && strlen((const char *)Meta_Data->tags[MetaData_Active_Tag]))
             {
                 u32 pixel = Tool_Tip_Move.pixels.x;
-                u16 contigId = Map_State->contigIds[pixel];
+                u32 contigId = Map_State->contigIds[pixel];
 
                 if (MetaData_Edit_State == 1) Map_State->metaDataFlags[pixel] |= (1 << MetaData_Active_Tag);
                 else Map_State->metaDataFlags[pixel] &= ~(1 << MetaData_Active_Tag);
@@ -3389,7 +3389,7 @@ Render()
             char buff[128];
             f32 position = 0.0f;
             f32 start = 0.0f;
-            u16 scaffId = Contigs->contigs->scaffId;
+            u32 scaffId = Contigs->contigs->scaffId;
             ForLoop(Contigs->numberOfContigs)
             {
                 contig *cont = Contigs->contigs + index;
@@ -3661,7 +3661,7 @@ Render()
                                     if (gph->on)
                                     {
                                         glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
-                                        u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u16), sizeof(u16), GL_MAP_READ_BIT);
+                                        u32 *buffer = (u32 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u32), sizeof(u32), GL_MAP_READ_BIT);
 
                                         stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)gph->name, gph->data[*buffer]);
                                         ++nExtra;
@@ -3681,10 +3681,10 @@ Render()
             textBoxHeight *= (3.0f + (f32)nExtra);
             textBoxHeight += (2.0f + (f32)nExtra);
 
-            u16 id1 = Map_State->originalContigIds[Tool_Tip_Move.pixels.x];
-            u16 id2 = Map_State->originalContigIds[Tool_Tip_Move.pixels.y];
-            u16 coord1 = Map_State->contigRelCoords[Tool_Tip_Move.pixels.x];
-            u16 coord2 = Map_State->contigRelCoords[Tool_Tip_Move.pixels.y];
+            u32 id1 = Map_State->originalContigIds[Tool_Tip_Move.pixels.x];
+            u32 id2 = Map_State->originalContigIds[Tool_Tip_Move.pixels.y];
+            u32 coord1 = Map_State->contigRelCoords[Tool_Tip_Move.pixels.x];
+            u32 coord2 = Map_State->contigRelCoords[Tool_Tip_Move.pixels.y];
             
             f64 bpPerPixel = (f64)Total_Genome_Length / (f64)Number_of_Pixels_1D;
 
@@ -3692,7 +3692,7 @@ Render()
             char *line2 = (char *)"vs";
             char line3[64];
 
-            auto NicePrint = [bpPerPixel](u16 id, u16 coord, char *buffer)
+            auto NicePrint = [bpPerPixel](u32 id, u32 coord, char *buffer)
             {
                 f64 pos = (f64)coord * bpPerPixel;
                 stbsp_snprintf(buffer, 64, "%s %'u %sbp", (Original_Contigs + id)->name, (u32)(pos / (pos > 1000.0 ? 1000.0 : 1.0)), pos > 1000.0 ? "K" : "");
@@ -3749,7 +3749,7 @@ Render()
                                     if (gph->on)
                                     {
                                         glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
-                                        u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u16), sizeof(u16), GL_MAP_READ_BIT);
+                                        u32 *buffer = (u32 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u32), sizeof(u32), GL_MAP_READ_BIT);
 
                                         stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)gph->name, gph->data[*buffer]);
 
@@ -4214,8 +4214,8 @@ LoadTexture(void *in)
     GLuint *textureHandle = (GLuint *)in;
 
     u16 id[2];
-    id[0] = (u16)(*textureHandle >> 8);
-    id[1] = (u16)(*textureHandle & 255);
+    id[0] = (u16)(*textureHandle >> 16);
+    id[1] = (u16)(*textureHandle & ((1 << 16) - 1));
     texture_buffer *buffer = TakeTextureBufferFromQueue_Wait(Texture_Buffer_Queue);
     buffer->x = id[0];
     buffer->y = id[1];
@@ -4254,6 +4254,22 @@ LoadTexture(void *in)
     } while (buffer->x != (u16)x || buffer->y != (u16)y);
 
     FenceIn(Current_Loaded_Texture = buffer);
+}
+
+global_function
+void
+PopulateTextureLoadQueue(void *in)
+{
+    u32 *packedTextureIndexes = (u32 *)in;
+    u32 ptr = 0;
+    ForLoop(Number_of_Textures_1D)
+    {
+        ForLoop2(Number_of_Textures_1D - index)
+        {
+            packedTextureIndexes[ptr] = (index << 16) | (index + index2);
+            ThreadPoolAddTask(Thread_Pool, LoadTexture, (void *)(packedTextureIndexes + ptr++));
+        }
+    }
 }
 
 global_function
@@ -4616,7 +4632,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                 Original_Contigs[index].name[index2] = name[index2];
             }
 
-            (Original_Contigs + index)->contigMapPixels = PushArrayP(arena, u16, Number_of_Pixels_1D);
+            (Original_Contigs + index)->contigMapPixels = PushArrayP(arena, u32, Number_of_Pixels_1D);
             (Original_Contigs + index)->nContigs = 0;
         }
 
@@ -4631,28 +4647,28 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         Number_of_Pixels_1D = Number_of_Textures_1D * Texture_Resolution;
 
         Map_State = PushStructP(arena, map_state);
-        Map_State->contigIds = PushArrayP(arena, u16, Number_of_Pixels_1D);
-        Map_State->originalContigIds = PushArrayP(arena, u16, Number_of_Pixels_1D);
-        Map_State->contigRelCoords = PushArrayP(arena, u16, Number_of_Pixels_1D);
-        Map_State->scaffIds = PushArrayP(arena, u16, Number_of_Pixels_1D);
+        Map_State->contigIds = PushArrayP(arena, u32, Number_of_Pixels_1D);
+        Map_State->originalContigIds = PushArrayP(arena, u32, Number_of_Pixels_1D);
+        Map_State->contigRelCoords = PushArrayP(arena, u32, Number_of_Pixels_1D);
+        Map_State->scaffIds = PushArrayP(arena, u32, Number_of_Pixels_1D);
         Map_State->metaDataFlags = PushArrayP(arena, u64, Number_of_Pixels_1D);
-        memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u16));
+        memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
         memset(Map_State->metaDataFlags, 0, Number_of_Pixels_1D * sizeof(u64));
         f32 total = 0.0f;
-        u16 lastPixel = 0;
-        u16 relCoord = 0;
+        u32 lastPixel = 0;
+        u32 relCoord = 0;
         ForLoop(Number_of_Original_Contigs)
         {
             total += contigFracs[index];
-            u16 pixel = (u16)((f64)Number_of_Pixels_1D * (f64)total);
+            u32 pixel = (u32)((f64)Number_of_Pixels_1D * (f64)total);
             
             relCoord = 0;
 #ifdef RevCoords
-            u16 tmp = pixel - lastPixel - 1;
+            u32 tmp = pixel - lastPixel - 1;
 #endif
             while (lastPixel < pixel)
             {
-                Map_State->originalContigIds[lastPixel] = (u16)index;
+                Map_State->originalContigIds[lastPixel] = index;
                 Map_State->contigRelCoords[lastPixel++] = 
 #ifdef RevCoords
                     tmp - relCoord++;
@@ -4663,7 +4679,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         }
         while (lastPixel < Number_of_Pixels_1D)
         {
-            Map_State->originalContigIds[lastPixel] = (u16)(Number_of_Original_Contigs - 1);
+            Map_State->originalContigIds[lastPixel] = (u32)(Number_of_Original_Contigs - 1);
             Map_State->contigRelCoords[lastPixel++] = relCoord++;
         }
 
@@ -4786,15 +4802,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         u32 nTextures = (Number_of_Textures_1D + 1) * (Number_of_Textures_1D >> 1);
         u32 *packedTextureIndexes = PushArrayP(arena, u32, nTextures);
-        u32 ptr = 0;
-        ForLoop(Number_of_Textures_1D)
-        {
-            ForLoop2(Number_of_Textures_1D - index)
-            {
-                packedTextureIndexes[ptr] = (index << 8) | (index + index2);
-                ThreadPoolAddTask(Thread_Pool, LoadTexture, (void *)(packedTextureIndexes + ptr++));
-            }
-        }
+        ThreadPoolAddTask(Thread_Pool, PopulateTextureLoadQueue, packedTextureIndexes);
 
         glActiveTexture(GL_TEXTURE0);
         glGenTextures(1, &Contact_Matrix->textures);
@@ -4813,7 +4821,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                                     (GLsizei)nTextures, 0, (GLsizei)((resolution >> 1) * resolution * nTextures), 0);
             resolution >>= 1;
         }
-        ptr = 0;
+        u32 ptr = 0;
 
         printf("Loading textures...\n");
         ForLoop(Number_of_Textures_1D)
@@ -4944,24 +4952,24 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         glActiveTexture(GL_TEXTURE2);
 
-        u16 *pixStartLookup = PushArrayP(arena, u16, 2 * nTex);
+        u32 *pixStartLookup = PushArrayP(arena, u32, 2 * nTex);
         u32 ptr = 0;
         ForLoop(Number_of_Textures_1D)
         {
             ForLoop2(Number_of_Textures_1D - index)
             {
-                pixStartLookup[ptr++] = (u16)((index + index2) * Texture_Resolution);
-                pixStartLookup[ptr++] = (u16)(index * Texture_Resolution);
+                pixStartLookup[ptr++] = (u32)((index + index2) * Texture_Resolution);
+                pixStartLookup[ptr++] = (u32)(index * Texture_Resolution);
             }
         }
 
         glGenBuffers(1, &pixStart);
         glBindBuffer(GL_TEXTURE_BUFFER, pixStart);
-        glBufferData(GL_TEXTURE_BUFFER, sizeof(u16) * 2 * nTex, pixStartLookup, GL_STATIC_DRAW);
+        glBufferData(GL_TEXTURE_BUFFER, sizeof(u32) * 2 * nTex, pixStartLookup, GL_STATIC_DRAW);
 
         glGenTextures(1, &pixStartTex);
         glBindTexture(GL_TEXTURE_BUFFER, pixStartTex);
-        glTexBuffer(GL_TEXTURE_BUFFER, GL_RG16UI, pixStart);
+        glTexBuffer(GL_TEXTURE_BUFFER, GL_RG32UI, pixStart);
 
         Contact_Matrix->pixelStartLookupBuffer = pixStart;
         Contact_Matrix->pixelStartLookupBufferTex = pixStartTex;
@@ -4970,19 +4978,19 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         glActiveTexture(GL_TEXTURE3);
 
-        u16 *pixRearrageLookup = PushArrayP(arena, u16, nPix1D);
+        u32 *pixRearrageLookup = PushArrayP(arena, u32, nPix1D);
         ForLoop(nPix1D)
         {
-            pixRearrageLookup[index] = (u16)index;
+            pixRearrageLookup[index] = (u32)index;
         }
 
         glGenBuffers(1, &pixRearrage);
         glBindBuffer(GL_TEXTURE_BUFFER, pixRearrage);
-        glBufferData(GL_TEXTURE_BUFFER, sizeof(u16) * nPix1D, pixRearrageLookup, GL_DYNAMIC_DRAW);
+        glBufferData(GL_TEXTURE_BUFFER, sizeof(u32) * nPix1D, pixRearrageLookup, GL_DYNAMIC_DRAW);
 
         glGenTextures(1, &pixRearrageTex);
         glBindTexture(GL_TEXTURE_BUFFER, pixRearrageTex);
-        glTexBuffer(GL_TEXTURE_BUFFER, GL_R16UI, pixRearrage);
+        glTexBuffer(GL_TEXTURE_BUFFER, GL_R32UI, pixRearrage);
 
         Contact_Matrix->pixelRearrangmentLookupBuffer = pixRearrage;
         Contact_Matrix->pixelRearrangmentLookupBufferTex = pixRearrageTex;
@@ -5752,14 +5760,14 @@ InvertMap(u32 pixelFrom, u32 pixelTo)
     
     u32 copySize = (pixelTo - pixelFrom + 1) >> 1;
     
-    u16 *tmpBuffer = PushArray(Working_Set, u16, copySize);
-    u16 *tmpBuffer2 = PushArray(Working_Set, u16, copySize);
-    u16 *tmpBuffer3 = PushArray(Working_Set, u16, copySize);
-    u16 *tmpBuffer4 = PushArray(Working_Set, u16, copySize);
+    u32 *tmpBuffer = PushArray(Working_Set, u32, copySize);
+    u32 *tmpBuffer2 = PushArray(Working_Set, u32, copySize);
+    u32 *tmpBuffer3 = PushArray(Working_Set, u32, copySize);
+    u32 *tmpBuffer4 = PushArray(Working_Set, u32, copySize);
     u64 *tmpBuffer5 = PushArray(Working_Set, u64, copySize);
 
     glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
-    u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, 0, nPixels * sizeof(u16), GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
+    u32 *buffer = (u32 *)glMapBufferRange(GL_TEXTURE_BUFFER, 0, nPixels * sizeof(u32), GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
 
     if (buffer)
     {
@@ -5806,8 +5814,8 @@ InvertMap(u32 pixelFrom, u32 pixelTo)
     UpdateContigsFromMapState();
 
     map_edit edit;
-    edit.finalPix1 = (u16)pixelTo;
-    edit.finalPix2 = (u16)pixelFrom;
+    edit.finalPix1 = (u32)pixelTo;
+    edit.finalPix2 = (u32)pixelFrom;
     edit.delta = 0;
     MoveWayPoints(&edit);
 }
@@ -5864,12 +5872,12 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
         if (forward)
         {
             u32 target = GetRealBufferLocation(pixelTo + (u32)delta);
-            u16 targetContigId = Map_State->contigIds[target] + (target == Number_of_Pixels_1D - 1 ? 1 : 0);
+            u32 targetContigId = Map_State->contigIds[target] + (target == Number_of_Pixels_1D - 1 ? 1 : 0);
             if (targetContigId)
             {
                 contig *targetContig = Contigs->contigs + targetContigId - 1;
                 
-                u16 targetCoord = IsContigInverted(targetContigId - 1) ? (targetContig->startCoord - targetContig->length + 1) : (targetContig->startCoord + targetContig->length - 1);
+                u32 targetCoord = IsContigInverted(targetContigId - 1) ? (targetContig->startCoord - targetContig->length + 1) : (targetContig->startCoord + targetContig->length - 1);
                 while (delta > 0 && (Map_State->contigIds[target] != targetContigId - 1 || Map_State->contigRelCoords[target] != targetCoord))
                 {
                     --target;
@@ -5884,11 +5892,11 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
         else
         {
             u32 target = GetRealBufferLocation((u32)((s32)pixelFrom + delta));
-            u16 targetContigId = Map_State->contigIds[target];
+            u32 targetContigId = Map_State->contigIds[target];
             if (targetContigId < (Contigs->numberOfContigs - 1))
             {
                 contig *targetContig = Contigs->contigs + (target ? targetContigId + 1 : 0);
-                u16 targetCoord = targetContig->startCoord;
+                u32 targetCoord = targetContig->startCoord;
                 while (delta < 0 && (Map_State->contigIds[target] != (target ? targetContigId + 1 : 0) || Map_State->contigRelCoords[target] != targetCoord))
                 {
                     ++target;
@@ -5920,14 +5928,14 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
 
         u32 copySize = delta > 0 ? (u32)delta : (u32)-delta;
 
-        u16 *tmpBuffer = PushArray(Working_Set, u16, copySize);
-        u16 *tmpBuffer2 = PushArray(Working_Set, u16, copySize);
-        u16 *tmpBuffer3 = PushArray(Working_Set, u16, copySize);
-        u16 *tmpBuffer4 = PushArray(Working_Set, u16, copySize);
+        u32 *tmpBuffer = PushArray(Working_Set, u32, copySize);
+        u32 *tmpBuffer2 = PushArray(Working_Set, u32, copySize);
+        u32 *tmpBuffer3 = PushArray(Working_Set, u32, copySize);
+        u32 *tmpBuffer4 = PushArray(Working_Set, u32, copySize);
         u64 *tmpBuffer5 = PushArray(Working_Set, u64, copySize);
 
         glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
-        u16 *buffer = (u16 *)glMapBufferRange(GL_TEXTURE_BUFFER, 0, nPixels * sizeof(u16), GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
+        u32 *buffer = (u32 *)glMapBufferRange(GL_TEXTURE_BUFFER, 0, nPixels * sizeof(u32), GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
 
         if (buffer)
         {
@@ -5988,9 +5996,9 @@ RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
         UpdateContigsFromMapState();
         
         map_edit edit;
-        edit.finalPix1 = (u16)GetRealBufferLocation((u32)((s32)pixelFrom + delta));
-        edit.finalPix2 = (u16)GetRealBufferLocation((u32)((s32)pixelTo + delta));
-        edit.delta = (s16)delta;
+        edit.finalPix1 = (u32)GetRealBufferLocation((u32)((s32)pixelFrom + delta));
+        edit.finalPix2 = (u32)GetRealBufferLocation((u32)((s32)pixelTo + delta));
+        edit.delta = (s32)delta;
         MoveWayPoints(&edit);
     }
 
@@ -7484,7 +7492,7 @@ SetSaveStatePaths()
 
 global_variable
 u08
-SaveState_Magic[5] = {'p', 't', 's', 'x', 1};
+SaveState_Magic[5] = {'p', 't', 's', 'x', 2};
 
 global_variable
 u08
@@ -7538,8 +7546,8 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
             }
         }
 
-        u16 nScaffs = 0;
-        u16 nMetaFlags = 0;
+        u32 nScaffs = 0;
+        u32 nMetaFlags = 0;
         ForLoop(Contigs->numberOfContigs)
         {
             if ((Contigs->contigs + index)->scaffId) ++nScaffs;
@@ -7558,7 +7566,7 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
             }
         }
 
-        u32 nFileBytes = 350 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (4 * nScaffs) + sizeof(meta_mode_data) + sizeof(MetaData_Active_Tag) + 2 + (10 * nMetaFlags) + 1 + nMetaTags + totalMetaTagSpace;
+        u32 nFileBytes = 352 + (13 * nWayp) + (12 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (8 * nScaffs) + sizeof(meta_mode_data) + sizeof(MetaData_Active_Tag) + 4 + (12 * nMetaFlags) + 1 + nMetaTags + totalMetaTagSpace;
         u08 *fileContents = PushArrayP(Loading_Arena, u08, nFileBytes);
         u08 *fileWriter = fileContents;
 
@@ -7688,7 +7696,7 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
 
             u32 editStackPtr = Map_Editor->editStackPtr == nEdits ? 0 : Map_Editor->editStackPtr;
             u32 nContigFlags = (nEdits + 7) >> 3;
-            u08 *contigFlags = fileWriter + (6 * nEdits);
+            u08 *contigFlags = fileWriter + (12 * nEdits);
             memset(contigFlags, 0, nContigFlags);
 
             ForLoop(nEdits)
@@ -7699,16 +7707,22 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
                 }
                 
                 map_edit *edit = Map_Editor->edits + editStackPtr;
-                u16 x = (u16)((s32)edit->finalPix1 - edit->delta);
-                u16 y = (u16)((s32)edit->finalPix2 - edit->delta);
-                s16 d = (s16)edit->delta;
+                u32 x = (u32)((s32)edit->finalPix1 - edit->delta);
+                u32 y = (u32)((s32)edit->finalPix2 - edit->delta);
+                s32 d = edit->delta;
 
                 *fileWriter++ = ((u08 *)&x)[0];
                 *fileWriter++ = ((u08 *)&x)[1];
+                *fileWriter++ = ((u08 *)&x)[2];
+                *fileWriter++ = ((u08 *)&x)[3];
                 *fileWriter++ = ((u08 *)&y)[0];
                 *fileWriter++ = ((u08 *)&y)[1];
+                *fileWriter++ = ((u08 *)&y)[2];
+                *fileWriter++ = ((u08 *)&y)[3];
                 *fileWriter++ = ((u08 *)&d)[0];
                 *fileWriter++ = ((u08 *)&d)[1];
+                *fileWriter++ = ((u08 *)&d)[2];
+                *fileWriter++ = ((u08 *)&d)[3];
 
                 if (edit->finalPix1 > edit->finalPix2)
                 {
@@ -7728,7 +7742,7 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
         {
             *fileWriter++ = (u08)nWayp;
 
-            u32 ptr = 348 + (13 * nWayp) + (6 * nEdits) + ((nEdits + 7) >> 3);
+            u32 ptr = 348 + (13 * nWayp) + (12 * nEdits) + ((nEdits + 7) >> 3);
             TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
             {
                 f32 x = node->coords.x;
@@ -7758,16 +7772,21 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
         {
             *fileWriter++ = ((u08 *)&nScaffs)[0];
             *fileWriter++ = ((u08 *)&nScaffs)[1];
+            *fileWriter++ = ((u08 *)&nScaffs)[2];
+            *fileWriter++ = ((u08 *)&nScaffs)[3];
             ForLoop(Contigs->numberOfContigs)
             {
                 if ((Contigs->contigs + index)->scaffId)
                 {
-                    u16 cId = (u16)index;
-                    u16 sId = (Contigs->contigs + index)->scaffId;
-                    *fileWriter++ = ((u08 *)&cId)[0];
-                    *fileWriter++ = ((u08 *)&cId)[1];
+                    u32 sId = (Contigs->contigs + index)->scaffId;
+                    *fileWriter++ = ((u08 *)&index)[0];
+                    *fileWriter++ = ((u08 *)&index)[1];
+                    *fileWriter++ = ((u08 *)&index)[2];
+                    *fileWriter++ = ((u08 *)&index)[3];
                     *fileWriter++ = ((u08 *)&sId)[0];
                     *fileWriter++ = ((u08 *)&sId)[1];
+                    *fileWriter++ = ((u08 *)&sId)[2];
+                    *fileWriter++ = ((u08 *)&sId)[3];
                 }
             }
         }
@@ -7782,14 +7801,17 @@ SaveState(u64 headerHash, char *path = 0, u08 overwrite = 0)
 
             *fileWriter++ = ((u08 *)&nMetaFlags)[0];
             *fileWriter++ = ((u08 *)&nMetaFlags)[1];
+            *fileWriter++ = ((u08 *)&nMetaFlags)[2];
+            *fileWriter++ = ((u08 *)&nMetaFlags)[3];
             ForLoop(Contigs->numberOfContigs)
             {
                 if (*(Contigs->contigs + index)->metaDataFlags)
                 {
-                    u16 cId = (u16)index;
                     u64 flags = *(Contigs->contigs + index)->metaDataFlags;
-                    *fileWriter++ = ((u08 *)&cId)[0];
-                    *fileWriter++ = ((u08 *)&cId)[1];
+                    *fileWriter++ = ((u08 *)&index)[0];
+                    *fileWriter++ = ((u08 *)&index)[1];
+                    *fileWriter++ = ((u08 *)&index)[2];
+                    *fileWriter++ = ((u08 *)&index)[3];
                     *fileWriter++ = ((u08 *)&flags)[0];
                     *fileWriter++ = ((u08 *)&flags)[1];
                     *fileWriter++ = ((u08 *)&flags)[2];
@@ -8221,28 +8243,34 @@ LoadState(u64 headerHash, char *path)
                     ForLoop(4) ((u08 *)&nEdits)[index] = *fileContents++;
                     nBytesRead += 4;
 
-                    u08 *contigFlags = fileContents + (6 * nEdits);
+                    u08 *contigFlags = fileContents + (12 * nEdits);
                     u32 nContigFlags = ((u32)nEdits + 7) >> 3;
 
                     ForLoop(nEdits)
                     {
-                        u16 x;
-                        u16 y;
-                        s16 d;
+                        u32 x;
+                        u32 y;
+                        s32 d;
 
                         ((u08 *)&x)[0] = *fileContents++;
                         ((u08 *)&x)[1] = *fileContents++;
+                        ((u08 *)&x)[2] = *fileContents++;
+                        ((u08 *)&x)[3] = *fileContents++;
                         ((u08 *)&y)[0] = *fileContents++;
                         ((u08 *)&y)[1] = *fileContents++;
+                        ((u08 *)&y)[2] = *fileContents++;
+                        ((u08 *)&y)[3] = *fileContents++;
                         ((u08 *)&d)[0] = *fileContents++;
                         ((u08 *)&d)[1] = *fileContents++;
+                        ((u08 *)&d)[2] = *fileContents++;
+                        ((u08 *)&d)[3] = *fileContents++;
 
                         u32 byte = (index + 1) >> 3;
                         u32 bit = (index + 1) & 7;
                         u32 invert  = contigFlags[byte] & (1 << bit);
 
-                        pointui startPixels = {(u32)x, (u32)y};
-                        s32 delta = (s32)d;
+                        pointui startPixels = {x, y};
+                        s32 delta = d;
                         pointui finalPixels = {(u32)((s32)startPixels.x + delta), (u32)((s32)startPixels.y + delta)};
 
                         RearrangeMap(startPixels.x, startPixels.y, delta);
@@ -8252,7 +8280,7 @@ LoadState(u64 headerHash, char *path)
                     }
 
                     fileContents += nContigFlags;
-                    nBytesRead += (nContigFlags + (6 * nEdits));
+                    nBytesRead += (nContigFlags + (12 * nEdits));
                 }
 
                 // waypoints
@@ -8296,29 +8324,35 @@ LoadState(u64 headerHash, char *path)
 
                 // scaffs
                 {
-                    u16 nScaffs;
+                    u32 nScaffs;
                     ((u08 *)&nScaffs)[0] = *fileContents++;
                     ((u08 *)&nScaffs)[1] = *fileContents++;
+                    ((u08 *)&nScaffs)[2] = *fileContents++;
+                    ((u08 *)&nScaffs)[3] = *fileContents++;
 
-                    nBytesRead += 2;
+                    nBytesRead += 4;
 
                     ForLoop(Contigs->numberOfContigs) (Contigs->contigs + index)->scaffId = 0;
 
                     ForLoop(nScaffs)
                     {
-                        u16 cId;
-                        u16 sId;
+                        u32 cId;
+                        u32 sId;
                         ((u08 *)&cId)[0] = *fileContents++;
                         ((u08 *)&cId)[1] = *fileContents++;
+                        ((u08 *)&cId)[2] = *fileContents++;
+                        ((u08 *)&cId)[3] = *fileContents++;
                         ((u08 *)&sId)[0] = *fileContents++;
                         ((u08 *)&sId)[1] = *fileContents++;
+                        ((u08 *)&sId)[2] = *fileContents++;
+                        ((u08 *)&sId)[3] = *fileContents++;
 
                         (Contigs->contigs + cId)->scaffId = sId;
                     }
 
                     UpdateScaffolds();
 
-                    nBytesRead += (4 * nScaffs);
+                    nBytesRead += (8 * nScaffs);
                 }
 
                 // meta data
@@ -8331,18 +8365,22 @@ LoadState(u64 headerHash, char *path)
                     fileContents += sizeof(meta_mode_data);
                     nBytesRead += sizeof(meta_mode_data);
 
-                    u16 nMetaFlags;
+                    u32 nMetaFlags;
                     ((u08 *)&nMetaFlags)[0] = *fileContents++;
                     ((u08 *)&nMetaFlags)[1] = *fileContents++;
-                    nBytesRead += 2;
+                    ((u08 *)&nMetaFlags)[2] = *fileContents++;
+                    ((u08 *)&nMetaFlags)[3] = *fileContents++;
+                    nBytesRead += 4;
 
                     memset(Map_State->metaDataFlags, 0, Number_of_Pixels_1D * sizeof(u64));
                     ForLoop(nMetaFlags)
                     {
-                        u16 cId;
+                        u32 cId;
                         u64 flags;
                         ((u08 *)&cId)[0] = *fileContents++;
                         ((u08 *)&cId)[1] = *fileContents++;
+                        ((u08 *)&cId)[2] = *fileContents++;
+                        ((u08 *)&cId)[3] = *fileContents++;
                         ((u08 *)&flags)[0] = *fileContents++;
                         ((u08 *)&flags)[1] = *fileContents++;
                         ((u08 *)&flags)[2] = *fileContents++;
@@ -8351,7 +8389,7 @@ LoadState(u64 headerHash, char *path)
                         ((u08 *)&flags)[5] = *fileContents++;
                         ((u08 *)&flags)[6] = *fileContents++;
                         ((u08 *)&flags)[7] = *fileContents++;
-                        nBytesRead += 10;
+                        nBytesRead += 12;
 
                         u32 pixel = 0;
                         while ((pixel < Number_of_Pixels_1D) && (Map_State->contigIds[pixel] != cId)) ++pixel;
@@ -8452,9 +8490,9 @@ CopyEditsToClipBoard(GLFWwindow *window)
 
             map_edit *edit = Map_Editor->edits + editStackPtr++;
 
-            u16 start = Min(edit->finalPix1, edit->finalPix2);
-            u16 end = Max(edit->finalPix1, edit->finalPix2);
-            u16 to = start ? start - 1 : (end < (Number_of_Pixels_1D - 1) ? end + 1 : end);
+            u32 start = Min(edit->finalPix1, edit->finalPix2);
+            u32 end = Max(edit->finalPix1, edit->finalPix2);
+            u32 to = start ? start - 1 : (end < (Number_of_Pixels_1D - 1) ? end + 1 : end);
 
             u32 oldFrom = Map_State->contigRelCoords[start];
             u32 oldTo = Map_State->contigRelCoords[end];
@@ -8499,7 +8537,7 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons)
             fwrite(buffer, 1, strlen(buffer), file);
         }
 
-        u16 scaffId = 0;
+        u32 scaffId = 0;
         u64 scaffCoord_Start = 1;
         u32 scaffPart = 0;
 
@@ -8511,7 +8549,7 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons)
             {
                 contig *cont = Contigs->contigs + index;
                 u08 invert = IsContigInverted(index);
-                u16 startCoord = cont->startCoord - (invert ? (cont->length - 1) : 0);
+                u32 startCoord = cont->startCoord - (invert ? (cont->length - 1) : 0);
 
                 invert = (!formatSingletons && (!cont->scaffId || (index && (index < (Contigs->numberOfContigs - 1)) && (cont->scaffId != ((cont + 1)->scaffId)) && (cont->scaffId != ((cont - 1)->scaffId))) || (!index && (cont->scaffId != ((cont + 1)->scaffId))) || ((index == (Contigs->numberOfContigs - 1)) && (cont->scaffId != ((cont - 1)->scaffId))))) ? 0 : invert;
                 
@@ -8647,7 +8685,7 @@ MainArgs
     Camera_Position.z = 1.0f;
 
     CreateMemoryArena(Working_Set, MegaByte(256));
-    Thread_Pool = ThreadPoolInit(&Working_Set, 2); 
+    Thread_Pool = ThreadPoolInit(&Working_Set, 3); 
 
     glfwSetErrorCallback(ErrorCallback);
     if (!glfwInit())
@@ -9283,9 +9321,9 @@ MainArgs
 
                                     map_edit *edit = Map_Editor->edits + editStackPtr;
 
-                                    u16 start = Min(edit->finalPix1, edit->finalPix2);
-                                    u16 end = Max(edit->finalPix1, edit->finalPix2);
-                                    u16 to = start ? start - 1 : (end < (Number_of_Pixels_1D - 1) ? end + 1 : end);
+                                    u32 start = Min(edit->finalPix1, edit->finalPix2);
+                                    u32 end = Max(edit->finalPix1, edit->finalPix2);
+                                    u32 to = start ? start - 1 : (end < (Number_of_Pixels_1D - 1) ? end + 1 : end);
 
                                     u32 oldFrom = Map_State->contigRelCoords[start];
                                     u32 oldTo = Map_State->contigRelCoords[end];
@@ -9354,7 +9392,7 @@ MainArgs
                             {
                                 nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
 
-                                u16 scaffId = 0;
+                                u32 scaffId = 0;
                                 f32 pos = -0.5f;
                                 f32 scaffLen = 0.0f;
                                 u32 nSeq = 0;
@@ -9459,8 +9497,8 @@ MainArgs
                                                 if (*cont->metaDataFlags & (1 << index))
                                                 {
                                                     char buff[128];
-                                                    u16 startCoord = cont->startCoord;
-                                                    u16 endCoord = IsContigInverted(index2) ? (startCoord - cont->length + 1) : (startCoord + cont->length);
+                                                    u32 startCoord = cont->startCoord;
+                                                    u32 endCoord = IsContigInverted(index2) ? (startCoord - cont->length + 1) : (startCoord + cont->length);
 
                                                     stbsp_snprintf((char *)buff, sizeof(buff), "%s [%$" PRIu64 "bp to %$" PRIu64 "bp]", (char *)((Original_Contigs + cont->originalContigId)->name), (u64)((f64)startCoord / (f64)Number_of_Pixels_1D * (f64)Total_Genome_Length), (u64)((f64)(endCoord) / (f64)Number_of_Pixels_1D * (f64)Total_Genome_Length));
                                                     if (nk_button_label(NK_Context, (char *)buff))
