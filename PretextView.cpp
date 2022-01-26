@@ -2460,7 +2460,8 @@ graph
     f32 scale;
     f32 base;
     f32 lineSize;
-    u32 on;
+    u16 on;
+    u16 nameOn;
     nk_colorf colour;
 };
 
@@ -2714,6 +2715,7 @@ Render()
 #endif
    
     // Extensions
+    u08 graphNamesOn = 0;
     {
         TraverseLinkedList(Extensions.head, extension_node)
         {
@@ -2725,6 +2727,8 @@ Render()
 
                         if (gph->on)
                         {
+                            if (gph->nameOn) graphNamesOn = 1;
+
                             f32 factor1 = 1.0f / (2.0f * Camera_Position.z);
                             f32 factor2 = 2.0f / height;
 
@@ -2919,7 +2923,7 @@ Render()
     }
 
     // Text / UI Rendering
-    if (Contig_Name_Labels->on || Scale_Bars->on || Tool_Tip->on || UI_On || Loading || Edit_Mode || Waypoint_Edit_Mode || Waypoints_Always_Visible || Scaff_Edit_Mode || Scaffs_Always_Visible || MetaData_Edit_Mode || MetaData_Always_Visible)
+    if (Contig_Name_Labels->on || Scale_Bars->on || Tool_Tip->on || UI_On || Loading || Edit_Mode || Waypoint_Edit_Mode || Waypoints_Always_Visible || Scaff_Edit_Mode || Scaffs_Always_Visible || MetaData_Edit_Mode || MetaData_Always_Visible || graphNamesOn)
     {
         f32 textNormalMat[16];
         f32 textRotMat[16];
@@ -2948,6 +2952,42 @@ Render()
             textRotMat[12] = -1.0f;
             textRotMat[13] = 1.0f;
             textRotMat[15] = 1.0f;
+        }
+
+        // Extension Labels
+        {
+            TraverseLinkedList(Extensions.head, extension_node)
+            {
+                switch (node->type)
+                {
+                    case extension_graph:
+                        {
+                            graph *gph = (graph *)node->extension;
+
+                            if (gph->on && gph->nameOn)
+                            {
+                                f32 factor1 = 1.0f / (2.0f * Camera_Position.z);
+                                f32 factor2 = 2.0f / height;
+
+                                f32 wy = (factor1 * (1.0f - (factor2 * (height - gph->base)))) + Camera_Position.y;
+
+                                glUseProgram(UI_Shader->shaderProgram);
+                                glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textNormalMat);
+
+                                f32 lh = 0.0f;
+                                fonsClearState(FontStash_Context);
+                                fonsSetSize(FontStash_Context, 32.0f * Screen_Scale.x);
+                                fonsSetAlign(FontStash_Context, FONS_ALIGN_LEFT | FONS_ALIGN_BOTTOM);
+                                fonsSetFont(FontStash_Context, Font_Bold);
+                                fonsVertMetrics(FontStash_Context, 0, 0, &lh);
+                                fonsSetColor(FontStash_Context, FourFloatColorToU32(gph->colour));
+
+                                fonsDrawText(FontStash_Context, Max(ModelXToScreen(-0.5f), 0.0f) + 10.0f, ModelYToScreen(wy) + lh + 1.0f, (const char *)gph->name, 0);
+                            }
+                        }
+                        break;
+                }
+            }
         }
 
         // Contig Labels
@@ -9548,33 +9588,47 @@ MainArgs
                                                     
                                                     bounds = nk_widget_bounds(NK_Context);
                                                     gph->on = nk_check_label(NK_Context, buff, (s32)gph->on) ? 1 : 0;
-                                                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 150, Screen_Scale.y * 600), bounds))
+                                                    if (nk_contextual_begin(NK_Context, 0, nk_vec2(Screen_Scale.x * 320, Screen_Scale.y * 340), bounds))
                                                     {
                                                         struct nk_colorf colour = gph->colour;
 
-                                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
-                                                        nk_label(NK_Context, "Plot Colour", NK_TEXT_CENTERED);
+                                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 330, 2);
+                                                        nk_group_begin(NK_Context, "...1", 0);
+                                                        {
+                                                            nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                                                            nk_label(NK_Context, "Plot Colour", NK_TEXT_CENTERED);
 
-                                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 200, 1);
-                                                        colour = nk_color_picker(NK_Context, colour, NK_RGBA);
+                                                            nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 200, 1);
+                                                            colour = nk_color_picker(NK_Context, colour, NK_RGBA);
 
-                                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
-                                                        if (nk_button_label(NK_Context, "Default")) colour = DefaultGraphColour;
+                                                            nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                                                            if (nk_button_label(NK_Context, "Default")) colour = DefaultGraphColour;
 
-                                                        gph->colour = colour;
+                                                            gph->colour = colour;
 
-                                                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
-                                                        nk_label(NK_Context, "Plot Height", NK_TEXT_CENTERED);
-                                                        nk_slider_float(NK_Context, -16.0f * DefaultGraphBase, &gph->base, 32.0f * DefaultGraphBase, 16.0f);
-                                                        if (nk_button_label(NK_Context, "Default")) gph->base = DefaultGraphBase;
+                                                            nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                                                            gph->nameOn = nk_check_label(NK_Context, "Label", (s32)gph->nameOn) ? 1 : 0;
 
-                                                        nk_label(NK_Context, "Plot Scale", NK_TEXT_CENTERED);
-                                                        nk_slider_float(NK_Context, 0, &gph->scale, 8.0f * DefaultGraphScale, 0.005f);
-                                                        if (nk_button_label(NK_Context, "Default")) gph->scale = DefaultGraphScale;
+                                                            nk_group_end(NK_Context);
+                                                        }
+                                            
+                                                        nk_group_begin(NK_Context, "...2", 0);
+                                                        {
+                                                            nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
+                                                            nk_label(NK_Context, "Plot Height", NK_TEXT_CENTERED);
+                                                            nk_slider_float(NK_Context, -16.0f * DefaultGraphBase, &gph->base, 32.0f * DefaultGraphBase, 16.0f);
+                                                            if (nk_button_label(NK_Context, "Default")) gph->base = DefaultGraphBase;
 
-                                                        nk_label(NK_Context, "Line Width", NK_TEXT_CENTERED);
-                                                        nk_slider_float(NK_Context, 0.1f, &gph->lineSize, 2.0f * DefaultGraphLineSize, 0.001f);
-                                                        if (nk_button_label(NK_Context, "Default")) gph->lineSize = DefaultGraphLineSize;
+                                                            nk_label(NK_Context, "Plot Scale", NK_TEXT_CENTERED);
+                                                            nk_slider_float(NK_Context, 0, &gph->scale, 8.0f * DefaultGraphScale, 0.005f);
+                                                            if (nk_button_label(NK_Context, "Default")) gph->scale = DefaultGraphScale;
+
+                                                            nk_label(NK_Context, "Line Width", NK_TEXT_CENTERED);
+                                                            nk_slider_float(NK_Context, 0.1f, &gph->lineSize, 2.0f * DefaultGraphLineSize, 0.001f);
+                                                            if (nk_button_label(NK_Context, "Default")) gph->lineSize = DefaultGraphLineSize;
+
+                                                            nk_group_end(NK_Context);
+                                                        }
 
                                                         nk_contextual_end(NK_Context);
                                                     }
