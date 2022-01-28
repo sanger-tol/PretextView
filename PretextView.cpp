@@ -2437,6 +2437,14 @@ FourFloatColorToU32(nk_colorf colour)
 }
 
 global_function
+u32
+ThreeFloatColorToU32(nk_colorf colour)
+{
+    return(glfonsRGBA((u08)(colour.r * 255.0f), (u08)(colour.g * 255.0f),
+                (u08)(colour.b * 255.0f), 255));
+}
+
+global_function
 void
 ColourGenerator(u32 index, f32 *rgb)
 {
@@ -2955,7 +2963,21 @@ Render()
         }
 
         // Extension Labels
+        if (graphNamesOn)
         {
+            glUseProgram(UI_Shader->shaderProgram);
+            glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textNormalMat);
+
+            fonsClearState(FontStash_Context);
+            fonsSetSize(FontStash_Context, 32.0f * Screen_Scale.x);
+            fonsSetAlign(FontStash_Context, FONS_ALIGN_LEFT | FONS_ALIGN_TOP);
+            fonsSetFont(FontStash_Context, Font_Bold);
+
+            f32 x = ModelXToScreen(-0.5f);
+            x = Max(x, 0.0f) + 10.0f;
+
+            f32 h = height + 1.0f;
+
             TraverseLinkedList(Extensions.head, extension_node)
             {
                 switch (node->type)
@@ -2966,23 +2988,8 @@ Render()
 
                             if (gph->on && gph->nameOn)
                             {
-                                f32 factor1 = 1.0f / (2.0f * Camera_Position.z);
-                                f32 factor2 = 2.0f / height;
-
-                                f32 wy = (factor1 * (1.0f - (factor2 * (height - gph->base)))) + Camera_Position.y;
-
-                                glUseProgram(UI_Shader->shaderProgram);
-                                glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textNormalMat);
-
-                                f32 lh = 0.0f;
-                                fonsClearState(FontStash_Context);
-                                fonsSetSize(FontStash_Context, 32.0f * Screen_Scale.x);
-                                fonsSetAlign(FontStash_Context, FONS_ALIGN_LEFT | FONS_ALIGN_BOTTOM);
-                                fonsSetFont(FontStash_Context, Font_Bold);
-                                fonsVertMetrics(FontStash_Context, 0, 0, &lh);
-                                fonsSetColor(FontStash_Context, FourFloatColorToU32(gph->colour));
-
-                                fonsDrawText(FontStash_Context, Max(ModelXToScreen(-0.5f), 0.0f) + 10.0f, ModelYToScreen(wy) + lh + 1.0f, (const char *)gph->name, 0);
+                                fonsSetColor(FontStash_Context, ThreeFloatColorToU32(gph->colour));
+                                fonsDrawText(FontStash_Context, x, h - gph->base, (const char *)gph->name, 0);
                             }
                         }
                         break;
@@ -3448,7 +3455,7 @@ Render()
                         vert[3].y = ModelYToScreen(0.5f - start);
 
                         ColourGenerator((u32)scaffId, (f32 *)barColour);
-                        u32 colour = FourFloatColorToU32(*((nk_colorf *)barColour)) | 0xff000000;
+                        u32 colour = ThreeFloatColorToU32(*((nk_colorf *)barColour));
 
                         glUseProgram(Flat_Shader->shaderProgram);
                         glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&barColour);
