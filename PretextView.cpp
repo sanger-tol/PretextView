@@ -748,10 +748,11 @@ edit_pixels
 {
     pointui pixels;
     point2f worldCoords;
-    u32 editing;
-    u32 selecting;
     pointui selectPixels;
-    u32 snap;
+    u08 editing : 1;
+    u08 selecting : 1;
+    u08 scaffSelecting : 1;
+    u08 snap : 1;
 };
 
 global_variable
@@ -937,7 +938,7 @@ Loading = 0;
 
 global_function
 s32
-RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap = 0);
+RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u08 snap = 0);
 
 global_function
 void
@@ -1921,14 +1922,15 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             {
                 Edit_Pixels.selectPixels.x = Max(pixel1, Max(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y));
                 while(  Edit_Pixels.selectPixels.x < (Number_of_Pixels_1D - 1) &&
-                        Map_State->contigIds[Edit_Pixels.selectPixels.x] == Map_State->contigIds[1 + Edit_Pixels.selectPixels.x])
+                        ((Edit_Pixels.scaffSelecting && Map_State->scaffIds[Edit_Pixels.selectPixels.x] && Map_State->scaffIds[Edit_Pixels.selectPixels.x] == Map_State->scaffIds[1 + Edit_Pixels.selectPixels.x] ) || 
+                          Map_State->contigIds[Edit_Pixels.selectPixels.x] == Map_State->contigIds[1 + Edit_Pixels.selectPixels.x]))
                 {
                     ++Edit_Pixels.selectPixels.x;
                 }
 
                 Edit_Pixels.selectPixels.y = Min(pixel1, Min(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y));
                 while(  Edit_Pixels.selectPixels.y > 0 &&
-                        Map_State->contigIds[Edit_Pixels.selectPixels.y] == Map_State->contigIds[Edit_Pixels.selectPixels.y - 1])
+                        ((Edit_Pixels.scaffSelecting && Map_State->scaffIds[Edit_Pixels.selectPixels.y] && Map_State->scaffIds[Edit_Pixels.selectPixels.y] == Map_State->scaffIds[Edit_Pixels.selectPixels.y - 1]) || Map_State->contigIds[Edit_Pixels.selectPixels.y] == Map_State->contigIds[Edit_Pixels.selectPixels.y - 1]))
                 {
                     --Edit_Pixels.selectPixels.y;
                 }
@@ -4107,10 +4109,10 @@ Render()
                     char *helpText2 = (char *)"E: exit, Q: undo, W: redo";
                     char *helpText3 = (char *)"Left Click: pickup, place";
                     char *helpText4 = (char *)"S: toggle snap mode";
-                    char *helpText5 = (char *)"Middle Click / Spacebar: pickup whole contig";
+                    char *helpText5 = (char *)"Middle Click / Spacebar: pickup whole sequence or (hold Shift): scaffold";
                     char *helpText6 = (char *)"Middle Click / Spacebar (while editing): invert sequence";
 
-                    textWidth = fonsTextBounds(FontStash_Context, 0, 0, helpText6, 0, NULL);
+                    textWidth = fonsTextBounds(FontStash_Context, 0, 0, helpText5, 0, NULL);
 
                     glUseProgram(Flat_Shader->shaderProgram);
 
@@ -5869,7 +5871,7 @@ InvertMap(u32 pixelFrom, u32 pixelTo)
 
 global_function
 s32
-RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u32 snap)
+RearrangeMap(u32 pixelFrom, u32 pixelTo, s32 delta, u08 snap)
 {
     if (pixelFrom > pixelTo)
     {
@@ -6060,6 +6062,7 @@ ToggleEditMode(GLFWwindow* window)
 
     if (Edit_Mode && !Edit_Pixels.editing)
     {
+        Edit_Pixels.scaffSelecting = 0;
         Global_Mode = mode_normal;
         if (Tool_Tip->on)
         {
@@ -6481,6 +6484,7 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                         if (action != GLFW_RELEASE) Scaff_FF_Flag |= 2;
                         else Scaff_FF_Flag &= ~2;
                     }
+                    else if (Edit_Mode) Edit_Pixels.scaffSelecting = action != GLFW_RELEASE;
                     else keyPressed = 0;
                     break;
 
@@ -8732,6 +8736,8 @@ MainArgs
     Edit_Pixels.worldCoords.y = 0;
     Edit_Pixels.editing = 0;
     Edit_Pixels.selecting = 0;
+    Edit_Pixels.scaffSelecting = 0;
+    Edit_Pixels.snap = 0;
 
     Camera_Position.x = 0.0f;
     Camera_Position.y = 0.0f;
