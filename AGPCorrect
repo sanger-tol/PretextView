@@ -39,7 +39,7 @@ with open(sys.argv[2], "r") as f:
         if not line.startswith("#"):
             line = line.split("\t")
             if line[4] == "W":
-                seen[line[-4]] = max(seen.setdefault(line[-4], 0), int(line[-2]))
+                seen[line[5]] = max(seen.setdefault(line[5], 0), int(line[7]))
 
 with open(sys.argv[2], "r") as f:
     curr_scaff = None
@@ -58,17 +58,17 @@ with open(sys.argv[2], "r") as f:
 
             line[1] = str(int(line[1]) + correct)
 
-            if line[4] == "W" and ((this_l := int(line[-2])) == seen[line[-4]]):
-                correct += (acc_l := seqs[line[-4]]) - this_l
+            if line[4] == "W" and ((this_l := int(line[7])) == seen[line[5]]):
+                correct += (acc_l := seqs[line[5]]) - this_l
 
-                if int(line[-3]) >= acc_l:
+                if int(line[6]) >= acc_l:
                     sys.exit(
                         "Error with line: {}\n{} > {}".format(
-                            "\t".join(line), line[-3], acc_l
+                            "\t".join(line), line[6], acc_l
                         )
                     )
 
-                line[-2] = str(acc_l)
+                line[7] = str(acc_l)
 
             line[2] = str(int(line[2]) + correct)
 
