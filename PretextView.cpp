@@ -1839,6 +1839,18 @@ AddMapEdit(s32 delta, pointui finalPixels, u32 invert);
 
 global_function
 void
+AddBreakEdit(u32 loc);
+
+global_function
+u08
+BreakMap(const int& loc, const u32& ignore_len);
+
+global_function
+void
+UnbreakMap(const int& loc);
+
+global_function
+void
 RebuildContig(u32 pixel)
 {
     for (;;)
@@ -1960,6 +1972,9 @@ map_edit
         delta = d;
     }
 };
+
+global_variable
+const s32 Break_Edit_Delta = std::numeric_limits<s32>::min();
 
 struct
 waypoint;
@@ -2106,6 +2121,25 @@ AddMapEdit(s32 delta, pointui finalPixels, u32 invert)
 
 global_function
 void
+AddBreakEdit(u32 loc)
+{
+    ++Map_Editor->nEdits;
+    Map_Editor->nUndone = 0;
+
+    map_edit *edit = Map_Editor->edits + Map_Editor->editStackPtr++;
+
+    if (Map_Editor->editStackPtr == Edits_Stack_Size)
+    {
+        Map_Editor->editStackPtr = 0;
+    }
+
+    edit->delta = Break_Edit_Delta;
+    edit->finalPix1 = loc;
+    edit->finalPix2 = loc;
+}
+
+global_function
+void
 UpdateScaffolds()
 {
     ForLoop(Number_of_Pixels_1D) Map_State->scaffIds[index] = (Contigs->contigs_arr + Map_State->contigIds[index])->scaffId;
@@ -2126,6 +2160,13 @@ UndoMapEdit()
         }
 
         map_edit *edit = Map_Editor->edits + (--Map_Editor->editStackPtr);
+
+        if (edit->delta == Break_Edit_Delta)
+        {
+            UnbreakMap((int)edit->finalPix1);
+            UpdateScaffolds();
+            return;
+        }
 
         if (edit->finalPix1 > edit->finalPix2)
         {
@@ -2155,6 +2196,14 @@ RedoMapEdit()
         if (Map_Editor->editStackPtr == Edits_Stack_Size)
         {
             Map_Editor->editStackPtr = 0;
+        }
+
+        if (edit->delta == Break_Edit_Delta)
+        {
+            BreakMap((int)edit->finalPix1, 1);
+            UpdateContigsFromMapState();
+            UpdateScaffolds();
+            return;
         }
 
         u32 start = my_Min(edit->finalPix1, edit->finalPix2);
@@ -6050,8 +6099,8 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 #endif
             while (lastPixel < pixel)
             {
-                Map_State->originalContigIds[lastPixel] = index; // 每一个像素点对应的都是当前contig的编号
-                Map_State->contigRelCoords[lastPixel++] =        // 每一个像素点对应的在当前contig中的局部坐标
+                Map_State->originalContigIds[lastPixel] = index; // Each pixel corresponds to the ID of the current contig
+                Map_State->contigRelCoords[lastPixel++] =        // Each pixel corresponds to the local coordinates within the current contig.
 #ifdef RevCoords
                     tmp - relCoord++;
 #else
@@ -7410,7 +7459,7 @@ RearrangeMap(       // NOTE: VERY IMPORTANT
         
 */
 global_function
-void 
+u08
 BreakMap(
     const int& loc, 
     const u32& ignore_len       // cut点到开头或者结尾的长度不足ignore_len的contig不会被切断
@@ -7451,7 +7500,7 @@ BreakMap(
             l_len,  ignore_len,
             r_len,  ignore_len, 
             loc);
-        return;
+        return 0;
     } 
 
     // cut the contig by amending the original Contig Ids.
@@ -7478,8 +7527,51 @@ BreakMap(
         inversed ? "(is)" : "(isn\'t)", 
         loc );
 
-    return ; 
+    return 1; 
 
+}
+
+global_function
+void
+UnbreakMap(
+    const int& loc
+)
+{
+    if (loc < 0 || (loc + 1) >= (int)Number_of_Pixels_1D)
+    {
+        return;
+    }
+
+    u32 left_id = Map_State->originalContigIds[loc];
+    u32 right_id = Map_State->originalContigIds[loc + 1];
+
+    if ((left_id % Max_Number_of_Contigs) != (right_id % Max_Number_of_Contigs))
+    {
+        return;
+    }
+    if (left_id == right_id)
+    {
+        return;
+    }
+
+    u32 right_contig_id = Map_State->contigIds[loc + 1];
+    s32 ptr_right = loc + 1;
+    u08 inversed = IsContigInverted(right_contig_id);
+    while ( // from loc+1 to right
+        ptr_right < (int)Number_of_Pixels_1D - 1 && 
+        Map_State->contigIds[ptr_right] == right_contig_id && 
+        (Map_State->contigRelCoords[ptr_right] ==  Map_State->contigRelCoords[ptr_right + 1] + (inversed ? +1 : -1)) ) { ++ptr_right; };
+
+    for (u32 tmp = (u32)(loc + 1); tmp <= (u32)ptr_right; tmp++)
+    {
+        if (Map_State->originalContigIds[tmp] >= Max_Number_of_Contigs)
+        {
+            Map_State->originalContigIds[tmp] -= Max_Number_of_Contigs;
+        }
+    }
+
+    UpdateContigsFromMapState();
+    Redisplay = 1;
 }
 
 
@@ -7574,9 +7666,12 @@ void cut_frags(const std::vector<int>& problem_locs, bool consider_gap_extension
             }
         }
         // cut the fragment
-        BreakMap(
+        if (BreakMap(
             loc,   // cut loc
-            consider_min_len_flag ? auto_curation_state.auto_cut_smallest_frag_size_in_pixel:1); // ignore length
+            consider_min_len_flag ? auto_curation_state.auto_cut_smallest_frag_size_in_pixel:1)) // ignore length
+        {
+            AddBreakEdit((u32)loc);
+        }
         UpdateContigsFromMapState();
     }
     Redisplay = 1;
@@ -8927,6 +9022,21 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     break;
 
                 case GLFW_KEY_V:
+                    if (Edit_Mode && action != GLFW_RELEASE)
+                    {
+                        u32 loc = my_Min(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+                        if (BreakMap((int)loc, 1))
+                        {
+                            AddBreakEdit(loc);
+                            UpdateContigsFromMapState();
+                            UpdateScaffolds();
+                            Redisplay = 1;
+                        }
+                    }
+                    else
+                    {
+                        keyPressed = 0;
+                    }
                     break;
 
                 case GLFW_KEY_W:
@@ -9855,9 +9965,19 @@ SaveState(
                 }
                 
                 map_edit *edit = Map_Editor->edits + editStackPtr;
-                u32 x = (u32)((s32)edit->finalPix1 - edit->delta);
-                u32 y = (u32)((s32)edit->finalPix2 - edit->delta);
+                u32 x = 0;
+                u32 y = 0;
                 s32 d = edit->delta;
+                if (edit->delta == Break_Edit_Delta)
+                {
+                    x = edit->finalPix1;
+                    y = edit->finalPix2;
+                }
+                else
+                {
+                    x = (u32)((s32)edit->finalPix1 - edit->delta);
+                    y = (u32)((s32)edit->finalPix2 - edit->delta);
+                }
 
                 *fileWriter++ = ((u08 *)&x)[0];
                 *fileWriter++ = ((u08 *)&x)[1];
@@ -9872,7 +9992,7 @@ SaveState(
                 *fileWriter++ = ((u08 *)&d)[2];
                 *fileWriter++ = ((u08 *)&d)[3];
 
-                if (edit->finalPix1 > edit->finalPix2)
+                if (edit->delta != Break_Edit_Delta && edit->finalPix1 > edit->finalPix2)
                 {
                     u32 byte = (index + 1) >> 3;
                     u32 bit = (index + 1) & 7;
@@ -10009,6 +10129,7 @@ SaveState(
                 }
             }
         }
+
     
         u32 nBytesComp = nFileBytes + 128;
         u08 *compBuff = PushArrayP(Loading_Arena, u08, nBytesComp);
@@ -10430,14 +10551,22 @@ LoadState(u64 headerHash, char *path)
                         u32 bit = (index + 1) & 7; // find the bit in the byte
                         u32 invert  = contigFlags[byte] & (1 << bit);
 
-                        pointui startPixels = {x, y};
-                        s32 delta = d;
-                        pointui finalPixels = {(u32)((s32)startPixels.x + delta), (u32)((s32)startPixels.y + delta)};
+                        if (d == Break_Edit_Delta)
+                        {
+                            BreakMap((int)x, 1);
+                            AddBreakEdit(x);
+                        }
+                        else
+                        {
+                            pointui startPixels = {x, y};
+                            s32 delta = d;
+                            pointui finalPixels = {(u32)((s32)startPixels.x + delta), (u32)((s32)startPixels.y + delta)};
 
-                        RearrangeMap(startPixels.x, startPixels.y, delta);
-                        if (invert) InvertMap(finalPixels.x, finalPixels.y);
+                            RearrangeMap(startPixels.x, startPixels.y, delta);
+                            if (invert) InvertMap(finalPixels.x, finalPixels.y);
 
-                        AddMapEdit(delta, finalPixels, invert);
+                            AddMapEdit(delta, finalPixels, invert);
+                        }
                     }
 
                     fileContents += nContigFlags;
@@ -10602,6 +10731,45 @@ LoadState(u64 headerHash, char *path)
                                 }
                                 break;
                         }
+                    }
+                }
+
+                // breaks (manual/auto cuts without movement)
+                {
+                    if ((nBytesRead + 8) <= nBytesFile && memcmp(fileContents, "brks", 4) == 0)
+                    {
+                        fileContents += 4;
+                        nBytesRead += 4;
+
+                        u32 nBreaks = 0;
+                        ((u08 *)&nBreaks)[0] = *fileContents++;
+                        ((u08 *)&nBreaks)[1] = *fileContents++;
+                        ((u08 *)&nBreaks)[2] = *fileContents++;
+                        ((u08 *)&nBreaks)[3] = *fileContents++;
+                        nBytesRead += 4;
+
+                        std::vector<u32> break_locs;
+                        break_locs.reserve(nBreaks);
+                        for (u32 i = 0; i < nBreaks; i++)
+                        {
+                            if ((nBytesRead + 4) > nBytesFile) break;
+                            u32 loc = 0;
+                            ((u08 *)&loc)[0] = *fileContents++;
+                            ((u08 *)&loc)[1] = *fileContents++;
+                            ((u08 *)&loc)[2] = *fileContents++;
+                            ((u08 *)&loc)[3] = *fileContents++;
+                            nBytesRead += 4;
+                            if (loc < Number_of_Pixels_1D) break_locs.push_back(loc);
+                        }
+
+                        for (u32 loc : break_locs)
+                        {
+                            if (BreakMap((int)loc, 1))
+                            {
+                                AddBreakEdit(loc);
+                            }
+                        }
+                        if (!break_locs.empty()) UpdateContigsFromMapState();
                     }
                 }
             }
