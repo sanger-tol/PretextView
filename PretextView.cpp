@@ -560,6 +560,26 @@ Mouse_Move;
 global_variable
 tool_tip Tool_Tip_Move; 
 
+global_variable
+point2f
+MetaData_Help_Pos;
+
+global_variable
+point2f
+MetaData_Help_Size;
+
+global_variable
+point2f
+MetaData_Help_Drag_Offset;
+
+global_variable
+u08
+MetaData_Help_Pos_Set = 0;
+
+global_variable
+u08
+MetaData_Help_Drag = 0;
+
 
 global_variable
 edit_pixels
@@ -2898,6 +2918,18 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
 
     u32 redisplay = 0;
 
+    if (MetaData_Help_Drag && MetaData_Edit_Mode && !UI_On)
+    {
+        s32 w, h;
+        glfwGetWindowSize(window, &w, &h);
+        MetaData_Help_Pos.x = (f32)x - MetaData_Help_Drag_Offset.x;
+        MetaData_Help_Pos.y = (f32)y - MetaData_Help_Drag_Offset.y;
+        MetaData_Help_Pos.x = my_Max(0.0f, my_Min(MetaData_Help_Pos.x, (f32)w - MetaData_Help_Size.x));
+        MetaData_Help_Pos.y = my_Max(0.0f, my_Min(MetaData_Help_Pos.y, (f32)h - MetaData_Help_Size.y));
+        MetaData_Help_Pos_Set = 1;
+        redisplay = 1;
+    }
+
     if (UI_On)
     {
     }
@@ -3314,13 +3346,30 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         }
         else if (button == primaryMouse && MetaData_Edit_Mode && action == GLFW_PRESS)
         {
-            MetaData_Edit_State = 1;
-            MouseMove(window, x, y);
+            if (MetaData_Help_Pos_Set &&
+                x >= MetaData_Help_Pos.x &&
+                y >= MetaData_Help_Pos.y &&
+                x <= (MetaData_Help_Pos.x + MetaData_Help_Size.x) &&
+                y <= (MetaData_Help_Pos.y + MetaData_Help_Size.y))
+            {
+                MetaData_Help_Drag = 1;
+                MetaData_Help_Drag_Offset.x = (f32)x - MetaData_Help_Pos.x;
+                MetaData_Help_Drag_Offset.y = (f32)y - MetaData_Help_Pos.y;
+            }
+            else
+            {
+                MetaData_Edit_State = 1;
+                MouseMove(window, x, y);
+            }
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && MetaData_Edit_Mode && action == GLFW_PRESS)
         {
             MetaData_Edit_State = 2;
             MouseMove(window, x, y);
+        }
+        else if (button == primaryMouse && MetaData_Help_Drag && action == GLFW_RELEASE)
+        {
+            MetaData_Help_Drag = 0;
         }
         else if ((button == GLFW_MOUSE_BUTTON_MIDDLE || button == primaryMouse) && MetaData_Edit_Mode && action == GLFW_RELEASE)
         {
@@ -5247,10 +5296,24 @@ Render() {
                 glUseProgram(Flat_Shader->shaderProgram);
                 glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&MetaData_Mode_Data->bg);
 
-                vert[0].x = width - spacing - textWidth;  vert[0].y = height - spacing - textBoxHeight;
-                vert[1].x = width - spacing - textWidth;  vert[1].y = height - spacing;
-                vert[2].x = width - spacing;              vert[2].y = height - spacing;
-                vert[3].x = width - spacing;              vert[3].y = height - spacing - textBoxHeight;
+                MetaData_Help_Size.x = textWidth;
+                MetaData_Help_Size.y = textBoxHeight;
+                if (!MetaData_Help_Pos_Set)
+                {
+                    MetaData_Help_Pos.x = width - spacing - textWidth;
+                    MetaData_Help_Pos.y = height - spacing - textBoxHeight;
+                    MetaData_Help_Pos_Set = 1;
+                }
+                MetaData_Help_Pos.x = my_Max(0.0f, my_Min(MetaData_Help_Pos.x, width - textWidth));
+                MetaData_Help_Pos.y = my_Max(0.0f, my_Min(MetaData_Help_Pos.y, height - textBoxHeight));
+
+                const f32 boxX = MetaData_Help_Pos.x;
+                const f32 boxY = MetaData_Help_Pos.y;
+
+                vert[0].x = boxX;             vert[0].y = boxY;
+                vert[1].x = boxX;             vert[1].y = boxY + textBoxHeight;
+                vert[2].x = boxX + textWidth; vert[2].y = boxY + textBoxHeight;
+                vert[3].x = boxX + textWidth; vert[3].y = boxY;
 
                 glBindBuffer(GL_ARRAY_BUFFER, Waypoint_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
@@ -5261,8 +5324,8 @@ Render() {
                 for (u32 i=0; i< helpTexts.size() ; i++) {
                     fonsDrawText(
                         FontStash_Context, 
-                        width - spacing - textWidth, 
-                        height - spacing - textBoxHeight + (lh + 1.0f) * i, 
+                        boxX, 
+                        boxY + (lh + 1.0f) * i, 
                         helpTexts[i].c_str(), 
                         0);
                 }
@@ -5292,9 +5355,111 @@ Render() {
             fonsVertMetrics(FontStash_Context, 0, 0, &lh);
             fonsSetColor(FontStash_Context, FourFloatColorToU32(Tool_Tip->fg));
            
-            // Extension info, extra lines
+            // Extension + scaffold/tag info, extra lines
             u32 nExtra = 0;
             f32 longestExtraLineLength = 0.0f;
+            char scaffLine[64];
+            char tagLine[256];
+            const u32 tooltipPixel = Tool_Tip_Move.pixels.x;
+            const u32 scaffId = Map_State->scaffIds[tooltipPixel];
+            stbsp_snprintf(scaffLine, sizeof(scaffLine), "Scaffold: %u", scaffId);
+            longestExtraLineLength = my_Max(
+                longestExtraLineLength,
+                fonsTextBounds(FontStash_Context, 0, 0, scaffLine, 0, NULL));
+            ++nExtra;
+
+            {
+                u64 flags = Map_State->metaDataFlags[tooltipPixel];
+                if (Contigs && tooltipPixel < Number_of_Pixels_1D)
+                {
+                    u32 contigId = Map_State->contigIds[tooltipPixel];
+                    if (contigId < Contigs->numberOfContigs)
+                    {
+                        u64 *flagPtr = (Contigs->contigs_arr + contigId)->metaDataFlags;
+                        if (flagPtr) flags = *flagPtr;
+                    }
+                }
+                if (!flags)
+                {
+                    stbsp_snprintf(tagLine, sizeof(tagLine), "Tags: <none>");
+                }
+                else
+                {
+                    const u32 maxShown = 6;
+                    char tagsBuffer[192];
+                    const size_t tagsBufferSize = sizeof(tagsBuffer);
+                    tagsBuffer[0] = '\0';
+                    u32 tagCount = 0;
+                    u32 shownCount = 0;
+                    size_t tagsLen = 0;
+                    ForLoop(ArrayCount(Meta_Data->tags))
+                    {
+                        if (!(flags & (1ULL << index))) continue;
+                        ++tagCount;
+                        if (shownCount >= maxShown) continue;
+                        const char *tagName = (const char *)Meta_Data->tags[index];
+                        char fallback[16];
+                        if (!tagName || !tagName[0])
+                        {
+                            stbsp_snprintf(fallback, sizeof(fallback), "Tag%u", index + 1);
+                            tagName = fallback;
+                        }
+                        if (tagsLen + 1 >= tagsBufferSize) break;
+                        if (shownCount)
+                        {
+                            size_t remaining = tagsBufferSize - tagsLen;
+                            int wrote = stbsp_snprintf(
+                                tagsBuffer + tagsLen,
+                                remaining,
+                                ", ");
+                            if (wrote < 0) break;
+                            if ((size_t)wrote >= remaining)
+                            {
+                                tagsLen = tagsBufferSize - 1;
+                                tagsBuffer[tagsLen] = '\0';
+                                break;
+                            }
+                            tagsLen += (size_t)wrote;
+                        }
+                        {
+                            size_t remaining = tagsBufferSize - tagsLen;
+                            int wrote = stbsp_snprintf(
+                                tagsBuffer + tagsLen,
+                                remaining,
+                                "%s",
+                                tagName);
+                            if (wrote < 0) break;
+                            if ((size_t)wrote >= remaining)
+                            {
+                                tagsLen = tagsBufferSize - 1;
+                                tagsBuffer[tagsLen] = '\0';
+                                break;
+                            }
+                            tagsLen += (size_t)wrote;
+                        }
+                        ++shownCount;
+                    }
+                    if (tagCount > shownCount)
+                    {
+                        stbsp_snprintf(
+                            tagLine,
+                            sizeof(tagLine),
+                            "Tags: %s +%u more",
+                            tagsBuffer,
+                            tagCount - shownCount);
+                    }
+                    else
+                    {
+                        stbsp_snprintf(tagLine, sizeof(tagLine), "Tags: %s", tagsBuffer);
+                    }
+                }
+            }
+            longestExtraLineLength = my_Max(
+                longestExtraLineLength,
+                fonsTextBounds(FontStash_Context, 0, 0, tagLine, 0, NULL));
+            ++nExtra;
+
+            const u32 extraFixedLines = 2;
             {
                 if (Extensions.head)
                 {
@@ -5377,6 +5542,10 @@ Render() {
                     ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + lh + 1.0f, line2, 0);
             fonsDrawText(FontStash_Context, ModelXToScreen(Tool_Tip_Move.worldCoords.x) + spacing, 
                     ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + (2.0f * lh) + 2.0f, line3, 0);
+            fonsDrawText(FontStash_Context, ModelXToScreen(Tool_Tip_Move.worldCoords.x) + spacing, 
+                    ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + (3.0f * (lh + 1.0f)), scaffLine, 0);
+            fonsDrawText(FontStash_Context, ModelXToScreen(Tool_Tip_Move.worldCoords.x) + spacing, 
+                    ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + (4.0f * (lh + 1.0f)), tagLine, 0);
 
             {
                 if (Extensions.head)
@@ -5398,7 +5567,7 @@ Render() {
                                         stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)gph->name, gph->data[*buffer]);
 
                                         fonsDrawText(FontStash_Context, ModelXToScreen(Tool_Tip_Move.worldCoords.x) + spacing, 
-                                                ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + ((2.0f + (f32)(++count)) * (lh + 1.0f)), buff, 0);
+                                                ModelYToScreen(-Tool_Tip_Move.worldCoords.y) + spacing + ((2.0f + (f32)extraFixedLines + (f32)(++count)) * (lh + 1.0f)), buff, 0);
 
                                         glUnmapBuffer(GL_TEXTURE_BUFFER);
                                         glBindBuffer(GL_TEXTURE_BUFFER, 0);
@@ -9385,6 +9554,10 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     break;
                 
                 case GLFW_KEY_P:
+                    if (Edit_Mode)
+                    {
+                        CopyHighlightedRegionToClipboard(window);
+                    }
                     break;
 
                 case GLFW_KEY_Q:
@@ -12021,6 +12194,40 @@ TextInput(GLFWwindow* window, u32 codepoint)
 
 global_function
 void
+CopyHighlightedRegionToClipboard(GLFWwindow *window)
+{
+    if (!File_Loaded || !Map_State || !Original_Contigs || !Number_of_Pixels_1D) return;
+
+    u32 pixelStart, pixelEnd;
+    if (Edit_Pixels.editing)
+    {
+        pixelStart = my_Min(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+        pixelEnd = my_Max(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+    }
+    else if (Edit_Pixels.selecting)
+    {
+        pixelStart = my_Min(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y);
+        pixelEnd = my_Max(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y);
+    }
+    else return;
+
+    pixelStart = my_Min(pixelStart, Number_of_Pixels_1D - 1);
+    pixelEnd = my_Min(pixelEnd, Number_of_Pixels_1D - 1);
+
+    f64 bpPerPixel = (f64)Total_Genome_Length / (f64)Number_of_Pixels_1D;
+    f64 startMbp = ((f64)pixelStart * bpPerPixel) / 1e6;
+    f64 endMbp = ((f64)(pixelEnd + 1) * bpPerPixel) / 1e6;
+
+    u32 origId = GetOriginalContigBaseId(Map_State->originalContigIds[pixelStart]);
+    const char *name = (const char *)(Original_Contigs + origId)->name;
+
+    char buffer[256];
+    stbsp_snprintf(buffer, sizeof(buffer), "%s %.2f Mbp - %.2f Mbp", name, startMbp, endMbp);
+    glfwSetClipboardString(window, buffer);
+}
+
+global_function
+void
 CopyEditsToClipBoard(GLFWwindow *window)
 {
     u32 nEdits = my_Min(Edits_Stack_Size, Map_Editor->nEdits);
@@ -12959,7 +13166,7 @@ MainArgs
                                 
                                 nk_popup_end(NK_Context);
                             } else {
-                                /* 如果用户点击了窗口外的区域，也关闭弹出窗口 */
+                                /* user clicks outside the window area, the pop-up window will also close */
                                 auto_cut_button = 0;
                                 #ifdef DEBUG 
                                     fmt::println("Outside of the popup window is clicked.");
