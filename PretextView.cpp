@@ -3284,10 +3284,10 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
             MouseMove(window, x, y);
             if (!Edit_Pixels.editing) UpdateScaffolds();
         }
-        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && !Edit_Pixels.editing)
+        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && Edit_Pixels.selecting)
         {
-            Edit_Pixels.editing = 1;
             Edit_Pixels.selecting = 0;
+            if (!Edit_Pixels.editing) Edit_Pixels.editing = 1;
             MouseMove(window, x, y);
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_PRESS && !Edit_Pixels.editing)
@@ -9766,10 +9766,10 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                         glfwGetCursorPos(window, &x, &y);
                         MouseMove(window, x, y);
                     }
-                    else if (Edit_Mode && !Edit_Pixels.editing && action == GLFW_RELEASE)
+                    else if (Edit_Mode && Edit_Pixels.selecting && action == GLFW_RELEASE)
                     {
-                        Edit_Pixels.editing = 1;
                         Edit_Pixels.selecting = 0;
+                        if (!Edit_Pixels.editing) Edit_Pixels.editing = 1;
                         f64 x, y;
                         glfwGetCursorPos(window, &x, &y);
                         MouseMove(window, x, y);
