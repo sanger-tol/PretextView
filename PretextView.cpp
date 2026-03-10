@@ -5565,7 +5565,10 @@ Render() {
             f32 longestExtraLineLength = 0.0f;
             char scaffLine[64];
             char tagLine[256];
-            const u32 tooltipPixel = Tool_Tip_Move.pixels.x;
+            const u32 nPix = Number_of_Pixels_1D ? Number_of_Pixels_1D - 1 : 0;
+            const u32 tooltipPixelX = my_Min(Tool_Tip_Move.pixels.x, nPix);
+            const u32 tooltipPixelY = my_Min(Tool_Tip_Move.pixels.y, nPix);
+            const u32 tooltipPixel = tooltipPixelX;
             const u32 scaffId = Map_State->scaffIds[tooltipPixel];
             stbsp_snprintf(scaffLine, sizeof(scaffLine), "Scaffold: %u", scaffId);
             longestExtraLineLength = my_Max(
@@ -5679,7 +5682,7 @@ Render() {
                                     if (gph->on)
                                     {
                                         glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
-                                        u32 *buffer = (u32 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u32), sizeof(u32), GL_MAP_READ_BIT);
+                                        u32 *buffer = (u32 *)glMapBufferRange(GL_TEXTURE_BUFFER, tooltipPixelX * sizeof(u32), sizeof(u32), GL_MAP_READ_BIT);
 
                                         stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)gph->name, gph->data[*buffer]);
                                         ++nExtra;
@@ -5699,10 +5702,10 @@ Render() {
             textBoxHeight *= (3.0f + (f32)nExtra);
             textBoxHeight += (2.0f + (f32)nExtra);
 
-            u32 id1 = GetOriginalContigBaseId(Map_State->originalContigIds[Tool_Tip_Move.pixels.x]);
-            u32 id2 = GetOriginalContigBaseId(Map_State->originalContigIds[Tool_Tip_Move.pixels.y]);
-            u32 coord1 = Map_State->contigRelCoords[Tool_Tip_Move.pixels.x];
-            u32 coord2 = Map_State->contigRelCoords[Tool_Tip_Move.pixels.y];
+            u32 id1 = GetOriginalContigBaseId(Map_State->originalContigIds[tooltipPixelX]);
+            u32 id2 = GetOriginalContigBaseId(Map_State->originalContigIds[tooltipPixelY]);
+            u32 coord1 = Map_State->contigRelCoords[tooltipPixelX];
+            u32 coord2 = Map_State->contigRelCoords[tooltipPixelY];
             
             f64 bpPerPixel = (f64)Total_Genome_Length / (f64)Number_of_Pixels_1D;
 
@@ -5767,7 +5770,7 @@ Render() {
                                     if (gph->on)
                                     {
                                         glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
-                                        u32 *buffer = (u32 *)glMapBufferRange(GL_TEXTURE_BUFFER, Tool_Tip_Move.pixels.x * sizeof(u32), sizeof(u32), GL_MAP_READ_BIT);
+                                        u32 *buffer = (u32 *)glMapBufferRange(GL_TEXTURE_BUFFER, tooltipPixelX * sizeof(u32), sizeof(u32), GL_MAP_READ_BIT);
 
                                         stbsp_snprintf(buff, sizeof(buff), "%s: %$d", (char *)gph->name, gph->data[*buffer]);
 
@@ -6715,6 +6718,9 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
        
         Edit_Pixels.editing = 0;
         Global_Mode = mode_normal;
+
+        MetaData_Help_Pos_Set = 0;
+        MetaData_Help_Drag = 0;
 
         Extensions = {};
 
