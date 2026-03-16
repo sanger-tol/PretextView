@@ -325,7 +325,7 @@ public:
         if (this->start_pixel>0 ) // if selected frags <= 5, still sort them together without clustering first.
         {   
             u32 frag_id = Map_State->contigIds[this->start_pixel-1];
-            if (Contigs->contigs_arr[frag_id].length >= this->smallest_frag_size_in_pixel)
+            if (frag_id < Contigs->numberOfContigs && Contigs->contigs_arr[frag_id].length >= this->smallest_frag_size_in_pixel)
             {
                 select_area.source_frag_id = frag_id;
             }
@@ -340,7 +340,7 @@ public:
         if (this->end_pixel + 1 <= number_of_pixels_1D - 1)
         {   
             u32 frag_id = Map_State->contigIds[this->end_pixel+1];
-            if (Contigs->contigs_arr[frag_id].length >= this->smallest_frag_size_in_pixel)
+            if (frag_id < Contigs->numberOfContigs && Contigs->contigs_arr[frag_id].length >= this->smallest_frag_size_in_pixel)
             {
                 select_area.sink_frag_id = frag_id;
             }

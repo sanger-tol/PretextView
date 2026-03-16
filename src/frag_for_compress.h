@@ -133,7 +133,7 @@ struct Frag4compress {
         }
 
         this->frag_id = new u32[num];
-        this->startCoord = new u32[num];
+        this->startCoord = new u32[num]();
         this->length = new u32[num];
         this->inversed = new bool[num];
         this->metaDataFlags = new u64[num];
@@ -145,6 +145,11 @@ struct Frag4compress {
         {
             frag_id[i] = selected_frag_ids_tmp[i];
             inversed[i] = false;
+            if ((u32)frag_id[i] >= Contigs->numberOfContigs)
+            {
+                fmt::print(stderr, "[Frag4compress::re_allocate_mem] frag_id[{}]={} >= numberOfContigs={}\n", i, frag_id[i], Contigs->numberOfContigs);
+                assert(0);
+            }
             length[i] = Contigs->contigs_arr[frag_id[i]].length;
             total_length += length[i];
             metaDataFlags[i] = (Contigs->contigs_arr[frag_id[i]].metaDataFlags == nullptr)?0:*(Contigs->contigs_arr[frag_id[i]].metaDataFlags);

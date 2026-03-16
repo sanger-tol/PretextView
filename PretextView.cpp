@@ -82,6 +82,7 @@ SOFTWARE.
 #pragma clang diagnostic pop
 
 #include <signal.h>
+#include <ctime>
 #include <fcntl.h>
 #ifdef _WIN32
 #include <io.h>
@@ -747,6 +748,10 @@ char
 Crash_Report_Path[256] = "pretextview_crash_report.txt";
 
 global_variable
+u08
+Loaded_File_Path[256] = {0};
+
+global_variable
 char
 Crash_Report_Snapshot[2048] = {0};
 
@@ -949,11 +954,45 @@ CrashSignalHandler(int sig)
         case SIGFPE: sigName = "SIGFPE"; break;
     }
 
-    int fd = PV_OPEN(Crash_Report_Path, PV_OPEN_FLAGS, 0644);
+    /* Build path with timestamp so each crash gets a unique file */
+    char pathWithTimestamp[512];
+    const char *dot = strrchr(Crash_Report_Path, '.');
+    if (dot && dot > Crash_Report_Path && strcmp(dot, ".txt") == 0)
+    {
+        std::time_t t = std::time(0);
+        std::tm *tm = std::localtime(&t);
+        char ts[32];
+        if (tm && std::strftime(ts, sizeof(ts), "_%Y-%m-%d_%H-%M-%S", tm) > 0)
+        {
+            size_t baseLen = (size_t)(dot - Crash_Report_Path);
+            if (baseLen + strlen(ts) + 5 < sizeof(pathWithTimestamp))
+            {
+                memcpy(pathWithTimestamp, Crash_Report_Path, baseLen);
+                pathWithTimestamp[baseLen] = '\0';
+                strcat(pathWithTimestamp, ts);
+                strcat(pathWithTimestamp, ".txt");
+            }
+            else
+            {
+                strncpy(pathWithTimestamp, Crash_Report_Path, sizeof(pathWithTimestamp) - 1);
+                pathWithTimestamp[sizeof(pathWithTimestamp) - 1] = '\0';
+            }
+        }
+        else
+        {
+            strncpy(pathWithTimestamp, Crash_Report_Path, sizeof(pathWithTimestamp) - 1);
+            pathWithTimestamp[sizeof(pathWithTimestamp) - 1] = '\0';
+        }
+    }
+    else
+    {
+        strncpy(pathWithTimestamp, Crash_Report_Path, sizeof(pathWithTimestamp) - 1);
+        pathWithTimestamp[sizeof(pathWithTimestamp) - 1] = '\0';
+    }
+
+    int fd = PV_OPEN(pathWithTimestamp, PV_OPEN_FLAGS, 0644);
     if (fd >= 0)
     {
-        const char *header = "PretextView crash report\n";
-        const char *label = "Signal: ";
         const char *newline = "\n";
 
         auto write_all = [](int outFd, const char *s) {
@@ -963,8 +1002,22 @@ CrashSignalHandler(int sig)
             if (n) PV_WRITE(outFd, s, n);
         };
 
-        write_all(fd, header);
-        write_all(fd, label);
+        /* Timestamp in report content */
+        std::time_t t = std::time(0);
+        std::tm *tm = std::localtime(&t);
+        char timeBuf[64];
+        if (tm && std::strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", tm) > 0)
+        {
+            write_all(fd, "PretextView crash report\n");
+            write_all(fd, "Timestamp: ");
+            write_all(fd, timeBuf);
+            write_all(fd, newline);
+        }
+        else
+        {
+            write_all(fd, "PretextView crash report\n");
+        }
+        write_all(fd, "Signal: ");
         write_all(fd, sigName);
         write_all(fd, newline);
         write_all(fd, Crash_Report_Snapshot);
@@ -1560,7 +1613,7 @@ Clipboard_Save_Name_Buffer[1024] = "clipboard.txt";
 
 global_variable
 char
-Debug_Save_Name_Buffer[1024] = "pretextview_debug_report.txt";
+Debug_Save_Name_Buffer[1024] = "pretextview_error_report.txt";
 
 global_variable
 s32
@@ -1575,7 +1628,10 @@ SetSaveStateNameBuffer(char *name)
     {
         AGP_Name_Buffer[ptr] = *name;
         Edits_Name_Buffer[ptr] = *name;
-        Save_State_Name_Buffer[ptr++] = *name++;
+        Save_State_Name_Buffer[ptr] = *name;
+        Debug_Save_Name_Buffer[ptr] = *name;
+        ptr++;
+        name++;
     }
     
     u32 ptr1 = ptr;
@@ -1597,8 +1653,61 @@ SetSaveStateNameBuffer(char *name)
     name = (char *)"_clipboard.txt";
     while (*name) Clipboard_Save_Name_Buffer[ptr++] = *name++;
     Clipboard_Save_Name_Buffer[ptr] = 0;
+
+    ptr = ptr1;
+    name = (char *)"_error_report.txt";
+    while (*name) Debug_Save_Name_Buffer[ptr++] = *name++;
+    Debug_Save_Name_Buffer[ptr] = 0;
 }
 
+// the 
+global_function
+void
+UpdateCrashReportPathFromLoadedFile(const char *filePath)
+{
+    if (!filePath || !filePath[0]) return;
+    strncpy((char *)Loaded_File_Path, filePath, sizeof(Loaded_File_Path) - 1);
+    Loaded_File_Path[sizeof(Loaded_File_Path) - 1] = 0;
+    std::filesystem::path p(filePath);
+    std::string dir = p.parent_path().string();
+    if (!dir.empty())
+    {
+#ifdef _WIN32
+        if (dir.back() != '\\') dir += '\\';
+#else
+        if (dir.back() != '/') dir += '/';
+#endif
+        std::string basename = p.filename().string();
+        std::string crashPath = dir + basename + "_error_report.txt";
+        if (crashPath.size() < sizeof(Crash_Report_Path))
+        {
+            memcpy(Crash_Report_Path, crashPath.c_str(), crashPath.size() + 1);
+        }
+    }
+}
+
+global_variable
+char
+Loaded_File_Directory_For_Save[MAX_PATH_LEN] = {0};
+
+global_function
+const char *
+GetLoadedFileDirectoryForSaveDialog(void)
+{
+    if (!Loaded_File_Path[0]) return 0;
+    std::filesystem::path p((const char *)Loaded_File_Path);
+    std::string dir = p.parent_path().string();
+    if (dir.empty()) return 0;
+#ifdef _WIN32
+    if (dir.back() != '\\') dir += '\\';
+#else
+    if (dir.back() != '/') dir += '/';
+#endif
+    size_t n = dir.size();
+    if (n >= MAX_PATH_LEN) return 0;
+    memcpy(Loaded_File_Directory_For_Save, dir.c_str(), n + 1);
+    return Loaded_File_Directory_For_Save;
+}
 
 /* 
 @params: 
@@ -8856,6 +8965,13 @@ void
 auto_sort_func(char* currFileName)
 {   
     if (!currFileName || !auto_sort_state) return;
+    if (!Contigs || !Map_State || !textures_array_ptr || !Contact_Matrix || !frag_sort_method)
+    {
+        fprintf(stderr, "[Pixel Sort] Error: Contigs=%p Map_State=%p textures_array_ptr=%p Contact_Matrix=%p frag_sort_method=%p\n",
+            (void*)Contigs, (void*)Map_State, (void*)textures_array_ptr, (void*)Contact_Matrix, (void*)frag_sort_method);
+        auto_sort_state = 0;
+        return;
+    }
     
     fprintf(stdout, "========================\n");
     fprintf(stdout, "[Pixel Sort] start...\n");
@@ -10210,7 +10326,7 @@ void
 ErrorCallback(s32 error, const char *desc)
 {
     (void)error;
-    if (desc)
+    if (desc && desc[0])
     {
         stbsp_snprintf(GLFW_Error_Message, sizeof(GLFW_Error_Message), "%s", desc);
         GLFW_Error_Has = 1;
@@ -10220,7 +10336,7 @@ ErrorCallback(s32 error, const char *desc)
         GLFW_Error_Message[0] = '\0';
         GLFW_Error_Has = 0;
     }
-    fprintf(stderr, "Error: %s\n", desc);
+    fprintf(stderr, "Error: %s\n", desc ? desc : "(null)");
 }
 
 
@@ -12460,14 +12576,39 @@ CopyHighlightedRegionToClipboard(GLFWwindow *window)
     pixelEnd = my_Min(pixelEnd, Number_of_Pixels_1D - 1);
 
     f64 bpPerPixel = (f64)Total_Genome_Length / (f64)Number_of_Pixels_1D;
-    f64 startMbp = ((f64)pixelStart * bpPerPixel) / 1e6;
-    f64 endMbp = ((f64)(pixelEnd + 1) * bpPerPixel) / 1e6;
 
-    u32 origId = GetOriginalContigBaseId(Map_State->originalContigIds[pixelStart]);
-    const char *name = (const char *)(Original_Contigs + origId)->name;
+    // Build output using local (contig-level) coordinates --yy5
+    char buffer[1024];
+    u32 bufPtr = 0;
+    u32 lastBaseId = GetOriginalContigBaseId(Map_State->originalContigIds[pixelStart]);
+    u32 minCoord = Map_State->contigRelCoords[pixelStart];
+    u32 maxCoord = Map_State->contigRelCoords[pixelStart];
 
-    char buffer[256];
-    stbsp_snprintf(buffer, sizeof(buffer), "%s %.2f Mbp - %.2f Mbp", name, startMbp, endMbp);
+    // Iterate through each pixel and update the buffer --yy5
+    for (u32 p = pixelStart + 1; p <= pixelEnd + 1; p++)
+    {
+        u32 baseId = (p <= pixelEnd) ? GetOriginalContigBaseId(Map_State->originalContigIds[p]) : (u32)-1;
+        u32 coord = (p <= pixelEnd) ? Map_State->contigRelCoords[p] : 0;
+
+        if (p > pixelEnd || baseId != lastBaseId)
+        {
+            const char *name = (const char *)(Original_Contigs + lastBaseId)->name;
+            u32 lo = my_Min(minCoord, maxCoord);
+            u32 hi = my_Max(minCoord, maxCoord);
+            f64 startMbp = ((f64)lo * bpPerPixel) / 1e6;
+            f64 endMbp = ((f64)(hi + 1) * bpPerPixel) / 1e6;
+            bufPtr += (u32)stbsp_snprintf(buffer + bufPtr, (s32)(sizeof(buffer) - bufPtr), "%s%s %.2f Mbp - %.2f Mbp", bufPtr ? "; " : "", name, startMbp, endMbp);
+            if (p > pixelEnd) break;
+            lastBaseId = baseId;
+            minCoord = coord;
+            maxCoord = coord;
+        }
+        else
+        {
+            if (coord < minCoord) minCoord = coord;
+            if (coord > maxCoord) maxCoord = coord;
+        }
+    }
     glfwSetClipboardString(window, buffer);
     size_t len = strlen(buffer);
     /* Append to ClipboardEditor_LastCopied instead of overwriting */
@@ -12890,12 +13031,12 @@ MainArgs
                 memcpy(Crash_Report_Path, home, n + 1);
 #ifdef _WIN32
                 if (n > 0 && Crash_Report_Path[n-1] != '\\') { Crash_Report_Path[n] = '\\'; n++; }
-                memcpy(Crash_Report_Path + n, "pretextview_crash_report.txt", 28);
+                memcpy(Crash_Report_Path + n, "pretextview_error_report.txt", 29);
 #else
                 if (n > 0 && Crash_Report_Path[n-1] != '/') { Crash_Report_Path[n] = '/'; n++; }
-                memcpy(Crash_Report_Path + n, "pretextview_crash_report.txt", 28);
+                memcpy(Crash_Report_Path + n, "pretextview_error_report.txt", 29);
 #endif
-                Crash_Report_Path[n + 28] = '\0';
+                Crash_Report_Path[n + 29] = '\0';
             }
         }
     }
@@ -12985,6 +13126,7 @@ MainArgs
         {
             glfwSetWindowTitle(window, (const char *)currFileName);
             FenceIn(SetSaveStateNameBuffer((char *)currFileName));
+            UpdateCrashReportPathFromLoadedFile((const char *)currFile);
         }
     }
     else
@@ -13134,6 +13276,7 @@ MainArgs
             {
                 glfwSetWindowTitle(window, (const char *)currFileName);
                 FenceIn(SetSaveStateNameBuffer((char *)currFileName));
+                UpdateCrashReportPathFromLoadedFile((const char *)currFile);
             }
             glfwPollEvents(); 
             Loading = 0;
@@ -14547,6 +14690,12 @@ MainArgs
                     struct nk_window *saveDebugW = nk_window_find(NK_Context, "Save Debug Report");
                     if (saveDebugW && (saveDebugW->flags & NK_WINDOW_HIDDEN))
                         showSaveDebugReportScreen = 0;
+                    if (showSaveDebugReportScreen)
+                    {
+                        const char *loadedDir = GetLoadedFileDirectoryForSaveDialog();
+                        if (loadedDir)
+                            FileBrowserReloadDirectoryContent(&saveDebugReportBrowser, loadedDir);
+                    }
                     u08 state;
                     if ((state = FileBrowserRun("Save Debug Report", &saveDebugReportBrowser, NK_Context, (u32)showSaveDebugReportScreen, 5))) 
                     {

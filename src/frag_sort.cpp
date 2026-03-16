@@ -161,8 +161,8 @@ void FragSortTool::sort_according_likelihood_dfs(
             chromosomes.end(), 
             [&frags](const std::deque<s32>& a, const std::deque<s32>& b){
                 u32 len_a = 0, len_b = 0;
-                for (auto i : a) len_a += frags->length[std::abs(i)-1];
-                for (auto i : b) len_b += frags->length[std::abs(i)-1];
+                for (auto i : a) { u32 idx = (u32)std::abs(i); len_a += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
+                for (auto i : b) { u32 idx = (u32)std::abs(i); len_b += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
                 return len_a > len_b;
             });
     }
@@ -512,16 +512,16 @@ void FragSortTool::sort_according_likelihood_unionFind(
         std::sort(chromosomes.begin(), chromosomes.end(), 
             [&frags](const std::deque<s32>& a, const std::deque<s32>& b) {
                 u32 len_a = 0, len_b = 0;
-                for (auto &val: a) len_a += frags->length[std::abs(val)-1];
-                for (auto &val: b) len_b += frags->length[std::abs(val)-1];
+                for (auto &val: a) { u32 idx = (u32)std::abs(val); len_a += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
+                for (auto &val: b) { u32 idx = (u32)std::abs(val); len_b += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
                 return len_a > len_b;
             });
         
         std::sort(chromosomes_excluded.begin(), chromosomes_excluded.end(), 
             [&frags](const std::deque<s32>& a, const std::deque<s32>& b) {
                 u32 len_a = 0, len_b = 0;
-                for (auto &val: a) len_a += frags->length[std::abs(val)-1];
-                for (auto &val: b) len_b += frags->length[std::abs(val)-1];
+                for (auto &val: a) { u32 idx = (u32)std::abs(val); len_a += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
+                for (auto &val: b) { u32 idx = (u32)std::abs(val); len_b += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
                 return len_a > len_b;
             });
     }
@@ -839,16 +839,16 @@ void FragSortTool::sort_according_likelihood_unionFind_doFuse(
         std::sort(chromosomes.begin(), chromosomes.end(), 
             [&frags](const std::deque<s32>& a, const std::deque<s32>& b) {
                 u32 len_a = 0, len_b = 0;
-                for (auto &val: a) len_a += frags->length[std::abs(val)-1];
-                for (auto &val: b) len_b += frags->length[std::abs(val)-1];
+                for (auto &val: a) { u32 idx = (u32)std::abs(val); len_a += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
+                for (auto &val: b) { u32 idx = (u32)std::abs(val); len_b += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
                 return len_a > len_b;
             });
         
         std::sort(chromosomes_excluded.begin(), chromosomes_excluded.end(), 
             [&frags](const std::deque<s32>& a, const std::deque<s32>& b) {
                 u32 len_a = 0, len_b = 0;
-                for (auto &val: a) len_a += frags->length[std::abs(val)-1];
-                for (auto &val: b) len_b += frags->length[std::abs(val)-1];
+                for (auto &val: a) { u32 idx = (u32)std::abs(val); len_a += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
+                for (auto &val: b) { u32 idx = (u32)std::abs(val); len_b += (idx >= 1 && idx <= frags->num) ? frags->length[idx-1] : 0; }
                 return len_a > len_b;
             });
     }
