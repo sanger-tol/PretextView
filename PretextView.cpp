@@ -743,17 +743,6 @@ global_variable
 char
 GLFW_Error_Message[512] = {0};
 
-global_variable
-char
-Crash_Report_Path[256] = "pretextview_crash_report.txt";
-
-global_variable
-u08
-Loaded_File_Path[256] = {0};
-
-global_variable
-char
-Crash_Report_Snapshot[2048] = {0};
 
 global_variable
 error_context
@@ -900,144 +889,6 @@ CaptureException(error_context ctx, const char *where, const char *message)
     {
         Last_Exception_Message[0] = '\0';
     }
-}
-
-global_function
-void
-UpdateCrashReportSnapshot()
-{
-    const char *currentContext = GetCurrentErrorContextName();
-    const char *currentWhere = GetCurrentErrorContextWhere();
-    const char *lastError = GetLastErrorMessage();
-    const char *lastErrorCtx = GetLastErrorContextName();
-    const char *lastErrorWhere = GetLastErrorContextWhere();
-    const char *excCtx = GetErrorContextName(Last_Exception_Context);
-
-    stbsp_snprintf(
-        Crash_Report_Snapshot,
-        sizeof(Crash_Report_Snapshot),
-        "Current context: %s%s%s\n"
-        "Last error: %s%s%s%s%s\n"
-        "Last exception: %s%s%s%s%s\n"
-        "GLFW error: %s\n",
-        currentContext ? currentContext : "none",
-        (currentWhere && currentWhere[0]) ? " (" : "",
-        (currentWhere && currentWhere[0]) ? currentWhere : "",
-        (lastError && lastError[0]) ? lastError : "<none>",
-        (lastError && lastError[0]) ? " (" : "",
-        (lastError && lastError[0]) ? lastErrorCtx : "",
-        (lastError && lastError[0] && lastErrorWhere && lastErrorWhere[0]) ? ", " : "",
-        (lastError && lastError[0] && lastErrorWhere && lastErrorWhere[0]) ? lastErrorWhere : "",
-        (lastError && lastError[0]) ? ")" : "",
-        (Last_Exception_Message[0]) ? Last_Exception_Message : "<none>",
-        (Last_Exception_Message[0]) ? " (" : "",
-        (Last_Exception_Message[0]) ? excCtx : "",
-        (Last_Exception_Message[0] && Last_Exception_Where[0]) ? ", " : "",
-        (Last_Exception_Message[0] && Last_Exception_Where[0]) ? Last_Exception_Where : "",
-        (Last_Exception_Message[0]) ? ")" : "",
-        (GLFW_Error_Has && GLFW_Error_Message[0]) ? GLFW_Error_Message : "<none>");
-}
-
-global_function
-void
-CrashSignalHandler(int sig)
-{
-    const char *sigName = "signal";
-    switch (sig)
-    {
-        case SIGSEGV: sigName = "SIGSEGV"; break;
-        case SIGABRT: sigName = "SIGABRT"; break;
-#ifdef SIGBUS
-        case SIGBUS: sigName = "SIGBUS"; break;
-#endif
-        case SIGILL: sigName = "SIGILL"; break;
-        case SIGFPE: sigName = "SIGFPE"; break;
-    }
-
-    /* Build path with timestamp so each crash gets a unique file */
-    char pathWithTimestamp[512];
-    const char *dot = strrchr(Crash_Report_Path, '.');
-    if (dot && dot > Crash_Report_Path && strcmp(dot, ".txt") == 0)
-    {
-        std::time_t t = std::time(0);
-        std::tm *tm = std::localtime(&t);
-        char ts[32];
-        if (tm && std::strftime(ts, sizeof(ts), "_%Y-%m-%d_%H-%M-%S", tm) > 0)
-        {
-            size_t baseLen = (size_t)(dot - Crash_Report_Path);
-            if (baseLen + strlen(ts) + 5 < sizeof(pathWithTimestamp))
-            {
-                memcpy(pathWithTimestamp, Crash_Report_Path, baseLen);
-                pathWithTimestamp[baseLen] = '\0';
-                strcat(pathWithTimestamp, ts);
-                strcat(pathWithTimestamp, ".txt");
-            }
-            else
-            {
-                strncpy(pathWithTimestamp, Crash_Report_Path, sizeof(pathWithTimestamp) - 1);
-                pathWithTimestamp[sizeof(pathWithTimestamp) - 1] = '\0';
-            }
-        }
-        else
-        {
-            strncpy(pathWithTimestamp, Crash_Report_Path, sizeof(pathWithTimestamp) - 1);
-            pathWithTimestamp[sizeof(pathWithTimestamp) - 1] = '\0';
-        }
-    }
-    else
-    {
-        strncpy(pathWithTimestamp, Crash_Report_Path, sizeof(pathWithTimestamp) - 1);
-        pathWithTimestamp[sizeof(pathWithTimestamp) - 1] = '\0';
-    }
-
-    int fd = PV_OPEN(pathWithTimestamp, PV_OPEN_FLAGS, 0644);
-    if (fd >= 0)
-    {
-        const char *newline = "\n";
-
-        auto write_all = [](int outFd, const char *s) {
-            if (!s) return;
-            size_t n = 0;
-            while (s[n]) { ++n; }
-            if (n) PV_WRITE(outFd, s, n);
-        };
-
-        /* Timestamp in report content */
-        std::time_t t = std::time(0);
-        std::tm *tm = std::localtime(&t);
-        char timeBuf[64];
-        if (tm && std::strftime(timeBuf, sizeof(timeBuf), "%Y-%m-%d %H:%M:%S", tm) > 0)
-        {
-            write_all(fd, "PretextView crash report\n");
-            write_all(fd, "Timestamp: ");
-            write_all(fd, timeBuf);
-            write_all(fd, newline);
-        }
-        else
-        {
-            write_all(fd, "PretextView crash report\n");
-        }
-        write_all(fd, "Signal: ");
-        write_all(fd, sigName);
-        write_all(fd, newline);
-        write_all(fd, Crash_Report_Snapshot);
-        PV_CLOSE(fd);
-    }
-
-    _exit(128 + sig);
-}
-
-global_function
-void
-InstallCrashHandler()
-{
-    signal(SIGSEGV, CrashSignalHandler);
-    signal(SIGABRT, CrashSignalHandler);
-#ifdef SIGBUS
-    signal(SIGBUS, CrashSignalHandler);
-#endif
-    signal(SIGILL, CrashSignalHandler);
-    signal(SIGFPE, CrashSignalHandler);
 }
 
 global_function
@@ -1268,7 +1119,6 @@ struct file_browser loadBrowser;
 struct file_browser saveAGPBrowser;
 struct file_browser saveEditsBrowser;
 struct file_browser saveClipboardBrowser;
-struct file_browser saveDebugReportBrowser;
 struct file_browser loadAGPBrowser;
 
 
@@ -1611,14 +1461,6 @@ global_variable
 char
 Clipboard_Save_Name_Buffer[1024] = "clipboard.txt";
 
-global_variable
-char
-Debug_Save_Name_Buffer[1024] = "pretextview_error_report.txt";
-
-global_variable
-s32
-showSaveDebugReportScreen = 0;
-
 global_function
 void
 SetSaveStateNameBuffer(char *name)
@@ -1629,7 +1471,6 @@ SetSaveStateNameBuffer(char *name)
         AGP_Name_Buffer[ptr] = *name;
         Edits_Name_Buffer[ptr] = *name;
         Save_State_Name_Buffer[ptr] = *name;
-        Debug_Save_Name_Buffer[ptr] = *name;
         ptr++;
         name++;
     }
@@ -1654,59 +1495,6 @@ SetSaveStateNameBuffer(char *name)
     while (*name) Clipboard_Save_Name_Buffer[ptr++] = *name++;
     Clipboard_Save_Name_Buffer[ptr] = 0;
 
-    ptr = ptr1;
-    name = (char *)"_error_report.txt";
-    while (*name) Debug_Save_Name_Buffer[ptr++] = *name++;
-    Debug_Save_Name_Buffer[ptr] = 0;
-}
-
-// the 
-global_function
-void
-UpdateCrashReportPathFromLoadedFile(const char *filePath)
-{
-    if (!filePath || !filePath[0]) return;
-    strncpy((char *)Loaded_File_Path, filePath, sizeof(Loaded_File_Path) - 1);
-    Loaded_File_Path[sizeof(Loaded_File_Path) - 1] = 0;
-    std::filesystem::path p(filePath);
-    std::string dir = p.parent_path().string();
-    if (!dir.empty())
-    {
-#ifdef _WIN32
-        if (dir.back() != '\\') dir += '\\';
-#else
-        if (dir.back() != '/') dir += '/';
-#endif
-        std::string basename = p.filename().string();
-        std::string crashPath = dir + basename + "_error_report.txt";
-        if (crashPath.size() < sizeof(Crash_Report_Path))
-        {
-            memcpy(Crash_Report_Path, crashPath.c_str(), crashPath.size() + 1);
-        }
-    }
-}
-
-global_variable
-char
-Loaded_File_Directory_For_Save[MAX_PATH_LEN] = {0};
-
-global_function
-const char *
-GetLoadedFileDirectoryForSaveDialog(void)
-{
-    if (!Loaded_File_Path[0]) return 0;
-    std::filesystem::path p((const char *)Loaded_File_Path);
-    std::string dir = p.parent_path().string();
-    if (dir.empty()) return 0;
-#ifdef _WIN32
-    if (dir.back() != '\\') dir += '\\';
-#else
-    if (dir.back() != '/') dir += '/';
-#endif
-    size_t n = dir.size();
-    if (n >= MAX_PATH_LEN) return 0;
-    memcpy(Loaded_File_Directory_For_Save, dir.c_str(), n + 1);
-    return Loaded_File_Directory_For_Save;
 }
 
 /* 
@@ -1716,7 +1504,6 @@ GetLoadedFileDirectoryForSaveDialog(void)
             2 agp state
             3 edits save
             4 clipboard save
-            5 debug report save
 */
 global_function
 u08
@@ -1860,7 +1647,7 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                         {
                             if (save)
                             {
-                                char *nameBuffer = save == 2 ? AGP_Name_Buffer : (save == 3 ? Edits_Name_Buffer : (save == 4 ? Clipboard_Save_Name_Buffer : (save == 5 ? Debug_Save_Name_Buffer : Save_State_Name_Buffer)));
+                                char *nameBuffer = save == 2 ? AGP_Name_Buffer : (save == 3 ? Edits_Name_Buffer : (save == 4 ? Clipboard_Save_Name_Buffer : Save_State_Name_Buffer));
                                 strncpy(nameBuffer, browser->files[fileIndex], 1024);
                             }
                             else
@@ -1903,7 +1690,7 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                 f32 fileRatio2[] = {0.45f, 0.1f, 0.18f, 0.17f, NK_UNDEFINED};
                 nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 35.0f, save == 2 ? 5 : 3, save == 2 ? fileRatio2 : fileRatio);
 
-                char *nameBuffer = save == 2 ? AGP_Name_Buffer : (save == 3 ? Edits_Name_Buffer : (save == 4 ? Clipboard_Save_Name_Buffer : (save == 5 ? Debug_Save_Name_Buffer : Save_State_Name_Buffer)));
+                char *nameBuffer = save == 2 ? AGP_Name_Buffer : (save == 3 ? Edits_Name_Buffer : (save == 4 ? Clipboard_Save_Name_Buffer : Save_State_Name_Buffer));
                 u08 saveViaEnter = (nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, nameBuffer, 1024, 0) & NK_EDIT_COMMITED) ? 1 : 0;
                 
                 static u08 overwrite = 0;
@@ -1918,7 +1705,7 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                 {
                     strncpy(browser->file, browser->directory, MAX_PATH_LEN);
                     size_t n = strlen(browser->file);
-                    char *nameBuffer = save == 2 ? AGP_Name_Buffer : (save == 3 ? Edits_Name_Buffer : (save == 4 ? Clipboard_Save_Name_Buffer : (save == 5 ? Debug_Save_Name_Buffer : Save_State_Name_Buffer)));
+                    char *nameBuffer = save == 2 ? AGP_Name_Buffer : (save == 3 ? Edits_Name_Buffer : (save == 4 ? Clipboard_Save_Name_Buffer : Save_State_Name_Buffer));
                     strncpy(browser->file + n, nameBuffer, MAX_PATH_LEN - n);
                     ret = 1 | (overwrite ? 2 : 0) | (singletons ? 4 : 0) | (preserveOrder ? 8 : 0);
                 }
@@ -3712,81 +3499,6 @@ Theme_Colour;
 
 global_function
 void
-SaveDebugReportToFile(char *path, u08 overwrite)
-{
-    FILE *file;
-    if (!overwrite && (file = fopen((const char *)path, "rb")))
-    {
-        fclose(file);
-        return;
-    }
-    if (!(file = fopen((const char *)path, "w"))) return;
-
-    char buff[256];
-    u32 contigCount = (File_Loaded && Contigs) ? Contigs->numberOfContigs : 0;
-    u32 edits = (Map_Editor) ? Map_Editor->nEdits : 0;
-    u32 undone = (Map_Editor) ? Map_Editor->nUndone : 0;
-    u32 waypoints = (Waypoint_Editor) ? Waypoint_Editor->nWaypointsActive : 0;
-
-    fprintf(file, "PretextView Debug Report\n");
-    fprintf(file, "=======================\n\n");
-    fprintf(file, "Mode: %s\n", GetGlobalModeName(Global_Mode));
-    fprintf(file, "UI_On: %u  Redisplay: %u\n", UI_On, Redisplay);
-    fprintf(file, "Loading: %u  File_Loaded: %u\n", Loading, File_Loaded);
-
-    const char *currentContext = GetCurrentErrorContextName();
-    const char *currentWhere = GetCurrentErrorContextWhere();
-    if (currentWhere && currentWhere[0])
-        fprintf(file, "Current context: %s (%s)\n", currentContext, currentWhere);
-    else
-        fprintf(file, "Current context: %s\n", currentContext);
-
-    const char *lastError = GetLastErrorMessage();
-    const char *lastErrorCtx = GetLastErrorContextName();
-    const char *lastErrorWhere = GetLastErrorContextWhere();
-    if (lastError && lastError[0])
-    {
-        if (lastErrorWhere && lastErrorWhere[0])
-            fprintf(file, "Last error: %s (%s, %s)\n", lastError, lastErrorCtx, lastErrorWhere);
-        else
-            fprintf(file, "Last error: %s (%s)\n", lastError, lastErrorCtx);
-    }
-    else
-        fprintf(file, "Last error: <none>\n");
-
-    if (Last_Exception_Message[0])
-    {
-        const char *excCtx = GetErrorContextName(Last_Exception_Context);
-        if (Last_Exception_Where[0])
-            fprintf(file, "Last exception: %s (%s, %s)\n", Last_Exception_Message, excCtx, Last_Exception_Where);
-        else
-            fprintf(file, "Last exception: %s (%s)\n", Last_Exception_Message, excCtx);
-    }
-    else
-        fprintf(file, "Last exception: <none>\n");
-
-    if (GLFW_Error_Has && GLFW_Error_Message[0])
-        fprintf(file, "GLFW error: %s\n", GLFW_Error_Message);
-    else
-        fprintf(file, "GLFW error: <none>\n");
-
-    fprintf(file, "Crash report file: %s\n", Crash_Report_Path);
-    fprintf(file, "AutoSort: %u  AutoCut: %u\n", auto_sort_state, auto_cut_state);
-    fprintf(file, "Edit: editing=%u selecting=%u snap=%u scaffSelect=%u\n",
-            Edit_Pixels.editing, Edit_Pixels.selecting, Edit_Pixels.snap, Edit_Pixels.scaffSelecting);
-    fprintf(file, "Pixels: x=%u y=%u\n", Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
-    fprintf(file, "Camera: x=%.3f y=%.3f z=%.3f\n", Camera_Position.x, Camera_Position.y, Camera_Position.z);
-    fprintf(file, "Pixels1D: %u\n", Number_of_Pixels_1D);
-    fprintf(file, "Original contigs: %u  Editable contigs: %u\n", Number_of_Original_Contigs, contigCount);
-    fprintf(file, "Edits: %u  Undone: %u\n", edits, undone);
-    fprintf(file, "Waypoints: %u\n", waypoints);
-    fprintf(file, "\n--- Crash Report Snapshot ---\n%s\n", Crash_Report_Snapshot);
-
-    fclose(file);
-}
-
-global_function
-void
 DebugWindowRun(struct nk_context *ctx)
 {
     if (!Debug_UI_On)
@@ -3879,9 +3591,6 @@ DebugWindowRun(struct nk_context *ctx)
         }
         nk_label(ctx, buff, NK_TEXT_LEFT);
 
-        stbsp_snprintf(buff, sizeof(buff), "Crash report file: %s", Crash_Report_Path);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
         stbsp_snprintf(buff, sizeof(buff), "AutoSort: %u  AutoCut: %u", auto_sort_state, auto_cut_state);
         nk_label(ctx, buff, NK_TEXT_LEFT);
 
@@ -3933,10 +3642,6 @@ DebugWindowRun(struct nk_context *ctx)
 
         stbsp_snprintf(buff, sizeof(buff), "Waypoints: %u", waypoints);
         nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        nk_layout_row_dynamic(ctx, Screen_Scale.y * 28.0f, 1);
-        if (nk_button_label(ctx, "Save as"))
-            showSaveDebugReportScreen = 1;
     }
 
     nk_end(ctx);
@@ -13023,24 +12728,7 @@ MainArgs
 #else
         if (!home) { struct passwd *pw = getpwuid(getuid()); if (pw) home = pw->pw_dir; }
 #endif
-        if (home && home[0])
-        {
-            size_t n = strlen(home);
-            if (n < sizeof(Crash_Report_Path) - 30)
-            {
-                memcpy(Crash_Report_Path, home, n + 1);
-#ifdef _WIN32
-                if (n > 0 && Crash_Report_Path[n-1] != '\\') { Crash_Report_Path[n] = '\\'; n++; }
-                memcpy(Crash_Report_Path + n, "pretextview_error_report.txt", 29);
-#else
-                if (n > 0 && Crash_Report_Path[n-1] != '/') { Crash_Report_Path[n] = '/'; n++; }
-                memcpy(Crash_Report_Path + n, "pretextview_error_report.txt", 29);
-#endif
-                Crash_Report_Path[n + 29] = '\0';
-            }
-        }
     }
-    InstallCrashHandler();
     glfwSetErrorCallback(ErrorCallback);
     if (!glfwInit()) 
     {      
@@ -13126,7 +12814,6 @@ MainArgs
         {
             glfwSetWindowTitle(window, (const char *)currFileName);
             FenceIn(SetSaveStateNameBuffer((char *)currFileName));
-            UpdateCrashReportPathFromLoadedFile((const char *)currFile);
         }
     }
     else
@@ -13165,7 +12852,6 @@ MainArgs
         FileBrowserInit(&saveAGPBrowser, &media);
         FileBrowserInit(&saveEditsBrowser, &media);
         FileBrowserInit(&saveClipboardBrowser, &media);
-        FileBrowserInit(&saveDebugReportBrowser, &media);
         FileBrowserInit(&loadAGPBrowser, &media);
     }
     
@@ -13186,11 +12872,9 @@ MainArgs
     
     while (!glfwWindowShouldClose(window)) 
     {
-        UpdateCrashReportSnapshot();
         if (Redisplay) 
         {
             SetErrorContext(error_context_visual_rendering, "Render");
-            UpdateCrashReportSnapshot();
             try
             {
                 Render();
@@ -13198,12 +12882,10 @@ MainArgs
             catch (const std::exception &e)
             {
                 CaptureException(error_context_visual_rendering, "Render", e.what());
-                UpdateCrashReportSnapshot();
             }
             catch (...)
             {
                 CaptureException(error_context_visual_rendering, "Render", "unknown exception");
-                UpdateCrashReportSnapshot();
             }
             SetErrorContext(error_context_none, 0);
 
@@ -13212,7 +12894,6 @@ MainArgs
             if (currFileName)
             {
                 SetErrorContext(error_context_state_management, "SaveState");
-                UpdateCrashReportSnapshot();
                 try
                 {
                     SaveState(headerHash);
@@ -13220,12 +12901,10 @@ MainArgs
                 catch (const std::exception &e)
                 {
                     CaptureException(error_context_state_management, "SaveState", e.what());
-                    UpdateCrashReportSnapshot();
                 }
                 catch (...)
                 {
                     CaptureException(error_context_state_management, "SaveState", "unknown exception");
-                    UpdateCrashReportSnapshot();
                 }
                 SetErrorContext(error_context_none, 0);
             }
@@ -13237,7 +12916,6 @@ MainArgs
             if (currFileName)
             {
                 SetErrorContext(error_context_state_management, "SaveState");
-                UpdateCrashReportSnapshot();
                 try
                 {
                     SaveState(headerHash);
@@ -13245,18 +12923,15 @@ MainArgs
                 catch (const std::exception &e)
                 {
                     CaptureException(error_context_state_management, "SaveState", e.what());
-                    UpdateCrashReportSnapshot();
                 }
                 catch (...)
                 {
                     CaptureException(error_context_state_management, "SaveState", "unknown exception");
-                    UpdateCrashReportSnapshot();
                 }
                 SetErrorContext(error_context_none, 0);
             }
 
             SetErrorContext(error_context_backend_integration, "LoadFile");
-            UpdateCrashReportSnapshot();
             try
             {
                 LoadFile((const char *)currFile, Loading_Arena, (char **)&currFileName, &headerHash);
@@ -13264,19 +12939,16 @@ MainArgs
             catch (const std::exception &e)
             {
                 CaptureException(error_context_backend_integration, "LoadFile", e.what());
-                UpdateCrashReportSnapshot();
             }
             catch (...)
             {
                 CaptureException(error_context_backend_integration, "LoadFile", "unknown exception");
-                UpdateCrashReportSnapshot();
             }
             SetErrorContext(error_context_none, 0);
             if (currFileName)
             {
                 glfwSetWindowTitle(window, (const char *)currFileName);
                 FenceIn(SetSaveStateNameBuffer((char *)currFileName));
-                UpdateCrashReportPathFromLoadedFile((const char *)currFile);
             }
             glfwPollEvents(); 
             Loading = 0;
@@ -13288,7 +12960,6 @@ MainArgs
             if (currFileName)
             {
                 SetErrorContext(error_context_state_management, "SaveState");
-                UpdateCrashReportSnapshot();
                 try
                 {
                     SaveState(headerHash);
@@ -13296,17 +12967,14 @@ MainArgs
                 catch (const std::exception &e)
                 {
                     CaptureException(error_context_state_management, "SaveState", e.what());
-                    UpdateCrashReportSnapshot();
                 }
                 catch (...)
                 {
                     CaptureException(error_context_state_management, "SaveState", "unknown exception");
-                    UpdateCrashReportSnapshot();
                 }
                 SetErrorContext(error_context_none, 0);
             }
             SetErrorContext(error_context_backend_integration, "auto_sort_func");
-            UpdateCrashReportSnapshot();
             try
             {
                 auto_sort_func((char*)currFileName);
@@ -13314,12 +12982,10 @@ MainArgs
             catch (const std::exception &e)
             {
                 CaptureException(error_context_backend_integration, "auto_sort_func", e.what());
-                UpdateCrashReportSnapshot();
             }
             catch (...)
             {
                 CaptureException(error_context_backend_integration, "auto_sort_func", "unknown exception");
-                UpdateCrashReportSnapshot();
             }
             SetErrorContext(error_context_none, 0);
             auto_sort_state = 0;
@@ -13331,7 +12997,6 @@ MainArgs
             if (currFileName)
             {
                 SetErrorContext(error_context_state_management, "SaveState");
-                UpdateCrashReportSnapshot();
                 try
                 {
                     SaveState(headerHash);
@@ -13339,17 +13004,14 @@ MainArgs
                 catch (const std::exception &e)
                 {
                     CaptureException(error_context_state_management, "SaveState", e.what());
-                    UpdateCrashReportSnapshot();
                 }
                 catch (...)
                 {
                     CaptureException(error_context_state_management, "SaveState", "unknown exception");
-                    UpdateCrashReportSnapshot();
                 }
                 SetErrorContext(error_context_none, 0);
             }
             SetErrorContext(error_context_backend_integration, "auto_cut_func");
-            UpdateCrashReportSnapshot();
             try
             {
                 auto_cut_func((char*)currFileName, Loading_Arena);
@@ -13357,12 +13019,10 @@ MainArgs
             catch (const std::exception &e)
             {
                 CaptureException(error_context_backend_integration, "auto_cut_func", e.what());
-                UpdateCrashReportSnapshot();
             }
             catch (...)
             {
                 CaptureException(error_context_backend_integration, "auto_cut_func", "unknown exception");
-                UpdateCrashReportSnapshot();
             }
             SetErrorContext(error_context_none, 0);
             auto_cut_state = 0;
@@ -14683,27 +14343,6 @@ MainArgs
                         struct nk_window *saveClipboardWindow = nk_window_find(NK_Context, "Save Clipboard");
                         if (saveClipboardWindow) saveClipboardWindow->flags |= NK_WINDOW_HIDDEN;
                         showSaveClipboardScreen = 0;
-                    }
-                }
-
-                {
-                    struct nk_window *saveDebugW = nk_window_find(NK_Context, "Save Debug Report");
-                    if (saveDebugW && (saveDebugW->flags & NK_WINDOW_HIDDEN))
-                        showSaveDebugReportScreen = 0;
-                    if (showSaveDebugReportScreen)
-                    {
-                        const char *loadedDir = GetLoadedFileDirectoryForSaveDialog();
-                        if (loadedDir)
-                            FileBrowserReloadDirectoryContent(&saveDebugReportBrowser, loadedDir);
-                    }
-                    u08 state;
-                    if ((state = FileBrowserRun("Save Debug Report", &saveDebugReportBrowser, NK_Context, (u32)showSaveDebugReportScreen, 5))) 
-                    {
-                        FenceIn(SaveDebugReportToFile(saveDebugReportBrowser.file, state & 2));
-                        FileBrowserReloadDirectoryContent(&saveDebugReportBrowser, saveDebugReportBrowser.directory);
-                        struct nk_window *saveDebugWindow = nk_window_find(NK_Context, "Save Debug Report");
-                        if (saveDebugWindow) saveDebugWindow->flags |= NK_WINDOW_HIDDEN;
-                        showSaveDebugReportScreen = 0;
                     }
                 }
 
