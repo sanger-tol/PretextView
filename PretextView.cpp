@@ -26,11 +26,9 @@ SOFTWARE.
 */
 
 
-#define my_String_(x) #x
-#define my_String(x) my_String_(x)
-
-#define PretextView_Version "PretextViewAI Version " my_String(PV) // PV is defined in the CMakeLists.txt
-#define PretextView_Title "PretextViewAI " my_String(PV) " - Wellcome Sanger Institute"    
+#define PretextView_Version_Label "1.0.7-beta"
+#define PretextView_Version "PretextViewAI Version " PretextView_Version_Label
+#define PretextView_Title "PretextViewAI " PretextView_Version_Label " - Wellcome Sanger Institute"
 
 
 #include <frag_sort.h>  // place this before add Header.h to avoid macro conflict
@@ -95,6 +93,18 @@ SOFTWARE.
 #define PV_WRITE write
 #define PV_CLOSE close
 #define PV_OPEN_FLAGS (O_WRONLY | O_CREAT | O_TRUNC)
+#endif
+
+#ifndef _WIN32
+#include <atomic>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
 #endif
 
 #pragma clang diagnostic push
@@ -744,11 +754,29 @@ GLFW_Error_Message[512] = {0};
 
 global_variable
 char
-Crash_Report_Path[256] = "pretextview_crash_report.txt";
+Crash_Report_Path[1024] = "pretextview_crash_report.txt";
+
+global_variable
+char
+Loaded_Pretext_Map_FullPath[1024] = {0};
 
 global_variable
 char
 Crash_Report_Snapshot[2048] = {0};
+
+#ifndef _WIN32
+global_variable
+char
+Crash_Terminal_Log_Buffer[1024 * 1024];
+
+global_variable
+size_t
+Crash_Terminal_Log_Len;
+#endif
+
+global_variable
+s32
+Debug_Report_Save_Browser_Open = 0;
 
 global_variable
 error_context
@@ -874,6 +902,11 @@ GetGlobalModeName(global_mode mode)
     }
 }
 
+#ifndef _WIN32
+static void
+CopyLogToCrashBuffer(void);
+#endif
+
 global_function
 void
 CaptureException(error_context ctx, const char *where, const char *message)
@@ -931,6 +964,71 @@ UpdateCrashReportSnapshot()
         (Last_Exception_Message[0] && Last_Exception_Where[0]) ? Last_Exception_Where : "",
         (Last_Exception_Message[0]) ? ")" : "",
         (GLFW_Error_Has && GLFW_Error_Message[0]) ? GLFW_Error_Message : "<none>");
+#ifndef _WIN32
+    CopyLogToCrashBuffer();
+#endif
+}
+
+global_function
+void
+ApplyCrashReportPathFromMapPath(const char *full_map_path)
+{
+    if (!full_map_path || !full_map_path[0])
+    {
+        return;
+    }
+    stbsp_snprintf(Loaded_Pretext_Map_FullPath, sizeof(Loaded_Pretext_Map_FullPath), "%s", full_map_path);
+
+    char dir[768];
+    char base[256];
+#ifndef _WIN32
+    const char *last_slash = strrchr(full_map_path, '/');
+#else
+    const char *last_slash = strrchr(full_map_path, '/');
+    const char *last_bs = strrchr(full_map_path, '\\');
+    if (!last_slash || (last_bs && last_bs > last_slash))
+    {
+        last_slash = last_bs;
+    }
+#endif
+    if (!last_slash)
+    {
+        stbsp_snprintf(dir, sizeof(dir), ".");
+        stbsp_snprintf(base, sizeof(base), "%s", full_map_path);
+    }
+    else
+    {
+        size_t dlen = (size_t)(last_slash - full_map_path);
+        if (dlen >= sizeof(dir))
+        {
+            dlen = sizeof(dir) - 1;
+        }
+        memcpy(dir, full_map_path, dlen);
+        dir[dlen] = '\0';
+        stbsp_snprintf(base, sizeof(base), "%s", last_slash + 1);
+    }
+    char prefix[256];
+    stbsp_snprintf(prefix, sizeof(prefix), "%s", base);
+    char *dot = strrchr(prefix, '.');
+    if (dot)
+    {
+        *dot = '\0';
+    }
+#ifndef _WIN32
+    stbsp_snprintf(
+        Crash_Report_Path,
+        sizeof(Crash_Report_Path),
+        "%s/%s_crash_report.txt",
+        dir,
+        prefix[0] ? prefix : "pretextview");
+#else
+    stbsp_snprintf(
+        Crash_Report_Path,
+        sizeof(Crash_Report_Path),
+        "%s\\%s_crash_report.txt",
+        dir,
+        prefix[0] ? prefix : "pretextview");
+#endif
 }
 
 global_function
@@ -968,6 +1066,16 @@ CrashSignalHandler(int sig)
         write_all(fd, sigName);
         write_all(fd, newline);
         write_all(fd, Crash_Report_Snapshot);
+#ifndef _WIN32
+        {
+            const char *sep = "\n--- Terminal log ---\n";
+            write_all(fd, sep);
+            if (Crash_Terminal_Log_Len > 0)
+            {
+                (void)PV_WRITE(fd, Crash_Terminal_Log_Buffer, (unsigned)Crash_Terminal_Log_Len);
+            }
+        }
+#endif
         PV_CLOSE(fd);
     }
 
@@ -1215,6 +1323,7 @@ struct file_browser loadBrowser;
 struct file_browser saveAGPBrowser;
 struct file_browser saveEditsBrowser;
 struct file_browser saveClipboardBrowser;
+struct file_browser saveDebugReportBrowser;
 struct file_browser loadAGPBrowser;
 
 
@@ -1557,6 +1666,10 @@ global_variable
 char
 Clipboard_Save_Name_Buffer[1024] = "clipboard.txt";
 
+global_variable
+char
+Debug_Report_Save_Name_Buffer[1024] = "debug_report.txt";
+
 global_function
 void
 SetSaveStateNameBuffer(char *name)
@@ -1591,6 +1704,29 @@ SetSaveStateNameBuffer(char *name)
     while (*name) Clipboard_Save_Name_Buffer[ptr++] = *name++;
     Clipboard_Save_Name_Buffer[ptr] = 0;
 
+    ptr = ptr1;
+    name = (char *)"_debug_report.txt";
+    while (*name) Debug_Report_Save_Name_Buffer[ptr++] = *name++;
+    Debug_Report_Save_Name_Buffer[ptr] = 0;
+}
+
+
+static char *
+GetSaveNameBufferForMode(u08 save)
+{
+    switch (save)
+    {
+        case 2:
+            return AGP_Name_Buffer;
+        case 3:
+            return Edits_Name_Buffer;
+        case 4:
+            return Clipboard_Save_Name_Buffer;
+        case 5:
+            return Debug_Report_Save_Name_Buffer;
+        default:
+            return Save_State_Name_Buffer;
+    }
 }
 
 
@@ -1601,6 +1737,7 @@ SetSaveStateNameBuffer(char *name)
             2 agp state
             3 edits save
             4 clipboard save
+            5 debug report save
 */
 global_function
 u08
@@ -1663,8 +1800,16 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
         nk_menubar_end(ctx);
         ctx->style.window.spacing.x = spacing_x;
 
-        /* window layout */
-        f32 endSpace = save ? 100.0f : 0; // Resolved: end space is clipped as the space is not enough
+        /* window layout — reserve footer height for save dialogs (filename row clips if too small) */
+        f32 endSpace = 0;
+        if (save == 5)
+        {
+            endSpace = Screen_Scale.y * 158.0f;
+        }
+        else if (save)
+        {
+            endSpace = Screen_Scale.y * 108.0f;
+        }
         total_space = nk_window_get_content_region(ctx);
         nk_layout_row(ctx, NK_DYNAMIC, total_space.h - endSpace, 2, ratio);
         nk_group_begin(ctx, "Special", NK_WINDOW_NO_SCROLLBAR);
@@ -1744,7 +1889,7 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                         {
                             if (save)
                             {
-                                char *nameBuffer = save == 2 ? AGP_Name_Buffer : (save == 3 ? Edits_Name_Buffer : (save == 4 ? Clipboard_Save_Name_Buffer : Save_State_Name_Buffer));
+                                char *nameBuffer = GetSaveNameBufferForMode(save);
                                 strncpy(nameBuffer, browser->files[fileIndex], 1024);
                             }
                             else
@@ -1783,28 +1928,73 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
             nk_layout_row(ctx, NK_DYNAMIC, endSpace - 5.0f, 1, ratio + 1);
             nk_group_begin(ctx, "File", NK_WINDOW_NO_SCROLLBAR);
             {
-                f32 fileRatio[] = {0.8f, 0.1f, NK_UNDEFINED};
-                f32 fileRatio2[] = {0.45f, 0.1f, 0.18f, 0.17f, NK_UNDEFINED};
-                nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 35.0f, save == 2 ? 5 : 3, save == 2 ? fileRatio2 : fileRatio);
-
-                char *nameBuffer = save == 2 ? AGP_Name_Buffer : (save == 3 ? Edits_Name_Buffer : (save == 4 ? Clipboard_Save_Name_Buffer : Save_State_Name_Buffer));
-                u08 saveViaEnter = (nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, nameBuffer, 1024, 0) & NK_EDIT_COMMITED) ? 1 : 0;
-                
                 static u08 overwrite = 0;
-                overwrite = (u08)nk_check_label(ctx, "Override", overwrite);
-                
-                static u08 singletons = 0;
-                if (save == 2) singletons = (u08)nk_check_label(ctx, "Format Singletons", singletons);
-                static u08 preserveOrder = 0;
-                if (save == 2) preserveOrder = (u08)nk_check_label(ctx, "Preserve Order", preserveOrder);
 
-                if (nk_button_label(ctx, "Save") || saveViaEnter)
+                if (save == 5)
                 {
-                    strncpy(browser->file, browser->directory, MAX_PATH_LEN);
-                    size_t n = strlen(browser->file);
-                    char *nameBuffer = save == 2 ? AGP_Name_Buffer : (save == 3 ? Edits_Name_Buffer : (save == 4 ? Clipboard_Save_Name_Buffer : Save_State_Name_Buffer));
-                    strncpy(browser->file + n, nameBuffer, MAX_PATH_LEN - n);
-                    ret = 1 | (overwrite ? 2 : 0) | (singletons ? 4 : 0) | (preserveOrder ? 8 : 0);
+                    nk_layout_row_dynamic(ctx, Screen_Scale.y * 42.0f, 1);
+                    nk_label_wrap(
+                        ctx,
+                        "Use the folder list above to choose a directory (click folders or the path bar). "
+                        "Then type the report file name below and click Save. "
+                        "The full path is: current folder + file name.");
+                    nk_layout_row_dynamic(ctx, Screen_Scale.y * 28.0f, 1);
+                    nk_label(ctx, "File name:", NK_TEXT_LEFT);
+                    nk_layout_row_dynamic(ctx, Screen_Scale.y * 32.0f, 1);
+                    char *nameBuffer = GetSaveNameBufferForMode(5);
+                    u08 saveViaEnter =
+                        (nk_edit_string_zero_terminated(
+                             ctx,
+                             NK_EDIT_FIELD | NK_EDIT_SIG_ENTER,
+                             nameBuffer,
+                             1024,
+                             0)
+                         & NK_EDIT_COMMITED)
+                            ? 1
+                            : 0;
+                    nk_layout_row_dynamic(ctx, Screen_Scale.y * 34.0f, 2);
+                    overwrite = (u08)nk_check_label(ctx, "Override", overwrite);
+                    if (nk_button_label(ctx, "Save") || saveViaEnter)
+                    {
+                        strncpy(browser->file, browser->directory, MAX_PATH_LEN);
+                        size_t n = strlen(browser->file);
+                        strncpy(browser->file + n, nameBuffer, MAX_PATH_LEN - n);
+                        ret = 1 | (overwrite ? 2 : 0);
+                    }
+                }
+                else
+                {
+                    f32 fileRatio[] = {0.8f, 0.1f, NK_UNDEFINED};
+                    f32 fileRatio2[] = {0.45f, 0.1f, 0.18f, 0.17f, NK_UNDEFINED};
+                    nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 35.0f, save == 2 ? 5 : 3, save == 2 ? fileRatio2 : fileRatio);
+
+                    char *nameBuffer = GetSaveNameBufferForMode(save);
+                    u08 saveViaEnter =
+                        (nk_edit_string_zero_terminated(ctx, NK_EDIT_FIELD | NK_EDIT_SIG_ENTER, nameBuffer, 1024, 0) & NK_EDIT_COMMITED)
+                            ? 1
+                            : 0;
+
+                    overwrite = (u08)nk_check_label(ctx, "Override", overwrite);
+
+                    static u08 singletons = 0;
+                    if (save == 2)
+                    {
+                        singletons = (u08)nk_check_label(ctx, "Format Singletons", singletons);
+                    }
+                    static u08 preserveOrder = 0;
+                    if (save == 2)
+                    {
+                        preserveOrder = (u08)nk_check_label(ctx, "Preserve Order", preserveOrder);
+                    }
+
+                    if (nk_button_label(ctx, "Save") || saveViaEnter)
+                    {
+                        strncpy(browser->file, browser->directory, MAX_PATH_LEN);
+                        size_t n = strlen(browser->file);
+                        nameBuffer = GetSaveNameBufferForMode(save);
+                        strncpy(browser->file + n, nameBuffer, MAX_PATH_LEN - n);
+                        ret = 1 | (overwrite ? 2 : 0) | (singletons ? 4 : 0) | (preserveOrder ? 8 : 0);
+                    }
                 }
 
                 nk_group_end(ctx);
@@ -2091,9 +2281,7 @@ UpdateContigsFromMapState()  // Reading updates contigs from the state of the ma
     // `Number_of_Original_Contigs` is 218.)
     ForLoop(Number_of_Pixels_1D - 1)
     {
-        // Ensure that contigPtr does not exceed the value of the maximum
-        // number of contigs.
-        if (contigPtr >= Contigs->numberOfContigs)
+        if (contigPtr >= Contigs->contigs_arr_capacity)
             break;
 
         ++length; // current fragment length
@@ -2201,9 +2389,11 @@ UpdateContigsFromMapState()  // Reading updates contigs from the state of the ma
         lastCoord = coord;
     }
 
-    if (contigPtr < Contigs->numberOfContigs)
-    // Update the fragment information of the last contig.
+    // Trailing fragment: numberOfContigs is still the previous pass here (assigned below).
+    // Comparing contigPtr to it skipped the last block when contigPtr equalled that stale count.
+    if (length > 0 && contigPtr < Contigs->contigs_arr_capacity)
     {
+        // Update the fragment information of the last contig.
         u32 lastId_original_contig_base = GetOriginalContigBaseId(lastId_original_contig);
         (Original_Contigs + lastId_original_contig_base)
             ->contigMapPixels[(Original_Contigs + lastId_original_contig_base)->nContigs++] = pixelIdx - 1 - (length >> 1);
@@ -3419,7 +3609,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         {
             InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
             Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
-            UpdateContigsFromMapState();
+            // UpdateContigsFromMapState() already invoked from InvertMap()
 
             Redisplay = 1;
         }
@@ -3594,13 +3784,226 @@ global_variable
 nk_color
 Theme_Colour;
 
+#ifndef _WIN32
+global_variable
+std::mutex
+Terminal_Log_Mutex;
+
+global_variable
+std::string
+Terminal_Log_Text;
+
+global_variable
+std::atomic<u64>
+Terminal_Log_Generation{};
+
+global_function
+void
+Terminal_Log_AppendChunk(const char *data, size_t n)
+{
+    if (!data || n == 0)
+    {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(Terminal_Log_Mutex);
+    Terminal_Log_Text.append(data, n);
+    const size_t cap = 1024 * 1024;
+    if (Terminal_Log_Text.size() > cap)
+    {
+        Terminal_Log_Text.erase(0, Terminal_Log_Text.size() - cap + cap / 4);
+        size_t cut = Terminal_Log_Text.find('\n');
+        if (cut != std::string::npos && cut < 4096)
+        {
+            Terminal_Log_Text.erase(0, cut + 1);
+        }
+    }
+    Terminal_Log_Generation.fetch_add(1, std::memory_order_relaxed);
+}
+
+global_function
+void
+Terminal_Log_ReaderLoop(int read_fd, int tty_fd)
+{
+    char buf[4096];
+    for (;;)
+    {
+        ssize_t n = read(read_fd, buf, sizeof buf);
+        if (n < 0)
+        {
+            if (errno == EINTR)
+            {
+                continue;
+            }
+            break;
+        }
+        if (n == 0)
+        {
+            break;
+        }
+        if (tty_fd >= 0)
+        {
+            (void)write(tty_fd, buf, (size_t)n);
+        }
+        Terminal_Log_AppendChunk(buf, (size_t)n);
+    }
+}
+
+global_function
+void
+Terminal_Log_Init(void)
+{
+    /* Drain libc buffers before replacing fds so nothing is stuck for the old destination. */
+    (void)fflush(stdout);
+    (void)fflush(stderr);
+
+    int fds[2];
+    if (pipe(fds) != 0)
+    {
+        return;
+    }
+#ifdef F_SETPIPE_SZ
+    (void)fcntl(fds[1], F_SETPIPE_SZ, 1024 * 1024);
+#endif
+    int tty = dup(STDOUT_FILENO);
+    if (tty < 0)
+    {
+        close(fds[0]);
+        close(fds[1]);
+        return;
+    }
+    if (dup2(fds[1], STDOUT_FILENO) < 0 || dup2(fds[1], STDERR_FILENO) < 0)
+    {
+        close(tty);
+        close(fds[0]);
+        close(fds[1]);
+        return;
+    }
+    close(fds[1]);
+
+    /*
+     * After dup2, stdout is a pipe; libc may use full buffering unless we force no buffering.
+     * Line-buffering on non-tty pipes is unreliable — use unbuffered so every write reaches the reader.
+     */
+    clearerr(stdout);
+    clearerr(stderr);
+    (void)setvbuf(stdout, NULL, _IONBF, 0);
+    (void)setvbuf(stderr, NULL, _IONBF, 0);
+
+    std::cout.clear();
+    std::cerr.clear();
+    std::cout.setf(std::ios::unitbuf);
+    std::cerr.setf(std::ios::unitbuf);
+
+    /* Python uses block-buffered stdout when it is a pipe unless this is set before interpreter start. */
+    (void)setenv("PYTHONUNBUFFERED", "1", 1);
+
+    int r = fds[0];
+    int t = tty;
+    std::thread([r, t]() { Terminal_Log_ReaderLoop(r, t); }).detach();
+}
+#else
+global_function
+void
+Terminal_Log_Init(void)
+{
+}
+#endif
+
+#ifndef _WIN32
+static void
+CopyLogToCrashBuffer(void)
+{
+    std::lock_guard<std::mutex> lock(Terminal_Log_Mutex);
+    size_t n = Terminal_Log_Text.size();
+    if (n >= sizeof(Crash_Terminal_Log_Buffer))
+    {
+        n = sizeof(Crash_Terminal_Log_Buffer) - 1;
+    }
+    memcpy(Crash_Terminal_Log_Buffer, Terminal_Log_Text.data(), n);
+    Crash_Terminal_Log_Len = n;
+}
+#endif
+
+global_function
+void
+WriteDebugReportToFile(const char *path)
+{
+    if (!path || !path[0])
+    {
+        return;
+    }
+    UpdateCrashReportSnapshot();
+    FILE *f = fopen(path, "wb");
+    if (!f)
+    {
+        fmt::print(stderr, "[Debug report] could not open {} for writing\n", path);
+        return;
+    }
+    fputs("PretextView debug report\n\n", f);
+    fputs(Crash_Report_Snapshot, f);
+#ifndef _WIN32
+    fputs("\n--- Terminal log ---\n", f);
+    {
+        std::lock_guard<std::mutex> lock(Terminal_Log_Mutex);
+        if (!Terminal_Log_Text.empty())
+        {
+            fwrite(Terminal_Log_Text.data(), 1, Terminal_Log_Text.size(), f);
+        }
+    }
+#endif
+    fclose(f);
+    fmt::print(stdout, "[Debug report] saved to %s\n", path);
+}
+
+global_function
+void
+PrimeDebugReportSaveBrowserDirectory(void)
+{
+    if (!Loaded_Pretext_Map_FullPath[0])
+    {
+        return;
+    }
+    char dir[1024];
+    stbsp_snprintf(dir, sizeof(dir), "%s", Loaded_Pretext_Map_FullPath);
+#ifndef _WIN32
+    char *slash = strrchr(dir, '/');
+#else
+    char *slash = strrchr(dir, '/');
+    char *bs = strrchr(dir, '\\');
+    if (!slash || (bs && bs > slash))
+    {
+        slash = bs;
+    }
+#endif
+    if (slash)
+    {
+        *slash = '\0';
+        FileBrowserReloadDirectoryContent(&saveDebugReportBrowser, dir);
+    }
+}
+
 global_function
 void
 DebugWindowRun(struct nk_context *ctx)
 {
+    static u08 prev_debug_ui_on = 0;
+    static int save_report_click_suppress_frames = 0;
+
     if (!Debug_UI_On)
     {
+        prev_debug_ui_on = 0;
         return;
+    }
+
+    /* Opening from the menu can leave the same click/focus to hit "Save report..." first row — skip that for a few frames. */
+    if (!prev_debug_ui_on)
+    {
+        save_report_click_suppress_frames = 3;
+    }
+    prev_debug_ui_on = 1;
+    if (save_report_click_suppress_frames > 0)
+    {
+        --save_report_click_suppress_frames;
     }
 
     const char *name = "Debug Report";
@@ -3613,135 +4016,125 @@ DebugWindowRun(struct nk_context *ctx)
     if (nk_begin(
             ctx,
             name,
-            nk_rect(Screen_Scale.x * 10, Screen_Scale.y * 620, Screen_Scale.x * 420, Screen_Scale.y * 360),
+            nk_rect(Screen_Scale.x * 10, Screen_Scale.y * 80, Screen_Scale.x * 720, Screen_Scale.y * 520),
             NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_TITLE | NK_WINDOW_SCALABLE))
     {
-        char buff[256];
-        nk_layout_row_dynamic(ctx, Screen_Scale.y * 20.0f, 1);
-
-        stbsp_snprintf(buff, sizeof(buff), "Mode: %s", GetGlobalModeName(Global_Mode));
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(buff, sizeof(buff), "UI_On: %u  Redisplay: %u", UI_On, Redisplay);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(buff, sizeof(buff), "Loading: %u  File_Loaded: %u", Loading, File_Loaded);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        const char *currentContext = GetCurrentErrorContextName();
-        const char *currentWhere = GetCurrentErrorContextWhere();
-        if (currentWhere && currentWhere[0])
+        struct nk_rect content = nk_window_get_content_region(ctx);
+        f32 btn_h = Screen_Scale.y * 30.0f;
+        f32 log_h = content.h - btn_h - ctx->style.window.spacing.y;
+        if (log_h < Screen_Scale.y * 120.0f)
         {
-            stbsp_snprintf(buff, sizeof(buff), "Current context: %s (%s)", currentContext, currentWhere);
+            log_h = Screen_Scale.y * 120.0f;
         }
-        else
-        {
-            stbsp_snprintf(buff, sizeof(buff), "Current context: %s", currentContext);
-        }
-        nk_label(ctx, buff, NK_TEXT_LEFT);
 
-        const char *lastError = GetLastErrorMessage();
-        const char *lastErrorCtx = GetLastErrorContextName();
-        const char *lastErrorWhere = GetLastErrorContextWhere();
-        if (lastError && lastError[0])
+        nk_layout_row_dynamic(ctx, btn_h, 1);
+        nk_style_push_font(ctx, &NK_Font_Browser->handle);
+        nk_button_push_behavior(ctx, NK_BUTTON_DEFAULT);
         {
-            if (lastErrorWhere && lastErrorWhere[0])
+            /* One activation per click: nk_button_label can stay true for multiple frames while held. */
+            static int save_report_button_was_down = 0;
+            const int down = nk_button_label(ctx, "Save report to file...");
+            if (down && !save_report_button_was_down && save_report_click_suppress_frames == 0)
             {
-                stbsp_snprintf(buff, sizeof(buff), "Last error: %s (%s, %s)", lastError, lastErrorCtx, lastErrorWhere);
+                PrimeDebugReportSaveBrowserDirectory();
+                Debug_Report_Save_Browser_Open = 1;
             }
-            else
+            save_report_button_was_down = down;
+        }
+        nk_button_pop_behavior(ctx);
+
+        nk_layout_row_dynamic(ctx, log_h, 1);
+#ifndef _WIN32
+        {
+            /* Throttled snapshot + virtualized rows: avoid memcpy and nk_edit_string on huge buffers every frame. */
+            static char term_display[512 * 1024];
+            static std::vector<u32> line_starts;
+            static u64 last_synced_gen = ~(u64)0;
+            static f64 last_sync_time = 0.0;
+            static s32 cached_disp_len = 0;
+
+            const f64 kMinSyncInterval = 0.05;
+            u64 gen_now = Terminal_Log_Generation.load(std::memory_order_acquire);
+            f64 now = GetTime();
+            if (gen_now != last_synced_gen &&
+                (now - last_sync_time >= kMinSyncInterval || last_synced_gen == ~(u64)0))
             {
-                stbsp_snprintf(buff, sizeof(buff), "Last error: %s (%s)", lastError, lastErrorCtx);
-            }
-        }
-        else
-        {
-            stbsp_snprintf(buff, sizeof(buff), "Last error: <none>");
-        }
-        nk_label(ctx, buff, NK_TEXT_LEFT);
+                last_sync_time = now;
+                static const char pfx[] = "... (earlier lines omitted)\n";
+                const size_t plen = sizeof(pfx) - 1;
+                const size_t max_body = sizeof(term_display) - plen - 1;
 
-        if (Last_Exception_Message[0])
-        {
-            const char *excCtx = GetErrorContextName(Last_Exception_Context);
-            if (Last_Exception_Where[0])
+                std::lock_guard<std::mutex> lock(Terminal_Log_Mutex);
+                const std::string &src = Terminal_Log_Text;
+                size_t body_len = src.size();
+                size_t body_off = 0;
+                if (body_len > max_body)
+                {
+                    memcpy(term_display, pfx, plen);
+                    body_off = body_len - (max_body - plen);
+                    body_len = max_body - plen;
+                    memcpy(term_display + plen, src.data() + body_off, body_len);
+                    cached_disp_len = (s32)(plen + body_len);
+                }
+                else
+                {
+                    memcpy(term_display, src.data(), body_len);
+                    cached_disp_len = (s32)body_len;
+                }
+                term_display[cached_disp_len] = '\0';
+
+                line_starts.clear();
+                line_starts.push_back(0);
+                for (s32 i = 0; i < cached_disp_len; ++i)
+                {
+                    if (term_display[i] == '\n')
+                    {
+                        line_starts.push_back((u32)(i + 1));
+                    }
+                }
+                last_synced_gen = Terminal_Log_Generation.load(std::memory_order_acquire);
+            }
+
+            int row_h = (int)(NK_Font_Browser->handle.height + ctx->style.text.padding.y + 2.0f);
+            if (row_h < 12)
             {
-                stbsp_snprintf(buff, sizeof(buff), "Last exception: %s (%s, %s)", Last_Exception_Message, excCtx, Last_Exception_Where);
+                row_h = 14;
             }
-            else
+            int nlines = (int)line_starts.size();
+            if (nlines < 1)
             {
-                stbsp_snprintf(buff, sizeof(buff), "Last exception: %s (%s)", Last_Exception_Message, excCtx);
+                nlines = 1;
+            }
+
+            struct nk_list_view lv;
+            if (nk_list_view_begin(ctx, &lv, "PVDebugTerm", NK_WINDOW_BORDER, row_h, nlines))
+            {
+                for (int row = lv.begin; row < lv.end; ++row)
+                {
+                    nk_layout_row_dynamic(ctx, (f32)row_h, 1);
+                    u32 a = line_starts[(u32)row];
+                    u32 b = ((u32)row + 1 < line_starts.size()) ? line_starts[(u32)row + 1] : (u32)cached_disp_len;
+                    int line_len = (int)(b - a);
+                    if (line_len > 0 && term_display[b - 1] == '\n')
+                    {
+                        line_len--;
+                    }
+                    if (line_len <= 0)
+                    {
+                        nk_label(ctx, " ", NK_TEXT_LEFT);
+                    }
+                    else
+                    {
+                        nk_text(ctx, term_display + a, line_len, NK_TEXT_LEFT);
+                    }
+                }
+                nk_list_view_end(&lv);
             }
         }
-        else
-        {
-            stbsp_snprintf(buff, sizeof(buff), "Last exception: <none>");
-        }
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        if (GLFW_Error_Has && GLFW_Error_Message[0])
-        {
-            stbsp_snprintf(buff, sizeof(buff), "GLFW error: %s", GLFW_Error_Message);
-        }
-        else
-        {
-            stbsp_snprintf(buff, sizeof(buff), "GLFW error: <none>");
-        }
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(buff, sizeof(buff), "Crash report file: %s", Crash_Report_Path);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(buff, sizeof(buff), "AutoSort: %u  AutoCut: %u", auto_sort_state, auto_cut_state);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(
-            buff,
-            sizeof(buff),
-            "Edit: editing=%u selecting=%u snap=%u scaffSelect=%u",
-            Edit_Pixels.editing,
-            Edit_Pixels.selecting,
-            Edit_Pixels.snap,
-            Edit_Pixels.scaffSelecting);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(
-            buff,
-            sizeof(buff),
-            "Pixels: x=%u y=%u",
-            Edit_Pixels.pixels.x,
-            Edit_Pixels.pixels.y);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(
-            buff,
-            sizeof(buff),
-            "Camera: x=%.3f y=%.3f z=%.3f",
-            Camera_Position.x,
-            Camera_Position.y,
-            Camera_Position.z);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        u32 contigCount = (File_Loaded && Contigs) ? Contigs->numberOfContigs : 0;
-        u32 edits = (Map_Editor) ? Map_Editor->nEdits : 0;
-        u32 undone = (Map_Editor) ? Map_Editor->nUndone : 0;
-        u32 waypoints = (Waypoint_Editor) ? Waypoint_Editor->nWaypointsActive : 0;
-
-        stbsp_snprintf(buff, sizeof(buff), "Pixels1D: %u", Number_of_Pixels_1D);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(
-            buff,
-            sizeof(buff),
-            "Original contigs: %u  Editable contigs: %u",
-            Number_of_Original_Contigs,
-            contigCount);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(buff, sizeof(buff), "Edits: %u  Undone: %u", edits, undone);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
-
-        stbsp_snprintf(buff, sizeof(buff), "Waypoints: %u", waypoints);
-        nk_label(ctx, buff, NK_TEXT_LEFT);
+#else
+        nk_label(ctx, "Terminal log is not captured on Windows.", NK_TEXT_LEFT);
+#endif
+        nk_style_pop_font(ctx);
     }
 
     nk_end(ctx);
@@ -3935,6 +4328,14 @@ AddExtension(extension_node *node)
         Extensions.tail = node;       // set the last to the new node just appended
     }
 }
+
+global_function
+void
+EnsureGridDataBuffersForContigCount(u32 nContigs);
+
+global_function
+void
+EnsureContigColourBarBuffersForContigCount(u32 nContigs);
 
 global_function
 void
@@ -4187,6 +4588,8 @@ Render() {
     // Grid
     if (File_Loaded && Grid->on)
     {
+        EnsureGridDataBuffersForContigCount(Contigs->numberOfContigs);
+
         glUseProgram(Flat_Shader->shaderProgram);
         glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&Grid->bg);
 
@@ -4291,6 +4694,8 @@ Render() {
     // Contig Id Bars
     if (File_Loaded && Contig_Ids->on)
     {
+        EnsureContigColourBarBuffersForContigCount(Contigs->numberOfContigs);
+
         glUseProgram(Flat_Shader->shaderProgram);
         glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&Grid->bg);
 
@@ -5768,6 +6173,8 @@ Render() {
             f32 min = my_Min(Edit_Pixels.worldCoords.x, Edit_Pixels.worldCoords.y);
             f32 max = my_Max(Edit_Pixels.worldCoords.x, Edit_Pixels.worldCoords.y);
 
+            const f32 mapEdge = 0.5f;
+
             if (Global_Edit_Invert_Flag) // draw the two arrows
             {
                 f32 spacing = 0.002f / Camera_Position.z;
@@ -5802,41 +6209,51 @@ Render() {
                 color[3] = alpha;
                 glUniform4fv(Flat_Shader->colorLocation, 1, color);
 
+                f32 yTopInner = -min;
+                f32 yTopEdge = mapEdge;
+
+                f32 xLeftOuter = min;
+
+                f32 yBotInner = -max;
+                f32 yBotEdge = -mapEdge;
+
+                f32 xRightInner = max;
+
                 // upper vertical part
-                vert[0].x = ModelXToScreen(min); vert[0].y = ModelYToScreen(0.5f);
-                vert[1].x = ModelXToScreen(min); vert[1].y = ModelYToScreen(-min);
-                vert[2].x = ModelXToScreen(max); vert[2].y = ModelYToScreen(-min);
-                vert[3].x = ModelXToScreen(max); vert[3].y = ModelYToScreen(0.5f);
+                vert[0].x = ModelXToScreen(min); vert[0].y = ModelYToScreen(yTopEdge);
+                vert[1].x = ModelXToScreen(min); vert[1].y = ModelYToScreen(yTopInner);
+                vert[2].x = ModelXToScreen(max); vert[2].y = ModelYToScreen(yTopInner);
+                vert[3].x = ModelXToScreen(max); vert[3].y = ModelYToScreen(yTopEdge);
                 glBindBuffer(GL_ARRAY_BUFFER, Edit_Mode_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Edit_Mode_Data->vaos[ptr++]);
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
                 // left horizontal part
-                vert[0].x = ModelXToScreen(-0.5f); vert[0].y = ModelYToScreen(-min);
-                vert[1].x = ModelXToScreen(-0.5f); vert[1].y = ModelYToScreen(-max);
-                vert[2].x = ModelXToScreen(min);   vert[2].y = ModelYToScreen(-max);
-                vert[3].x = ModelXToScreen(min);   vert[3].y = ModelYToScreen(-min);
+                vert[0].x = ModelXToScreen(-mapEdge); vert[0].y = ModelYToScreen(-min);
+                vert[1].x = ModelXToScreen(-mapEdge); vert[1].y = ModelYToScreen(-max);
+                vert[2].x = ModelXToScreen(xLeftOuter);   vert[2].y = ModelYToScreen(-max);
+                vert[3].x = ModelXToScreen(xLeftOuter);   vert[3].y = ModelYToScreen(-min);
                 glBindBuffer(GL_ARRAY_BUFFER, Edit_Mode_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Edit_Mode_Data->vaos[ptr++]);
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
                 // lower vertical part
-                vert[0].x = ModelXToScreen(min); vert[0].y = ModelYToScreen(-max);
-                vert[1].x = ModelXToScreen(min); vert[1].y = ModelYToScreen(-0.5f);
-                vert[2].x = ModelXToScreen(max); vert[2].y = ModelYToScreen(-0.5f);
-                vert[3].x = ModelXToScreen(max); vert[3].y = ModelYToScreen(-max);
+                vert[0].x = ModelXToScreen(min); vert[0].y = ModelYToScreen(yBotInner);
+                vert[1].x = ModelXToScreen(min); vert[1].y = ModelYToScreen(yBotEdge);
+                vert[2].x = ModelXToScreen(max); vert[2].y = ModelYToScreen(yBotEdge);
+                vert[3].x = ModelXToScreen(max); vert[3].y = ModelYToScreen(yBotInner);
                 glBindBuffer(GL_ARRAY_BUFFER, Edit_Mode_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Edit_Mode_Data->vaos[ptr++]);
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
                 // right horizontal part
-                vert[0].x = ModelXToScreen(max);  vert[0].y = ModelYToScreen(-min);
-                vert[1].x = ModelXToScreen(max);  vert[1].y = ModelYToScreen(-max);
-                vert[2].x = ModelXToScreen(0.5f); vert[2].y = ModelYToScreen(-max);
-                vert[3].x = ModelXToScreen(0.5f); vert[3].y = ModelYToScreen(-min);
+                vert[0].x = ModelXToScreen(xRightInner);  vert[0].y = ModelYToScreen(-min);
+                vert[1].x = ModelXToScreen(xRightInner);  vert[1].y = ModelYToScreen(-max);
+                vert[2].x = ModelXToScreen(mapEdge); vert[2].y = ModelYToScreen(-max);
+                vert[3].x = ModelXToScreen(mapEdge); vert[3].y = ModelYToScreen(-min);
                 glBindBuffer(GL_ARRAY_BUFFER, Edit_Mode_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Edit_Mode_Data->vaos[ptr++]);
@@ -6327,6 +6744,155 @@ global_variable
 GLuint
 Quad_EBO;
 
+static u08 Grid_Data_GL_heap;
+static u08 Contig_ColourBar_Data_GL_heap;
+
+global_function
+void
+EnsureGridDataBuffersForContigCount(u32 nContigs)
+{
+    if (!File_Loaded || !Grid_Data || !Flat_Shader)
+    {
+        return;
+    }
+    u32 need = 2 * (nContigs + 1) + 4; // small slack for driver / counting edge cases
+    if (need < 4)
+    {
+        need = 4;
+    }
+    if (Grid_Data->nBuffers >= need)
+    {
+        return;
+    }
+
+    GLuint posAttrib = (GLuint)glGetAttribLocation(Flat_Shader->shaderProgram, "position");
+    glUseProgram(Flat_Shader->shaderProgram);
+
+    if (Grid_Data->nBuffers > 0 && Grid_Data->vaos && Grid_Data->vbos)
+    {
+        glDeleteVertexArrays((GLsizei)Grid_Data->nBuffers, Grid_Data->vaos);
+        glDeleteBuffers((GLsizei)Grid_Data->nBuffers, Grid_Data->vbos);
+        if (Grid_Data_GL_heap)
+        {
+            free(Grid_Data->vaos);
+            free(Grid_Data->vbos);
+            Grid_Data_GL_heap = 0;
+        }
+    }
+
+    Grid_Data->vaos = (GLuint *)malloc((size_t)need * sizeof(GLuint));
+    Grid_Data->vbos = (GLuint *)malloc((size_t)need * sizeof(GLuint));
+    if (!Grid_Data->vaos || !Grid_Data->vbos)
+    {
+        if (Grid_Data->vaos)
+        {
+            free(Grid_Data->vaos);
+        }
+        if (Grid_Data->vbos)
+        {
+            free(Grid_Data->vbos);
+        }
+        Grid_Data->vaos = NULL;
+        Grid_Data->vbos = NULL;
+        Grid_Data->nBuffers = 0;
+        return;
+    }
+    Grid_Data_GL_heap = 1;
+
+    ForLoop(need)
+    {
+        glGenVertexArrays(1, Grid_Data->vaos + index);
+        glBindVertexArray(Grid_Data->vaos[index]);
+
+        glGenBuffers(1, Grid_Data->vbos + index);
+        glBindBuffer(GL_ARRAY_BUFFER, Grid_Data->vbos[index]);
+        glBufferData(GL_ARRAY_BUFFER, 4 * sizeof(vertex), NULL, GL_DYNAMIC_DRAW);
+
+        glEnableVertexAttribArray(posAttrib);
+        glVertexAttribPointer(posAttrib, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), 0);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, Quad_EBO);
+    }
+
+    Grid_Data->nBuffers = need;
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+/*function to ensure the contig colour bar data buffers are for the correct number of contigs, each edit of the contig will call this function --yy5*/
+global_function
+void
+EnsureContigColourBarBuffersForContigCount(u32 nContigs)
+{
+    if (!File_Loaded || !Contig_ColourBar_Data || !Flat_Shader)
+    {
+        return;
+    }
+    u32 need = nContigs + 4;
+    if (need < 4)
+    {
+        need = 4;
+    }
+    if (Contig_ColourBar_Data->nBuffers >= need)
+    {
+        return;
+    }
+
+    GLuint posAttrib = (GLuint)glGetAttribLocation(Flat_Shader->shaderProgram, "position");
+    glUseProgram(Flat_Shader->shaderProgram);
+
+    if (Contig_ColourBar_Data->nBuffers > 0 && Contig_ColourBar_Data->vaos && Contig_ColourBar_Data->vbos)
+    {
+        glDeleteVertexArrays((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vaos);
+        glDeleteBuffers((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vbos);
+        if (Contig_ColourBar_Data_GL_heap)
+        {
+            free(Contig_ColourBar_Data->vaos);
+            free(Contig_ColourBar_Data->vbos);
+            Contig_ColourBar_Data_GL_heap = 0;
+        }
+    }
+
+    Contig_ColourBar_Data->vaos = (GLuint *)malloc((size_t)need * sizeof(GLuint));
+    Contig_ColourBar_Data->vbos = (GLuint *)malloc((size_t)need * sizeof(GLuint));
+    if (!Contig_ColourBar_Data->vaos || !Contig_ColourBar_Data->vbos)
+    {
+        if (Contig_ColourBar_Data->vaos)
+        {
+            free(Contig_ColourBar_Data->vaos);
+        }
+        if (Contig_ColourBar_Data->vbos)
+        {
+            free(Contig_ColourBar_Data->vbos);
+        }
+        Contig_ColourBar_Data->vaos = NULL;
+        Contig_ColourBar_Data->vbos = NULL;
+        Contig_ColourBar_Data->nBuffers = 0;
+        return;
+    }
+    Contig_ColourBar_Data_GL_heap = 1;
+
+    ForLoop(need)
+    {
+        glGenVertexArrays(1, Contig_ColourBar_Data->vaos + index);
+        glBindVertexArray(Contig_ColourBar_Data->vaos[index]);
+
+        glGenBuffers(1, Contig_ColourBar_Data->vbos + index);
+        glBindBuffer(GL_ARRAY_BUFFER, Contig_ColourBar_Data->vbos[index]);
+        glBufferData(GL_ARRAY_BUFFER, 4 * sizeof(vertex), NULL, GL_DYNAMIC_DRAW);
+
+        glEnableVertexAttribArray(posAttrib);
+        glVertexAttribPointer(posAttrib, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), 0);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, Quad_EBO);
+    }
+
+    Contig_ColourBar_Data->nBuffers = need;
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
 enum
 load_file_result
 {
@@ -6593,6 +7159,12 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         glDeleteVertexArrays((GLsizei)Grid_Data->nBuffers, Grid_Data->vaos);
         glDeleteBuffers((GLsizei)Grid_Data->nBuffers, Grid_Data->vbos);
+        if (Grid_Data_GL_heap)
+        {
+            free(Grid_Data->vaos);
+            free(Grid_Data->vbos);
+            Grid_Data_GL_heap = 0;
+        }
 
         glDeleteVertexArrays((GLsizei)Label_Box_Data->nBuffers, Label_Box_Data->vaos);
         glDeleteBuffers((GLsizei)Label_Box_Data->nBuffers, Label_Box_Data->vbos);
@@ -6602,6 +7174,12 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         glDeleteVertexArrays((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vaos);
         glDeleteBuffers((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vbos);
+        if (Contig_ColourBar_Data_GL_heap)
+        {
+            free(Contig_ColourBar_Data->vaos);
+            free(Contig_ColourBar_Data->vbos);
+            Contig_ColourBar_Data_GL_heap = 0;
+        }
 
         glDeleteVertexArrays((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vaos);
         glDeleteBuffers((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vbos);
@@ -6896,6 +7474,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         // a pixel on screen.
         Contigs = PushStructP(arena, map_contigs);
         Contigs->numberOfContigs = nContigs;
+        Contigs->contigs_arr_capacity = nContigs;
         Contigs->contigs_arr = PushArrayP(arena, contig, nContigs);
 
         // Reserve storage for the contig invterted bit flags
@@ -8342,13 +8921,13 @@ BreakMap(
     }
 
     fmt::print(
-        "[Pixel Cut] Original contig_id ({}), current_id ({}), pixel range: [{}, {}] {} inversed, cut at {}\n", 
+        "[Pixel Cut] original_contig_id={} map_contig_id={} fragment_pixel_range=[{}, {}] {} cut_at_pixel={}\n",
         original_contig_id,
-        contig_id, 
-        ptr_left, 
-        ptr_right, 
-        inversed ? "(is)" : "(isn\'t)", 
-        loc );
+        contig_id,
+        ptr_left,
+        ptr_right,
+        inversed ? "inverted" : "not inverted",
+        loc);
 
     return 1; 
 
@@ -12785,6 +13364,8 @@ void SortMapByMetaTags(u64 tagMask)
 MainArgs 
 {   
 
+    Terminal_Log_Init();
+
     Stuck_Problem_Check_Debug
 
     #ifdef PYTHON_SCOPED_INTERPRETER
@@ -12918,6 +13499,7 @@ MainArgs
         {
             glfwSetWindowTitle(window, (const char *)currFileName);
             FenceIn(SetSaveStateNameBuffer((char *)currFileName));
+            ApplyCrashReportPathFromMapPath((const char *)currFile);
         }
     }
     else
@@ -12956,6 +13538,7 @@ MainArgs
         FileBrowserInit(&saveAGPBrowser, &media);
         FileBrowserInit(&saveEditsBrowser, &media);
         FileBrowserInit(&saveClipboardBrowser, &media);
+        FileBrowserInit(&saveDebugReportBrowser, &media);
         FileBrowserInit(&loadAGPBrowser, &media);
     }
     
@@ -13066,6 +13649,7 @@ MainArgs
             {
                 glfwSetWindowTitle(window, (const char *)currFileName);
                 FenceIn(SetSaveStateNameBuffer((char *)currFileName));
+                ApplyCrashReportPathFromMapPath((const char *)currFile);
             }
             glfwPollEvents(); 
             Loading = 0;
@@ -14493,6 +15077,28 @@ MainArgs
 
                 AboutWindowRun(NK_Context, (u32)showAboutScreen);
                 DebugWindowRun(NK_Context);
+
+                {
+                    u08 dbg_save_state;
+                    if ((dbg_save_state = FileBrowserRun("Save Debug Report", &saveDebugReportBrowser, NK_Context, (u32)Debug_Report_Save_Browser_Open, 5)))
+                    {
+                        WriteDebugReportToFile(saveDebugReportBrowser.file);
+                        FileBrowserReloadDirectoryContent(&saveDebugReportBrowser, saveDebugReportBrowser.directory);
+                        struct nk_window *w = nk_window_find(NK_Context, "Save Debug Report");
+                        if (w)
+                        {
+                            w->flags |= NK_WINDOW_HIDDEN;
+                        }
+                        Debug_Report_Save_Browser_Open = 0;
+                    }
+                    /* Do not clear the open flag just because the window is hidden (that blocked reopening after Save).
+                       Clear when the dialog was closed (title bar) or collected — window missing or NK_WINDOW_CLOSED. */
+                    struct nk_window *save_dbg_w = nk_window_find(NK_Context, "Save Debug Report");
+                    if (Debug_Report_Save_Browser_Open && (!save_dbg_w || (save_dbg_w->flags & NK_WINDOW_CLOSED)))
+                    {
+                        Debug_Report_Save_Browser_Open = 0;
+                    }
+                }
 
                 u08 state;
                 if ((state = UserProfileEditorRun("User profile editor", &saveBrowser, NK_Context, (u32)showUserProfileScreen, 1)))

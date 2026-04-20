@@ -423,7 +423,7 @@ void TexturesArray4AI::copy_buffer_to_textures(
 
 
 /*
-这个会把操作修改后的像素拷贝到 this->textures 中
+This will copy the modified pixels into this->textures.
 */
 void TexturesArray4AI::copy_buffer_to_textures_dynamic(
     const contact_matrix *contact_matrix_, 
@@ -903,18 +903,50 @@ void TexturesArray4AI::cal_compressed_hic(
         select_area, 
         false,  // used for cut
         cluster_flag);
-    if (frags->total_length != (using_select_area ? select_area->get_selected_len(Contigs, cluster_flag) : num_pixels_1d))
-    {   
+    /*
+    num_pixels_1d is the size of the Hi‑C texture (num_textures_1d × texture_resolution), often a fixed grid (e.g. 32768).
+    frags->total_length is the sum of contig lengths in the map.
+    So you can have a few extra pixels in the texture that are not assigned to any contig (padding / unused tail). 
+    The old check required total_length == num_pixels_1d for a full‑map sort, which is too strict and triggered 
+    the assert even when the data is consistent.*/
+        const u32 expected_len =
+        using_select_area ? select_area->get_selected_len(Contigs, cluster_flag) : num_pixels_1d;
+
+    if (frags->total_length > num_pixels_1d)
+    {
         fmt::print(
-            "\n[Compress Hic] warning: frags->total_length({}) != num_pixels_1d ({}) ({}) ({}). file:{}, line:{}\n\n",
+            stderr,
+            "\n[Compress Hic] error: frags->total_length({}) > num_pixels_1d({}) — contigs extend past the Hi-C map. file:{}, line:{}\n\n",
             frags->total_length,
-            using_select_area ? select_area->get_selected_len(Contigs, cluster_flag) : num_pixels_1d,
-            (using_select_area?"selected area":"full area"),
-            cluster_flag?"clustering":"not clustering",
+            num_pixels_1d,
             __FILE__,
-            __LINE__    
-        );
+            __LINE__);
         assert(0);
+    }
+
+    if (frags->total_length != expected_len)
+    {
+        if (!using_select_area && frags->total_length < num_pixels_1d)
+        {
+            fmt::print(
+                "\n[Compress Hic] note: frags->total_length({}) < num_pixels_1d({}) (full area) — map has unused trailing padding; continuing. file:{}, line:{}\n\n",
+                frags->total_length,
+                num_pixels_1d,
+                __FILE__,
+                __LINE__);
+        }
+        else
+        {
+            fmt::print(
+                "\n[Compress Hic] warning: frags->total_length({}) != expected_len({}) ({}) ({}). file:{}, line:{}\n\n",
+                frags->total_length,
+                expected_len,
+                (using_select_area ? "selected area" : "full area"),
+                cluster_flag ? "clustering" : "not clustering",
+                __FILE__,
+                __LINE__);
+            assert(0);
+        }
     }
     // clean the memory of compressed_hic_mx
     if (compressed_hic)

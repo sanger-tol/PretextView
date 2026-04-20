@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.17)
-project(PretextView VERSION "1.0.6")
+project(PretextView VERSION "1.0.7")
+# User-visible version (window title, macOS CFBundleShortVersionString); keep in sync with PretextView.cpp
+set(PRETEXTVIEW_APP_VERSION_STRING "1.0.7-beta")
 
 
 option(FORCE_MAC_X86 "Force macOS x86_64 build" OFF)
@@ -170,7 +172,6 @@ else()
     )
 endif()
 
-target_compile_definitions(${target_name} PRIVATE PV=${PROJECT_VERSION})
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_compile_definitions(${target_name} PRIVATE DEBUG)
     target_compile_definitions(copy_texture PRIVATE DEBUG)
@@ -304,7 +305,7 @@ file(GLOB aimodel_files "${CMAKE_CURRENT_SOURCE_DIR}/ai_model/*")
 file(GLOB torch_copy_libs "${TORCH_INSTALL_PREFIX}/lib/*")
 if (APPLE)
     execute_process(
-        COMMAND bash ${CMAKE_SOURCE_DIR}/make_macos_app_plist.sh ${PROJECT_VERSION}
+        COMMAND bash ${CMAKE_SOURCE_DIR}/make_macos_app_plist.sh "${PRETEXTVIEW_APP_VERSION_STRING}"
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         RESULT_VARIABLE result
         OUTPUT_VARIABLE output
@@ -436,7 +437,8 @@ endif()
 # ==== CPack: installation package ====
 include(InstallRequiredSystemLibraries)
 set(CPACK_PACKAGE_NAME ${target_name})
-set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+# Match installer/DMG name to user-visible version (e.g. PretextViewAI-1.0.7-beta-Darwin-x86_64.dmg)
+set(CPACK_PACKAGE_VERSION "${PRETEXTVIEW_APP_VERSION_STRING}")
 set(CPACK_PACKAGE_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/sanger-tol/PretextView")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CPACK_PACKAGE_VERSION}-${CMAKE_SYSTEM_NAME}-${ARCH_TYPE}")

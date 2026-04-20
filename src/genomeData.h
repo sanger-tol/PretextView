@@ -78,7 +78,7 @@ struct map_contigs
     u08 *contigInvertFlags = nullptr; // invert flag [num_pixels_1d / 8], 1 bit for one pixel
     contig *contigs_arr = nullptr;
     u32 numberOfContigs;
-    u32 pad;
+    u32 contigs_arr_capacity; // bytes allocated for contigs_arr (see UpdateContigsFromMapState loop guard)
 };
 
 
