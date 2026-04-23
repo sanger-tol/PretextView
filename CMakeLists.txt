@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.17)
 project(PretextView VERSION "1.0.7")
 # User-visible version (window title, macOS CFBundleShortVersionString); keep in sync with PretextView.cpp
-set(PRETEXTVIEW_APP_VERSION_STRING "1.0.7-beta")
+set(PRETEXTVIEW_APP_VERSION_STRING "1.0.7")
 
 
 option(FORCE_MAC_X86 "Force macOS x86_64 build" OFF)
