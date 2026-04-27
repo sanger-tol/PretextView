@@ -595,6 +595,12 @@ global_variable
 edit_pixels
 Edit_Pixels;
 
+global_variable
+GLuint Tab_Select_VAO;
+
+global_variable
+GLuint Tab_Select_VBO;
+
 
 global_variable
 point3f
@@ -3563,6 +3569,10 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
 
 global_function
 void
+ConsolidateTabSelections(GLFWwindow* window);
+
+global_function
+void
 Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
 {
     s32 primaryMouse = user_profile_settings_ptr->invert_mouse ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
@@ -3590,10 +3600,17 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         if (button == primaryMouse && Edit_Mode && action == GLFW_PRESS)
         {
             Edit_Pixels.editing = !Edit_Pixels.editing;
+            Edit_Pixels.tabSelecting = 0;
+            Edit_Pixels.tabSelectedRanges.clear();
             MouseMove(window, x, y);
             if (!Edit_Pixels.editing) UpdateScaffolds();
         }
-        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && Edit_Pixels.selecting)
+        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && !Edit_Pixels.editing && Edit_Pixels.tabSelecting)
+        {
+            Edit_Pixels.selecting = 0;
+            ConsolidateTabSelections(window);
+        }
+        else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && !Edit_Pixels.editing)
         {
             Edit_Pixels.selecting = 0;
             if (!Edit_Pixels.editing) Edit_Pixels.editing = 1;
@@ -6270,9 +6287,76 @@ Render() {
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
             }
 
+            // Draw Tab-selected contigs (full cross pattern)
+            if (Edit_Pixels.tabSelecting && !Edit_Pixels.tabSelectedRanges.empty() && !Edit_Pixels.editing)
+            {
+                f32 tabColor[4] = {1.0f, 0.65f, 0.0f, 0.3f};
+                glUniform4fv(Flat_Shader->colorLocation, 1, tabColor);
+
+                u32 nPix = Number_of_Pixels_1D;
+                for (const auto &range : Edit_Pixels.tabSelectedRanges)
+                {
+                    f32 tMin = (f32)(((f64)((2 * range.y) + 1)) / ((f64)(2 * nPix))) - 0.5f;
+                    f32 tMax = (f32)(((f64)((2 * range.x) + 1)) / ((f64)(2 * nPix))) - 0.5f;
+
+                    // upper vertical part
+                    vert[0].x = ModelXToScreen(tMin); vert[0].y = ModelYToScreen(0.5f);
+                    vert[1].x = ModelXToScreen(tMin); vert[1].y = ModelYToScreen(-tMin);
+                    vert[2].x = ModelXToScreen(tMax); vert[2].y = ModelYToScreen(-tMin);
+                    vert[3].x = ModelXToScreen(tMax); vert[3].y = ModelYToScreen(0.5f);
+                    glBindBuffer(GL_ARRAY_BUFFER, Tab_Select_VBO);
+                    glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
+                    glBindVertexArray(Tab_Select_VAO);
+                    glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
+
+                    // left horizontal part
+                    vert[0].x = ModelXToScreen(-0.5f); vert[0].y = ModelYToScreen(-tMin);
+                    vert[1].x = ModelXToScreen(-0.5f); vert[1].y = ModelYToScreen(-tMax);
+                    vert[2].x = ModelXToScreen(tMin);  vert[2].y = ModelYToScreen(-tMax);
+                    vert[3].x = ModelXToScreen(tMin);  vert[3].y = ModelYToScreen(-tMin);
+                    glBindBuffer(GL_ARRAY_BUFFER, Tab_Select_VBO);
+                    glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
+                    glBindVertexArray(Tab_Select_VAO);
+                    glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
+
+                    // lower vertical part
+                    vert[0].x = ModelXToScreen(tMin); vert[0].y = ModelYToScreen(-tMax);
+                    vert[1].x = ModelXToScreen(tMin); vert[1].y = ModelYToScreen(-0.5f);
+                    vert[2].x = ModelXToScreen(tMax); vert[2].y = ModelYToScreen(-0.5f);
+                    vert[3].x = ModelXToScreen(tMax); vert[3].y = ModelYToScreen(-tMax);
+                    glBindBuffer(GL_ARRAY_BUFFER, Tab_Select_VBO);
+                    glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
+                    glBindVertexArray(Tab_Select_VAO);
+                    glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
+
+                    // right horizontal part
+                    vert[0].x = ModelXToScreen(tMax);  vert[0].y = ModelYToScreen(-tMin);
+                    vert[1].x = ModelXToScreen(tMax);  vert[1].y = ModelYToScreen(-tMax);
+                    vert[2].x = ModelXToScreen(0.5f);  vert[2].y = ModelYToScreen(-tMax);
+                    vert[3].x = ModelXToScreen(0.5f);  vert[3].y = ModelYToScreen(-tMin);
+                    glBindBuffer(GL_ARRAY_BUFFER, Tab_Select_VBO);
+                    glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
+                    glBindVertexArray(Tab_Select_VAO);
+                    glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
+
+                    // center part
+                    vert[0].x = ModelXToScreen(tMin); vert[0].y = ModelYToScreen(-tMin);
+                    vert[1].x = ModelXToScreen(tMin); vert[1].y = ModelYToScreen(-tMax);
+                    vert[2].x = ModelXToScreen(tMax); vert[2].y = ModelYToScreen(-tMax);
+                    vert[3].x = ModelXToScreen(tMax); vert[3].y = ModelYToScreen(-tMin);
+                    glBindBuffer(GL_ARRAY_BUFFER, Tab_Select_VBO);
+                    glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
+                    glBindVertexArray(Tab_Select_VAO);
+                    glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
+                }
+
+                // Restore previous color
+                glUniform4fv(Flat_Shader->colorLocation, 1, color);
+            }
+
             { // draw the text by the selected (pre-select) fragment
-                f32 lh = 0.0f;   
-                
+                f32 lh = 0.0f;
+
                 fonsClearState(FontStash_Context);
                 fonsSetSize(FontStash_Context, 18.0f * Screen_Scale.x);
                 fonsSetAlign(FontStash_Context, FONS_ALIGN_LEFT | FONS_ALIGN_TOP);
@@ -6392,7 +6476,8 @@ Render() {
                         (char *)"Middle Click / Spacebar: pickup whole sequence or (hold Shift): scaffold",
                         (char *)"Middle Click / Spacebar (while editing): invert sequence",
                         (char *)"P: copy highlight to clipboard",
-                        (char *)"V: break at selection start"
+                        (char *)"V: break at selection start",
+                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate"
                     };
 
                     textBoxHeight = (f32)helpTexts.size() * (lh + 1.0f) - 1.0f;
@@ -8448,6 +8533,21 @@ Setup()
         PushGenericBuffer(&Edit_Mode_Data, 12);
     }
 
+    // Tab Select Data
+    {
+        glGenVertexArrays(1, &Tab_Select_VAO);
+        glBindVertexArray(Tab_Select_VAO);
+
+        glGenBuffers(1, &Tab_Select_VBO);
+        glBindBuffer(GL_ARRAY_BUFFER, Tab_Select_VBO);
+        glBufferData(GL_ARRAY_BUFFER, 4 * sizeof(vertex), NULL, GL_DYNAMIC_DRAW);
+
+        glEnableVertexAttribArray(posAttribFlatShader);
+        glVertexAttribPointer(posAttribFlatShader, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), 0);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, Quad_EBO);
+    }
+
     // Tool Tip Data
     {
         PushGenericBuffer(&Tool_Tip_Data, 1);
@@ -9814,6 +9914,8 @@ ToggleEditMode(GLFWwindow* window)
     if (Edit_Mode && !Edit_Pixels.editing)
     {
         Edit_Pixels.scaffSelecting = 0;
+        Edit_Pixels.tabSelecting = 0;
+        Edit_Pixels.tabSelectedRanges.clear();
         Global_Mode = mode_normal;
         if (Tool_Tip->on)
         {
@@ -10053,6 +10155,82 @@ NK_Pressed_Keys_Ptr = 0;
 global_variable
 u32
 GatheringTextInput = 0;
+
+global_function
+void
+ConsolidateTabSelections(GLFWwindow* window)
+{
+    u32 nPixels = Number_of_Pixels_1D;
+
+    // Sort by start position (ascending)
+    std::sort(Edit_Pixels.tabSelectedRanges.begin(), Edit_Pixels.tabSelectedRanges.end(),
+        [](const pointui &a, const pointui &b) { return a.y < b.y; });
+
+    // Anchor on first range, move subsequent ranges adjacent
+    for (u32 i = 1; i < (u32)Edit_Pixels.tabSelectedRanges.size(); i++)
+    {
+        u32 prevEnd = Edit_Pixels.tabSelectedRanges[i - 1].x;
+        u32 curStart = Edit_Pixels.tabSelectedRanges[i].y;
+        u32 curEnd = Edit_Pixels.tabSelectedRanges[i].x;
+        u32 rangeSize = curEnd - curStart + 1;
+
+        s32 delta = (s32)(prevEnd + 1) - (s32)curStart;
+
+        if (delta == 0) continue;
+
+        RearrangeMap(curStart, curEnd, delta, 0, false);
+        u32 newStart = (u32)((s32)curStart + delta);
+        u32 newEnd = (u32)((s32)curEnd + delta);
+        AddMapEdit(delta, {newStart, newEnd}, 0);
+
+        // Update subsequent ranges: when moving backward (delta < 0),
+        // pixels between newStart and curStart get displaced forward by rangeSize
+        for (u32 j = i + 1; j < (u32)Edit_Pixels.tabSelectedRanges.size(); j++)
+        {
+            if (delta < 0)
+            {
+                // Range moved backward: pixels in [newStart, curStart-1] shifted forward by rangeSize
+                if (Edit_Pixels.tabSelectedRanges[j].y >= newStart && Edit_Pixels.tabSelectedRanges[j].y < curStart)
+                {
+                    Edit_Pixels.tabSelectedRanges[j].y += rangeSize;
+                    Edit_Pixels.tabSelectedRanges[j].x += rangeSize;
+                }
+            }
+            else
+            {
+                // Range moved forward: pixels in [curEnd+1, newEnd] shifted backward by rangeSize
+                if (Edit_Pixels.tabSelectedRanges[j].y > curEnd && Edit_Pixels.tabSelectedRanges[j].y <= newEnd)
+                {
+                    Edit_Pixels.tabSelectedRanges[j].y -= rangeSize;
+                    Edit_Pixels.tabSelectedRanges[j].x -= rangeSize;
+                }
+            }
+        }
+
+        Edit_Pixels.tabSelectedRanges[i].y = newStart;
+        Edit_Pixels.tabSelectedRanges[i].x = newEnd;
+    }
+
+    UpdateContigsFromMapState();
+
+    // Set editing range to cover all consolidated ranges
+    u32 fullStart = Edit_Pixels.tabSelectedRanges.front().y;
+    u32 fullEnd = Edit_Pixels.tabSelectedRanges.back().x;
+
+    Edit_Pixels.pixels.x = fullEnd;
+    Edit_Pixels.pixels.y = fullStart;
+    Edit_Pixels.worldCoords.x = (f32)(((f64)((2 * fullEnd) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
+    Edit_Pixels.worldCoords.y = (f32)(((f64)((2 * fullStart) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
+
+    Edit_Pixels.editing = 1;
+    Edit_Pixels.selecting = 0;
+    Edit_Pixels.tabSelecting = 0;
+    Edit_Pixels.tabSelectedRanges.clear();
+
+    f64 mx, my;
+    glfwGetCursorPos(window, &mx, &my);
+    MouseMove(window, mx, my);
+}
 
 global_function
 void
@@ -10497,8 +10675,51 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     }
                     break;
 
-                case GLFW_KEY_SPACE:
+                case GLFW_KEY_TAB:
                     if (Edit_Mode && !Edit_Pixels.editing && action == GLFW_PRESS)
+                    {
+                        u32 pixel = Edit_Pixels.pixels.x;
+                        u32 contigId = Map_State->contigIds[pixel];
+
+                        // Find contig boundaries
+                        u32 contigStart = pixel;
+                        while (contigStart > 0 && Map_State->contigIds[contigStart - 1] == contigId)
+                        {
+                            --contigStart;
+                        }
+                        u32 contigEnd = pixel;
+                        while (contigEnd < (Number_of_Pixels_1D - 1) && Map_State->contigIds[contigEnd + 1] == contigId)
+                        {
+                            ++contigEnd;
+                        }
+
+                        // Toggle: remove if already selected, otherwise add
+                        bool found = false;
+                        for (u32 i = 0; i < (u32)Edit_Pixels.tabSelectedRanges.size(); i++)
+                        {
+                            if (Edit_Pixels.tabSelectedRanges[i].y == contigStart && Edit_Pixels.tabSelectedRanges[i].x == contigEnd)
+                            {
+                                Edit_Pixels.tabSelectedRanges.erase(Edit_Pixels.tabSelectedRanges.begin() + i);
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found)
+                        {
+                            Edit_Pixels.tabSelectedRanges.push_back({contigEnd, contigStart});
+                        }
+
+                        Edit_Pixels.tabSelecting = !Edit_Pixels.tabSelectedRanges.empty();
+                        Redisplay = 1;
+                    }
+                    break;
+
+                case GLFW_KEY_SPACE:
+                    if (Edit_Mode && !Edit_Pixels.editing && Edit_Pixels.tabSelecting && action == GLFW_PRESS)
+                    {
+                        ConsolidateTabSelections(window);
+                    }
+                    else if (Edit_Mode && !Edit_Pixels.editing && action == GLFW_PRESS)
                     {
                         Edit_Pixels.selecting = 1;
                         Edit_Pixels.selectPixels = Edit_Pixels.pixels;

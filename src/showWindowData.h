@@ -78,10 +78,12 @@ struct edit_pixels
     pointui pixels;
     point2f worldCoords;
     pointui selectPixels;
+    std::vector<pointui> tabSelectedRanges; // {x=endPixel, y=startPixel} per selected contig
     u08 editing : 1;
     u08 selecting : 1;
     u08 scaffSelecting : 1;
     u08 snap : 1;
+    u08 tabSelecting : 1;
 };
 
 struct tex_vertex
