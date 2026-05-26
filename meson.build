@@ -52,13 +52,13 @@ glfw_ops.append_compile_args('cpp', flags)
 glfw_ops.append_link_args(link_flags, language: ['c', 'cpp'])
 dependencies += [cmake.subproject('glfw', options : glfw_ops).dependency('glfw')]
 
-executable('PretextView', ['PretextView.cpp', 'glad.c'], 
+executable('PretextView', ['PretextView.cpp', 'src/layer.cpp', 'glad.c'], 
     dependencies : dependencies, 
     cpp_args : flags + ['--std=c++17'], 
     c_args : flags + ['--std=c17'], 
     link_args : link_flags, 
     link_with : libdeflate, 
-    include_directories : ['include', 'libdeflate'], 
+    include_directories : ['include', 'src', 'libdeflate'], 
     install : true)
 
 # gernate the macOS application, including the verion number, name, icon, ...

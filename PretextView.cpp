@@ -26,7 +26,7 @@ SOFTWARE.
 */
 
 
-#define PretextView_Version_Label "1.0.7"
+#define PretextView_Version_Label "1.0.8-beta"
 #define PretextView_Version "PretextViewAI Version " PretextView_Version_Label
 #define PretextView_Title "PretextViewAI " PretextView_Version_Label " - Wellcome Sanger Institute"
 
@@ -45,6 +45,7 @@ SOFTWARE.
 
 #include "utilsPretextView.h"
 #include "auto_curation_state.h"
+#include "layer.h"
 
 #include "TextureLoadQueue.cpp"  // 
 #include "ColorMapData.cpp"      // add color maps 
@@ -2435,12 +2436,28 @@ AddMapEdit(s32 delta, pointui finalPixels, u32 invert);
 
 global_function
 void
+UnbreakMap(const int& loc);
+
+global_function
+void
+UpdateScaffolds();
+
+global_function
+void
 RebuildContig(u32 pixel)
 {
+    u32 origContigBaseId = GetOriginalContigBaseId(Map_State->originalContigIds[pixel]);
+    u32 maxIterations = Number_of_Pixels_1D ? Number_of_Pixels_1D : 1;
+    u32 iterations = 0;
+
     for (;;)
     {
+        if (++iterations > maxIterations)
+        {
+            break;
+        }
+
         u32 contigId = Map_State->contigIds[pixel];
-        u32 origContigId = Map_State->originalContigIds[pixel];
 
         u32 top = (u32)pixel;
         while (top && (Map_State->contigIds[top - 1] == contigId)) --top;
@@ -2458,7 +2475,8 @@ RebuildContig(u32 pixel)
         u08 fragmented = 0;
         ForLoop(Number_of_Pixels_1D)
         {
-            if ((Map_State->contigIds[index] != contigId) && (Map_State->originalContigIds[pixel] == origContigId))
+            if ((Map_State->contigIds[index] != contigId) &&
+                (GetOriginalContigBaseId(Map_State->originalContigIds[index]) == origContigBaseId))
             {
                 fragmented = 1;
                 break;
@@ -2473,7 +2491,8 @@ RebuildContig(u32 pixel)
                 u32 otherPixel = 0;
                 ForLoop(Number_of_Pixels_1D)
                 {
-                    if ((Map_State->originalContigIds[pixel] == origContigId) && (Map_State->contigRelCoords[index] == (contigTopCoord - 1)))
+                    if ((GetOriginalContigBaseId(Map_State->originalContigIds[index]) == origContigBaseId) &&
+                        (Map_State->contigRelCoords[index] == (contigTopCoord - 1)))
                     {
                         otherPixel = index;
                         break;
@@ -2507,7 +2526,8 @@ RebuildContig(u32 pixel)
                 u32 otherPixel = 0;
                 ForLoop(Number_of_Pixels_1D)
                 {
-                    if ((Map_State->originalContigIds[pixel] == origContigId) && (Map_State->contigRelCoords[index] == (contigBottomCoord + 1)))
+                    if ((GetOriginalContigBaseId(Map_State->originalContigIds[index]) == origContigBaseId) &&
+                        (Map_State->contigRelCoords[index] == (contigBottomCoord + 1)))
                     {
                         otherPixel = index;
                         break;
@@ -2539,6 +2559,19 @@ RebuildContig(u32 pixel)
         }
         else break;
     }
+
+    for (u32 i = 0; i < (Number_of_Pixels_1D - 1); ++i)
+    {
+        if ((GetOriginalContigBaseId(Map_State->originalContigIds[i]) == origContigBaseId) &&
+            (Map_State->originalContigIds[i] != Map_State->originalContigIds[i + 1]))
+        {
+            UnbreakMap((int)i);
+        }
+    }
+
+    UpdateContigsFromMapState();
+    UpdateScaffolds();
+    Redisplay = 1;
 }
 
 struct
@@ -7209,6 +7242,121 @@ global_function
 u08
 LoadState(u64 headerHash, char *path = 0);
 
+global_variable
+u08
+Map_File_Path[512] = {0};
+
+u08
+PretextLayer_ReloadActiveTextures(memory_arena *arena, const char *file_path)
+{
+    if (!File_Loaded || !file_path || !file_path[0] || !Texture_Buffer_Queue || !Contact_Matrix || !Thread_Pool)
+    {
+        return(0);
+    }
+
+    ThreadPoolWait(Thread_Pool);
+
+    char layer_label[128];
+    PretextLayer_FormatActiveLabel(layer_label, (u32)sizeof(layer_label));
+    if (layer_label[0])
+    {
+        printf("[PretextView] Switching to %s\n", layer_label);
+    }
+
+    if (Contact_Matrix->textures)
+    {
+        glDeleteTextures(1, &Contact_Matrix->textures);
+        Contact_Matrix->textures = 0;
+    }
+
+    FenceIn(Texture_Ptr = 0);
+    FenceIn(Current_Loaded_Texture = 0);
+
+    ShutdownTextureBufferQueue(Texture_Buffer_Queue);
+    InitialiseTextureBufferQueue(arena, Texture_Buffer_Queue, Bytes_Per_Texture, file_path);
+
+    u32 nTextures = (Number_of_Textures_1D + 1) * (Number_of_Textures_1D >> 1);
+    u32 *packedTextureIndexes = new u32[nTextures];
+    ThreadPoolAddTask(Thread_Pool, PopulateTextureLoadQueue, packedTextureIndexes);
+
+    glActiveTexture(GL_TEXTURE0);
+    glGenTextures(1, &Contact_Matrix->textures);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, Contact_Matrix->textures);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, (GLint)Number_of_MipMaps - 1);
+
+    u32 resolution = Texture_Resolution;
+    ForLoop(Number_of_MipMaps)
+    {
+        glCompressedTexImage3D(
+            GL_TEXTURE_2D_ARRAY,
+            (GLint)index,
+            GL_COMPRESSED_RED_RGTC1,
+            (GLsizei)resolution,
+            (GLsizei)resolution,
+            (GLsizei)nTextures,
+            0,
+            (GLsizei)((resolution >> 1) * resolution * nTextures),
+            0);
+        resolution >>= 1;
+    }
+
+    ForLoop(Number_of_Textures_1D)
+    {
+        ForLoop2(Number_of_Textures_1D - index)
+        {
+            volatile texture_buffer *loadedTexture = 0;
+            while (!loadedTexture)
+            {
+#ifndef _WIN32
+                __atomic_load(&Current_Loaded_Texture, &loadedTexture, __ATOMIC_SEQ_CST);
+#else
+                loadedTexture = (texture_buffer *)InterlockedCompareExchangePointer(
+                    (PVOID volatile *)&Current_Loaded_Texture,
+                    NULL,
+                    NULL);
+#endif
+            }
+
+            u08 *texture = loadedTexture->texture;
+            resolution = Texture_Resolution;
+            for (GLint level = 0; level < (GLint)Number_of_MipMaps; ++level)
+            {
+                GLsizei nBytes = (GLsizei)(resolution * (resolution >> 1));
+                glCompressedTexSubImage3D(
+                    GL_TEXTURE_2D_ARRAY,
+                    level,
+                    0,
+                    0,
+                    (GLint)Texture_Ptr,
+                    (GLsizei)resolution,
+                    (GLsizei)resolution,
+                    1,
+                    GL_COMPRESSED_RED_RGTC1,
+                    nBytes,
+                    texture);
+                resolution >>= 1;
+                texture += nBytes;
+            }
+
+            AddTextureBufferToQueue(Texture_Buffer_Queue, (texture_buffer *)loadedTexture);
+            FenceIn(Current_Loaded_Texture = 0);
+            __atomic_fetch_add(&Texture_Ptr, 1, 0);
+        }
+    }
+
+    ThreadPoolWait(Thread_Pool);
+    CloseTextureBufferQueueFiles(Texture_Buffer_Queue);
+    delete[] packedTextureIndexes;
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+    return(1);
+}
+
 global_function
 load_file_result
 LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *headerHash)
@@ -7220,6 +7368,10 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
     {
         return(fileErr);
     }
+
+    PretextLayer_Reset();
+    PretextLayer_SetDecompressor(Decompressor);
+    CopyNullTerminatedString((u08 *)filePath, Map_File_Path);
     
     FenceIn(File_Loaded = 0); 
 
@@ -7398,6 +7550,9 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         // prevents memory leaks.
         FreeLastPushP(arena);
 
+        u08 *header_start = header;
+        u08 *header_end = header_start + nBytesHeader;
+
         /*
                             Header Format
             ================================================
@@ -7474,7 +7629,13 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         u08 textureRes = *header++;  // Resolution
         u08 nTextRes = *header++;    // Number of textures
-        u08 mipMapLevels = *header;  // Number of mipmap levels  (https://en.wikipedia.org/wiki/Mipmap)
+        u08 mipMapLevels = *header++;  // Number of mipmap levels  (https://en.wikipedia.org/wiki/Mipmap)
+
+        pretext_layer_info primary_layer_info = {};
+        if (PretextLayer_ParseHeaderExtension(&header, header_end, &primary_layer_info))
+        {
+            PretextLayer_ApplyLayerInfo(&primary_layer_info);
+        }
 
         // Texture resolution: The number of pixels currently displayed, 1024.
         Texture_Resolution = Pow2(textureRes);
@@ -7628,6 +7789,30 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             entry->nBytes = nBytes;
 
             currLocation += nBytes;
+        }
+
+        {
+            u32 n_texture_entries = (Number_of_Textures_1D + 1) * (Number_of_Textures_1D >> 1);
+            u64 first_texture_start = (u64)(sizeof(Magic) + 8 + nBytesHeaderComp);
+
+            PretextLayer_AdoptPrimaryAtlas(arena, File_Atlas, n_texture_entries, &primary_layer_info);
+            PretextLayer_DiscoverAdditionalSections(
+                file,
+                fileSize,
+                arena,
+                first_texture_start,
+                n_texture_entries,
+                Total_Genome_Length,
+                Number_of_Original_Contigs,
+                textureRes,
+                nTextRes,
+                mipMapLevels);
+
+            if (PretextLayer_IsEnabled())
+            {
+                currLocation = (u32)PretextLayer_GetFileScanCursor();
+                fseek(file, (long)currLocation, SEEK_SET);
+            }
         }
 
         // Extensions
@@ -10238,6 +10423,30 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
 {
     if (!Loading && !auto_sort_state && !auto_cut_state && (action != GLFW_RELEASE || key == GLFW_KEY_SPACE || key == GLFW_KEY_A || key == GLFW_KEY_LEFT_SHIFT))
     {
+        if (action == GLFW_PRESS && mods == 0 && File_Loaded &&
+            (key == GLFW_KEY_0 || key == GLFW_KEY_KP_0))
+        {
+            if (PretextLayer_IsEnabled())
+            {
+                if (PretextLayer_CycleActive())
+                {
+                    PretextLayer_ApplyActiveAtlas(&File_Atlas);
+                    if (PretextLayer_ReloadActiveTextures(Loading_Arena, (const char *)Map_File_Path))
+                    {
+                        Redisplay = 1;
+                    }
+                }
+            }
+            else
+            {
+                fprintf(stderr,
+                        "[PretextView] Layer switch unavailable: this map has %u layer(s). "
+                        "Build with PretextMap --mapqLayers for multi-layer output.\n",
+                        PretextLayer_GetCount());
+            }
+            return;
+        }
+
         if (UI_On)
         {
 #if 0

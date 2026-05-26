@@ -1,5 +1,7 @@
 /*
-Copyright (c) 2021 Ed Harry, Wellcome Sanger Institute
+Copyright (c) 2026 Wellcome Sanger Institute
+author: Shaoheng Guan, sg3@sanger.ac.uk, Wellcome Sanger Institute
+translated by Yumi Sims, yy5@sanger.ac.uk, Wellcome Sanger Institute
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -33,94 +35,103 @@ struct texture_buffer
     u08 *compressionBuffer;                  // compressed texture
     libdeflate_decompressor *decompressor;   // decompressor
     FILE *file;                              // file pointer
-    u32 homeIndex;                           // 纹理缓冲区索引
+    u32 homeIndex;                           // index of the texture buffer
     u16 x;                                   // raw number of the texture
     u16 y;                                   // column number 
     texture_buffer *prev;                    // previous buffer
 };
 
-// 定义单一纹理缓冲区队列
+// define the single texture buffer queue
 struct single_texture_buffer_queue   
 {
-    u32 queueLength;          // 队列中缓冲区数目
-    u32 pad;                  // 填充字节，用于对齐
-    mutex rwMutex;            // 读写互斥锁，防止队列读取中发生错乱  typedef pthread_mutex_t mutex; 采用多线库中的pthread_mutex_t定义而来
-    texture_buffer *front;    // 头节点指针
-    texture_buffer *rear;     // 尾节点指针
+    u32 queueLength;          // number of buffers in the queue
+    u32 pad;                  // padding bytes, for alignment
+    mutex rwMutex;            // read-write mutex, prevent errors in the queue reading  typedef pthread_mutex_t mutex; defined in the multi-thread library
+    texture_buffer *front;    // pointer to the head node
+    texture_buffer *rear;     // pointer to the last node
 };
 
-// 定义缓冲区队列结构体
+// define the buffer queue structure
 struct texture_buffer_queue
 {
-    single_texture_buffer_queue **queues;  // 多个单一队列缓冲区的指针数组, queues是一个地址，存储的 *queues 是一个地址，这个地址存储一个缓冲区队列**queues，
-    threadSig index;                       // 队列的索引 typedef volatile u32 threadSig;
-    u32 pad;                               // 填充字节，用于对齐
+    single_texture_buffer_queue **queues;  // pointer array of multiple single queue buffers, queues is an address, the stored *queues is an address, this address stores a buffer queue**queues，
+    threadSig index;                       // index of the queue typedef volatile u32 threadSig;
+    u32 pad;                               // padding bytes, for alignment
 };
 
-// 定义函数对单个buffer队列进行初始化
+// define the function to initialize the single buffer queue
 global_function
 void
 InitialiseSingleTextureBufferQueue(single_texture_buffer_queue *queue)
 {
-    InitialiseMutex(queue->rwMutex);  // 初始化互斥锁 #define InitialiseMutex(x) pthread_mutex_init(&(x), NULL)，将单个队列的互斥锁设置为可用
-    queue->queueLength = 0;           // 长度为0表明队列中为空
+    InitialiseMutex(queue->rwMutex);  // initialize the mutex #define InitialiseMutex(x) pthread_mutex_init(&(x), NULL)，Set the mutex of a single queue to available.
+    queue->queueLength = 0;           // length of 0 indicates that the queue is empty
 }
 
 global_function
 void
 AddSingleTextureBufferToQueue(single_texture_buffer_queue *queue, texture_buffer *buffer)
-{   // 将最后buffer添加为queue的rear最后一个 
-    LockMutex(queue->rwMutex); // 将当前queue上锁
+{   // add the last buffer to the rear of the queue
+    LockMutex(queue->rwMutex); // lock the current queue
     buffer->prev = 0;
 
     switch (queue->queueLength)
     {
-        case 0: // 设置为第一个buffer
-            queue->front = buffer;  // 此处不定义front的buffer->prev，只是在定一下一个的时候定义
+        case 0: // set the first buffer
+            queue->front = buffer;  // here we don't define the previous node of the front node, only define the next node
             queue->rear = buffer;
             break;
 
-        default: //紧跟着设置buffer
-            queue->rear->prev = buffer; // 设置原来的尾部节点的前一个为buffer
-            // ?? 为什么不是 将前一个给到buffer的prev然后将buffer给到queue->rear buffer->prev = queue->rear;
-            queue->rear = buffer;       // 将buffer设置为尾节点
+        default: // set the buffer after the last one
+            queue->rear->prev = buffer; // set the previous node of the last node to the buffer
+            // ?? why not set the previous node of the last node to the buffer? buffer->prev = queue->rear;
+            queue->rear = buffer;       // set the buffer to the last node
     }
 
-    ++queue->queueLength; // 更新buffer长度
-    UnlockMutex(queue->rwMutex); // 操作完解锁当前queue
+    ++queue->queueLength; // update the buffer length
+    UnlockMutex(queue->rwMutex); // unlock the current queue after the operation
 }
 
 #define Compression_Header_Size 128
 
 global_function
 void
+ShutdownTextureBufferQueue(texture_buffer_queue *queue);
+
+global_function
+void
 InitialiseTextureBufferQueue(memory_arena *arena, texture_buffer_queue *queue, u32 nBytesForTextureBuffer, const char *fileName)
-{   // 为所有的 single queue， 及其中的texture初始化内存
+{   // initialize the memory for all the single queues and the textures in them
+    if (queue->queues)
+    {
+        ShutdownTextureBufferQueue(queue);
+    }
+
     queue->queues = PushArrayP(arena, single_texture_buffer_queue *, Number_Of_Texture_Buffer_Queues);  // allocate pointers for 一个queue
-    queue->index = 0;      // 设置线程索引为0，后面可能会修改，因为threadsig 为 volatile u32
-    u32 nAdded = 0;        // 成功添加decompressor的个数
-    u32 nFileHandles = 0;  // 成功添加file指针的个数
+    queue->index = 0;      // set the thread index to 0, it may be modified later, because threadsig is volatile u32
+    u32 nAdded = 0;        // number of successfully added decompressors
+    u32 nFileHandles = 0;  // number of successfully added file pointers
 
-    ForLoop(Number_Of_Texture_Buffer_Queues) // 一共有8个queue
-    {   // 类似二维数组
+    ForLoop(Number_Of_Texture_Buffer_Queues) // there are 8 queues
+    {   // similar to a two-dimensional array
         queue->queues[index] = PushStructP(arena, single_texture_buffer_queue); // allocate spaces for each queues
-        InitialiseSingleTextureBufferQueue(queue->queues[index]);  // **queue指一个队列变量，*(queue+index)或*queue[index] 表示一个队列变量的指针
+        InitialiseSingleTextureBufferQueue(queue->queues[index]);  // **queue is a pointer to a queue variable, *(queue+index) or *queue[index] represents a pointer to a queue variable
 
-        ForLoop2(Number_Of_Texture_Buffers_Per_Queue) // 每个queue会有8个buffer
+        ForLoop2(Number_Of_Texture_Buffers_Per_Queue) // each queue will have 8 buffers, similar to a two-dimensional array
         {
             texture_buffer *buffer = PushStructP(arena, texture_buffer); // allocate space for texture buffer 
             buffer->texture = PushArrayP(arena, u08, nBytesForTextureBuffer); // space for texture
             buffer->compressionBuffer = PushArrayP(arena, u08, nBytesForTextureBuffer + Compression_Header_Size); // space for buffer and the compression header
             buffer->decompressor = libdeflate_alloc_decompressor(); // decompressor
             buffer->file = fopen(fileName, "rb");    // file pointer
-            buffer->homeIndex = index;               // texture的index是第几个队列的地址，每个队列中有8个texture
-            if (buffer->decompressor)                // 确保buffer初始化成功，成功分配解压器
+            buffer->homeIndex = index;               // the index of the texture is the address of the queue, each queue has 8 textures
+            if (buffer->decompressor)                // ensure the buffer is initialized successfully, successfully allocated the decompressor
             {
                 ++nAdded;
-                if (buffer->file)                    // 确保成功分配文件指针
+                if (buffer->file)                    // ensure the file pointer is successfully allocated
                 {
                     ++nFileHandles;
-                    AddSingleTextureBufferToQueue(queue->queues[index], buffer); // 将这个用于读取 texture 的buffer添加到queue上
+                    AddSingleTextureBufferToQueue(queue->queues[index], buffer); // add the buffer to the queue for reading the texture
                 }
             }
         }
@@ -139,41 +150,82 @@ InitialiseTextureBufferQueue(memory_arena *arena, texture_buffer_queue *queue, u
 
 global_function
 void close_file_in_single_queue(single_texture_buffer_queue* queue){
-    LockMutex(queue->rwMutex);
-    for (texture_buffer* tmp = queue->front; tmp; tmp = tmp->prev){  // iteration to close all of the file and decompressor
-        fclose(tmp->file);
-        free(tmp->decompressor);
+    if (!queue)
+    {
+        return;
     }
+
+    LockMutex(queue->rwMutex);
+    for (texture_buffer* tmp = queue->front; tmp; tmp = tmp->prev)
+    {
+        if (tmp->file)
+        {
+            fclose(tmp->file);
+            tmp->file = 0;
+        }
+        if (tmp->decompressor)
+        {
+            libdeflate_free_decompressor(tmp->decompressor);
+            tmp->decompressor = 0;
+        }
+    }
+    queue->front = 0;
+    queue->rear = 0;
+    queue->queueLength = 0;
     UnlockMutex(queue->rwMutex);
-    return ;
+}
+
+global_function
+void
+ShutdownTextureBufferQueue(texture_buffer_queue *queue)
+{
+    if (!queue || !queue->queues)
+    {
+        return;
+    }
+
+    ForLoop(Number_Of_Texture_Buffer_Queues)
+    {
+        if (queue->queues[index])
+        {
+            close_file_in_single_queue(queue->queues[index]);
+        }
+    }
+
+    queue->queues = 0;
+    queue->index = 0;
 }
 
 global_function
 void
 CloseTextureBufferQueueFiles(texture_buffer_queue *queue)
-{   // 关闭文件阅读器，释放解压器指针
+{   // close the file reader, release the decompressor pointer
+    if (!queue || !queue->queues)
+    {
+        return;
+    }
+
     ForLoop(Number_Of_Texture_Buffer_Queues)
     {
         close_file_in_single_queue(queue->queues[index]);
     }
-    return ;
 }
 
 
 global_function
 void
 AddTextureBufferToQueue(texture_buffer_queue *queue, texture_buffer *buffer)
-{   // 将buffer添加到对应的single queue中 
-    single_texture_buffer_queue *singleQueue = queue->queues[buffer->homeIndex]; // 得到buffer对应的queue的指针
-    AddSingleTextureBufferToQueue(singleQueue, buffer); // 将buffer添加到这个queue的尾部
+{   // add the buffer to the corresponding single queue
+    single_texture_buffer_queue *singleQueue = queue->queues[buffer->homeIndex]; // obtain the pointer of the buffer of queue
+    AddSingleTextureBufferToQueue(singleQueue, buffer); // add the buffer to the tail of this queue
 }
 
 global_function
 texture_buffer *
 TakeSingleTextureBufferFromQueue(single_texture_buffer_queue *queue)
-{   // 从single texture 中获取一个buffer_texture
-    // 取single texture 的头部节点
-    LockMutex(queue->rwMutex);  // 给single texture上锁
+{   // get a buffer_texture from single texture
+    // get the head node of single texture
+    LockMutex(queue->rwMutex);  // lock the single texture
     texture_buffer *buffer = queue->front;
 
     switch (queue->queueLength)
@@ -200,8 +252,12 @@ TakeSingleTextureBufferFromQueue(single_texture_buffer_queue *queue)
 global_function
 single_texture_buffer_queue *
 GetSingleTextureBufferQueue(texture_buffer_queue *queue)
-{   // 从所有的queue中获取一个 queue 
-    // __atomic_fetch_add 是一个内建函数，用于原子地执行一个加法操作并返回结果。对指定内存位置的值进行原子加法操作，并返回更新后的值。这个函数可以用来在多线程环境下安全地更新共享变量，确保操作的原子性，即在执行加法操作时，不会被其他线程中断或干扰
+  // I don't quite understand atmonic operation, therefore the following translation cannot be too accurate -yy5.
+{   // choose a queue from all the queues by atomic operation
+    // __atomic_fetch_add is a built-in function that atomically executes an addition operation and returns the result. 
+    // It applies an atomic addition to the value at the specified memory location, returning the updated value. 
+    // This function facilitates the safe update of shared variables in multithreaded environments by guaranteeing operational atomicity; 
+    // the addition is executed without interruption or interference from concurrent threads.
     u32 index = __atomic_fetch_add(&queue->index, 1, 0) % Number_Of_Texture_Buffer_Queues; 
     return(queue->queues[index]);
 }
@@ -209,7 +265,7 @@ GetSingleTextureBufferQueue(texture_buffer_queue *queue)
 global_function
 texture_buffer *
 TakeTextureBufferFromQueue(texture_buffer_queue *queue)
-{   // 从总queue中获取一个buffer，首先获取一个queue，然后从中获取一个buffer
+{   // get a buffer from the total queue, first get a queue, then get a buffer from the queue
     return(TakeSingleTextureBufferFromQueue(GetSingleTextureBufferQueue(queue)));
 }
 
@@ -218,9 +274,9 @@ texture_buffer *
 TakeTextureBufferFromQueue_Wait(texture_buffer_queue *queue)
 {   
     texture_buffer *buffer = 0;
-    while (!buffer) // 如果buffer为空
+    while (!buffer) // if the buffer is empty
     {
         buffer = TakeTextureBufferFromQueue(queue);
-    } // 如果队列中的buffer都为空则会一直循环
+    } // if all the buffers in the queue are empty, the loop will continue
     return(buffer);
 }

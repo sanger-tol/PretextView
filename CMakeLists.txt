@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.17)
-project(PretextView VERSION "1.0.7")
+project(PretextView VERSION "1.0.8")
 # User-visible version (window title, macOS CFBundleShortVersionString); keep in sync with PretextView.cpp
-set(PRETEXTVIEW_APP_VERSION_STRING "1.0.7")
+set(PRETEXTVIEW_APP_VERSION_STRING "1.0.8-beta")
 
 
 option(FORCE_MAC_X86 "Force macOS x86_64 build" OFF)
@@ -163,9 +163,9 @@ add_library(copy_texture STATIC src/copy_texture.cpp)
 
 
 if(NOT APPLE)
-    add_executable( ${target_name} PretextView.cpp )
+    add_executable( ${target_name} PretextView.cpp src/layer.cpp )
 else()
-    add_executable( ${target_name} MACOSX_BUNDLE PretextView.cpp )
+    add_executable( ${target_name} MACOSX_BUNDLE PretextView.cpp src/layer.cpp )
     set_target_properties(
         ${target_name} PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/Info.plist"
@@ -437,7 +437,7 @@ endif()
 # ==== CPack: installation package ====
 include(InstallRequiredSystemLibraries)
 set(CPACK_PACKAGE_NAME ${target_name})
-# Match installer/DMG name to user-visible version (e.g. PretextViewAI-1.0.7-beta-Darwin-x86_64.dmg)
+# Match installer/DMG name to user-visible version (e.g. PretextViewAI-1.0.8-beta-Darwin-x86_64.dmg)
 set(CPACK_PACKAGE_VERSION "${PRETEXTVIEW_APP_VERSION_STRING}")
 set(CPACK_PACKAGE_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/sanger-tol/PretextView")
