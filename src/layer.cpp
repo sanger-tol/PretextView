@@ -543,7 +543,20 @@ PretextLayer_DiscoverAdditionalSections(
         n_texture_entries);
 
     u32 cursor = (u32)Pretext_Layer_Manager.file_scan_cursor;
-    u32 max_layers_to_probe = (header_layer_count > 1) ? header_layer_count : Max_Pretext_Layers;
+
+    // Classic single-layer .pretext (no layr, or count == 1): only section 0 exists.
+    // Do not probe or byte-scan the file — scanning is O(file_size) and appears hung.
+    if (header_layer_count <= 1)
+    {
+        Pretext_Layer_Manager.n_loaded_sections = 1;
+        Pretext_Layer_Manager.n_layers = 1;
+        Pretext_Layer_Manager.enabled = 0;
+        Pretext_Layer_Manager.active = 0;
+        Pretext_Layer_Manager.file_scan_cursor = (u64)cursor;
+        return(0);
+    }
+
+    u32 max_layers_to_probe = header_layer_count;
 
     while (layer_slot < max_layers_to_probe &&
            layer_slot < Max_Pretext_Layers &&
@@ -566,7 +579,8 @@ PretextLayer_DiscoverAdditionalSections(
         ++layer_slot;
     }
 
-    if (layer_slot <= 1)
+    // Sequential layout failed but the header promises more layers — scan as fallback.
+    if (layer_slot < header_layer_count)
     {
         u64 section_offsets[Max_Pretext_Layers];
         u32 n_offsets = PretextLayer_ScanFileSectionOffsets(
