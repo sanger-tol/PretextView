@@ -101,24 +101,26 @@ struct map_state
     u32 *scaffIds = nullptr;          // [num_pixels_1d]
     u64 *metaDataFlags = nullptr;     // [num_pixels_1d], 256kb for 32768 pixels
 
-    void restore_cutted_contigs_all(const u32& num_pixel_1d)
+    // BreakMap() tags pixels right of a cut by adding Number_of_Original_Contigs to
+    // originalContigIds (so id, id+NOC, id+2*NOC, ... mark fragments). Reducing modulo
+    // NOC merges those tags back to the input-sequence id used at load time.
+    void restore_cutted_contigs_all(const u32& num_pixel_1d, const u32& num_original_contigs)
     {
         for (u32 i = 0; i < num_pixel_1d; i++)
         {
-            // These are now no-ops.  I don't understand what they originally did:
-            // originalContigIds[i] = originalContigIds[i] % Max_Number_of_Contigs;
-            originalContigIds[i] = originalContigIds[i];
+            u32 id = originalContigIds[i];
+            originalContigIds[i] = num_original_contigs ? (id % num_original_contigs) : id;
         }
     }
 
-    void restore_cutted_contigs(const s32 start_pixel, const s32 end_pixel)
+    // Same as restore_cutted_contigs_all, but only within the selected pixel range.
+    void restore_cutted_contigs(const s32 start_pixel, const s32 end_pixel, const u32& num_original_contigs)
     {   
         if (start_pixel < 0 || end_pixel < 0) return;
-        for (u32 i = start_pixel; i <= end_pixel; i++)
+        for (u32 i = (u32)start_pixel; i <= (u32)end_pixel; i++)
         {
-            // These are now no-ops.  I don't understand what they originally did:
-            // originalContigIds[i] = originalContigIds[i] % Max_Number_of_Contigs;
-            originalContigIds[i] = originalContigIds[i];
+            u32 id = originalContigIds[i];
+            originalContigIds[i] = num_original_contigs ? (id % num_original_contigs) : id;
         }
     }
 

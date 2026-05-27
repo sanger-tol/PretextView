@@ -1,0 +1,130 @@
+name: Development builds
+
+# Branch / manual builds — uploads CI artifacts only (no GitHub Release).
+# Release packages stay in deploy.yml (version tags only).
+
+on:
+  push:
+    branches:
+      - layers
+      - develop
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch to build (default = branch you run from)
+        required: false
+        type: string
+
+concurrency:
+  group: dev-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: windows-latest
+            target_arch: x86_64
+            artifact_slug: windows-x86_64
+            platform: windows
+          - runs-on: ubuntu-latest
+            target_arch: x86_64
+            artifact_slug: linux-x86_64
+            platform: linux
+          - runs-on: ubuntu-24.04-arm
+            target_arch: arm64
+            artifact_slug: linux-arm64
+            platform: linux
+          - runs-on: macos-15-intel
+            target_arch: x86_64
+            artifact_slug: macos-x86_64
+            platform: macos
+          - runs-on: macos-latest
+            target_arch: arm64
+            artifact_slug: macos-arm64
+            platform: macos
+
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref }}
+
+      - name: Build metadata
+        id: meta
+        shell: bash
+        run: |
+          BRANCH="${{ github.event.inputs.branch || github.ref_name }}"
+          BRANCH_SLUG="$(echo "$BRANCH" | tr '/_' '-' | tr '[:upper:]' '[:lower:]')"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "branch_slug=$BRANCH_SLUG" >> "$GITHUB_OUTPUT"
+          echo "Building branch: $BRANCH (${{ github.sha }}) on ${{ matrix.runs-on }} (${{ matrix.artifact_slug }})"
+
+      - name: Install NSIS on Windows
+        if: matrix.platform == 'windows'
+        shell: powershell
+        run: choco install nsis -y --no-progress
+
+      - name: Install GL and Wayland deps on Linux
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxi-dev wayland-protocols libwayland-dev libwayland-bin
+
+      - name: Run install script on Windows
+        if: matrix.platform == 'windows'
+        shell: cmd
+        run: install.cmake.bat
+
+      - name: Run install script on Linux
+        if: matrix.platform == 'linux'
+        run: |
+          chmod +x ./install.cmake.sh
+          uname -m
+          ./install.cmake.sh
+
+      - name: Run install script on macOS x86_64
+        if: matrix.platform == 'macos' && matrix.target_arch == 'x86_64'
+        run: |
+          chmod +x ./install.cmake.sh
+          ./install.cmake.sh --force-x86
+
+      - name: Run install script on macOS arm64
+        if: matrix.platform == 'macos' && matrix.target_arch == 'arm64'
+        run: |
+          chmod +x ./install.cmake.sh
+          ./install.cmake.sh
+
+      - name: Upload development artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-${{ steps.meta.outputs.branch_slug }}-${{ matrix.artifact_slug }}-${{ github.sha }}
+          path: |
+            build_cmake/*.deb
+            build_cmake/*.dmg
+            build_cmake/*.exe
+            build_cmake/*.zip
+            build_cmake/*.msi
+          if-no-files-found: error
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Development build" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: \`${{ steps.meta.outputs.branch }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Commit: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Platform: \`${{ matrix.artifact_slug }}\` (\`${{ matrix.runs-on }}\`)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Download installers from the **Artifacts** section of this workflow run." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Platform | Artifact |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|----------|----------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Linux x86_64 | \`.deb\` in \`linux-x86_64\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Linux ARM64 | \`.deb\` in \`linux-arm64\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| macOS Intel | \`.dmg\` in \`macos-x86_64\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| macOS Apple Silicon | \`.dmg\` in \`macos-arm64\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Windows x86_64 | \`.msi\` / \`.zip\` in \`windows-x86_64\` |" >> "$GITHUB_STEP_SUMMARY"

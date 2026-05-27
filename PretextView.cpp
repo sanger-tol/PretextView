@@ -222,6 +222,14 @@ u32
 Redisplay = 0;
 
 global_variable
+u08
+Pending_Clear_Cache = 0;
+
+global_variable
+u64
+Active_Map_Header_Hash = 0;
+
+global_variable
 s32
 Window_Width, Window_Height, FrameBuffer_Width, FrameBuffer_Height;
 
@@ -8256,6 +8264,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
     }
 
     FenceIn(File_Loaded = 1);
+    FenceIn(Active_Map_Header_Hash = *headerHash);
 
     if (LoadState(*headerHash)) LoadState(*headerHash + 1);
     return(ok);
@@ -9553,7 +9562,7 @@ auto_cut_func(
             return ;
         }
         fmt::print(stdout, "[Pixel cut] restoring the cutted frags within the selected area: [{}, {}]\n", start, end);
-        Map_State->restore_cutted_contigs( start, end );
+        Map_State->restore_cutted_contigs(start, end, Number_of_Original_Contigs);
         UpdateContigsFromMapState();
         Redisplay = 1;
         return ;
@@ -12711,13 +12720,210 @@ void Load_AGP(const std::string& agp_path)
 }
 
 
-// restore the state before curation
+// Rebuild originalContigIds and contigRelCoords from header fractions (same logic as LoadFile).
+// Used by Clear Cache when re-reading the .pretext header.
 global_function
 void
-restore_initial_state()
+AssignInitialMapPixelsFromContigFractions(f32 *contigFracs, u32 numberOfOriginalContigs)
 {
-    u32 nBytesRead = 0;
+    f32 total = 0.0f;
+    u32 lastPixel = 0;
+    u32 relCoord = 0;
 
+    ForLoop(numberOfOriginalContigs)
+    {
+        total += contigFracs[index];
+        u32 pixel = (u32)((f64)Number_of_Pixels_1D * (f64)total);
+
+        for (relCoord = 0; lastPixel < pixel; lastPixel++, relCoord++)
+        {
+            Map_State->originalContigIds[lastPixel] = index;
+            Map_State->contigRelCoords[lastPixel] = relCoord;
+        }
+    }
+
+    // Fraction sums can be slightly below 1.0; assign any tail pixels to the last contig.
+    for (; lastPixel < Number_of_Pixels_1D; lastPixel++)
+    {
+        u32 lastContig = numberOfOriginalContigs - 1;
+        Map_State->originalContigIds[lastPixel] = lastContig;
+        if (lastPixel && Map_State->originalContigIds[lastPixel - 1] != lastContig)
+        {
+            relCoord = 0;
+        }
+        Map_State->contigRelCoords[lastPixel] = relCoord++;
+    }
+}
+
+// Read only the first pstm header from Map_File_Path and restore the 1D pixel layout.
+// Returns 1 on success. Does not reload textures or layers.
+global_function
+u08
+RebuildInitialMapPixelsFromFile(void)
+{
+    if (!Map_File_Path[0] || !Map_State || !Number_of_Original_Contigs || !Decompressor)
+    {
+        return(0);
+    }
+
+    u08 magic[] = {'p', 's', 't', 'm'};
+    FILE *file = fopen((const char *)Map_File_Path, "rb");
+    if (!file)
+    {
+        return(0);
+    }
+
+    u08 magicTest[4];
+    if (fread(magicTest, 1, sizeof(magicTest), file) != sizeof(magicTest))
+    {
+        fclose(file);
+        return(0);
+    }
+
+    ForLoop(sizeof(magic))
+    {
+        if (magic[index] != magicTest[index])
+        {
+            fclose(file);
+            return(0);
+        }
+    }
+
+    u32 nBytesHeaderComp = 0;
+    u32 nBytesHeader = 0;
+    if (fread(&nBytesHeaderComp, 1, 4, file) != 4 ||
+        fread(&nBytesHeader, 1, 4, file) != 4 ||
+        !nBytesHeaderComp ||
+        !nBytesHeader)
+    {
+        fclose(file);
+        return(0);
+    }
+
+    u08 *compressionBuffer = new u08[nBytesHeaderComp];
+    u08 *header = new u08[nBytesHeader];
+    if (!compressionBuffer || !header)
+    {
+        delete[] compressionBuffer;
+        delete[] header;
+        fclose(file);
+        return(0);
+    }
+
+    u08 decompress_ok = 1;
+    if (fread(compressionBuffer, 1, nBytesHeaderComp, file) != nBytesHeaderComp ||
+        libdeflate_deflate_decompress(
+            Decompressor,
+            (const void *)compressionBuffer,
+            nBytesHeaderComp,
+            (void *)header,
+            nBytesHeader,
+            NULL))
+    {
+        decompress_ok = 0;
+    }
+    delete[] compressionBuffer;
+
+    if (!decompress_ok)
+    {
+        delete[] header;
+        fclose(file);
+        return(0);
+    }
+
+    u08 *header_cursor = header;
+    u08 *header_end = header + nBytesHeader;
+
+    header_cursor += 8; // Total_Genome_Length
+    u32 n_contigs = 0;
+    ForLoop(4) { ((u08 *)&n_contigs)[index] = *header_cursor++; }
+
+    if (n_contigs != Number_of_Original_Contigs)
+    {
+        delete[] header;
+        fclose(file);
+        fprintf(stderr, "[PretextView] Clear cache: header contig count (%u) != loaded map (%u)\n",
+                n_contigs, Number_of_Original_Contigs);
+        return(0);
+    }
+
+    f32 *contigFracs = new f32[Number_of_Original_Contigs];
+    ForLoop(Number_of_Original_Contigs)
+    {
+        ForLoop2(4) { ((u08 *)(contigFracs + index))[index2] = *header_cursor++; }
+        header_cursor += 64; // contig name
+    }
+
+    // Skip texture params and optional layr block; fractions above are all we need.
+    if ((u64)(header_end - header_cursor) >= 3)
+    {
+        header_cursor += 3; // textureRes, nTextRes, mipMapLevels
+        pretext_layer_info layer_info = {};
+        PretextLayer_ParseHeaderExtension(&header_cursor, header_end, &layer_info);
+    }
+
+    delete[] header;
+    fclose(file);
+
+    AssignInitialMapPixelsFromContigFractions(contigFracs, Number_of_Original_Contigs);
+    delete[] contigFracs;
+    return(1);
+}
+
+// After many edits, contigs_arr_capacity stays at the load-time count while numberOfContigs
+// can grow; UpdateContigsFromMapState() then stops early and leaves stale contigIds → crash.
+global_function
+void
+EnsureContigsArrayCapacity(u32 min_capacity)
+{
+    if (!Contigs || Contigs->contigs_arr_capacity >= min_capacity)
+    {
+        return;
+    }
+
+    contig *new_arr = new contig[min_capacity]();
+    u08 *new_flags = new u08[(min_capacity + 7) >> 3]();
+    if (!new_arr || !new_flags)
+    {
+        delete[] new_arr;
+        delete[] new_flags;
+        fprintf(stderr, "[PretextView] EnsureContigsArrayCapacity: allocation failed\n");
+        return;
+    }
+
+    Contigs->contigs_arr = new_arr;
+    Contigs->contigInvertFlags = new_flags;
+    Contigs->contigs_arr_capacity = min_capacity;
+}
+
+global_function
+void
+DeleteMapSaveStateCacheFiles(u64 headerHash)
+{
+    SetSaveStatePaths();
+    if (!SaveState_Path || !SaveState_Name)
+    {
+        return;
+    }
+
+    for (u64 flip = 0; flip < 2; ++flip)
+    {
+        u64 h = headerHash + flip;
+        ForLoop(16)
+        {
+            u08 x = (u08)((h >> (4 * index)) & 0xF);
+            SaveState_Name[index] = (u08)('a' + x);
+        }
+        SaveState_Name[16] = 0;
+        remove((const char *)SaveState_Path);
+    }
+}
+
+// UI defaults only (safe during Clear Cache; map reset is done via LoadFile reload).
+global_function
+void
+restore_ui_defaults()
+{
     // settings
     {
         theme th = (theme) 4;
@@ -12792,15 +12998,26 @@ restore_initial_state()
         }
     }
 
-    // colour map
-    {   // set as the first colour map
-        Color_Maps->currMap = useCustomOrder ? userColourMapOrder.order[0] : 0;
+    // colour map (clamp index: custom order can reference maps that no longer exist)
+    if (Color_Maps && Color_Maps->nMaps)
+    {
+        u32 mapIndex = 0;
+        if (useCustomOrder && userColourMapOrder.nMaps)
+        {
+            mapIndex = userColourMapOrder.order[0];
+            if (mapIndex >= Color_Maps->nMaps)
+            {
+                mapIndex = 0;
+            }
+        }
+        Color_Maps->currMap = mapIndex;
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_BUFFER, Color_Maps->maps[Color_Maps->currMap]);
         glActiveTexture(GL_TEXTURE0);
     }
 
     // gamma
+    if (Color_Maps && Contact_Matrix)
     {
         Color_Maps->controlPoints[0] = 0.0f;
         Color_Maps->controlPoints[1] = 0.5f;
@@ -12816,33 +13033,42 @@ restore_initial_state()
         Camera_Position.y = 0.0f;
         Camera_Position.z = 1.0f;
     }
+}
 
-    // edits
+// Full in-memory reset without reloading the .pretext file (used where reload is not desired).
+global_function
+void
+restore_initial_state()
+{
+    restore_ui_defaults();
+
+    // edits: must finish while nEdits > 0 (fixed ForLoop count could leave edits applied)
+    if (Map_Editor)
     {
-        u32 nEdits  = my_Min(Edits_Stack_Size, Map_Editor->nEdits);
-        ForLoop(nEdits) UndoMapEdit();
-    }
-    
-    // restore all the splited contigs
-    {
-        Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D);
-    }
-
-
-    // waypoints
-    {   
-        TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
+        Edit_Pixels.editing = 0;
+        Edit_Pixels.selecting = 0;
+        while (Map_Editor->nEdits)
         {
-            waypoint *tmp = node->prev;
-            RemoveWayPoint(node);
-            node = tmp;
+            UndoMapEdit();
         }
+        Map_Editor->nEdits = 0;
+        Map_Editor->nUndone = 0;
+        Map_Editor->editStackPtr = 0;
     }
 
-    // scaffs
+    // Map layout: full header rebuild clears rearranges and breaks; fallback only fixes breaks.
+    if (!RebuildInitialMapPixelsFromFile())
     {
-        ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
-        UpdateScaffolds();
+        Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
+    }
+
+    // waypoints (always remove list head; avoids broken TraverseLinkedList + prev walk)
+    if (Waypoint_Editor)
+    {
+        while (Waypoint_Editor->activeWaypoints.next)
+        {
+            RemoveWayPoint(Waypoint_Editor->activeWaypoints.next);
+        }
     }
 
     // meta data
@@ -12855,10 +13081,21 @@ restore_initial_state()
 
         memset(Map_State->metaDataFlags, 0, Number_of_Pixels_1D * sizeof(u64));
         
-        UpdateContigsFromMapState();
-
         for (u32 i = 0; i < ArrayCount(Meta_Data->tags); i ++ ) Meta_Data->tags[i][0] = 0;
         ForLoop(ArrayCount(Default_Tags)) strcpy((char *)Meta_Data->tags[MetaData_Active_Tag + index], Default_Tags[index]);
+    }
+
+    if (Map_State)
+    {
+        memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
+    }
+
+    // Rebuild fragment list once after map + meta resets (not inside meta block).
+    if (Map_State && Contigs)
+    {
+        EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+        UpdateContigsFromMapState();
+        UpdateScaffolds();
     }
 
     // extensions
@@ -12883,7 +13120,31 @@ restore_initial_state()
 
 }
 
+// Clear Cache: wait for loaders, drop saved curation on disk, reload .pretext from Map_File_Path.
+global_function
+void
+ProcessPendingClearCache(void)
+{
+    if (Thread_Pool)
+    {
+        ThreadPoolWait(Thread_Pool);
+    }
 
+    restore_ui_defaults();
+    DeleteMapSaveStateCacheFiles(Active_Map_Header_Hash);
+
+    if (Map_File_Path[0])
+    {
+        Loading = 1;
+        Redisplay = 1;
+        printf("[PretextView] Clear cache: reloading %s\n", Map_File_Path);
+    }
+    else
+    {
+        restore_initial_state();
+        fprintf(stderr, "[PretextView] Clear cache: no map path; applied in-memory reset only\n");
+    }
+}
 
 // User Profile
 global_variable u08 *
@@ -13586,7 +13847,7 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons, u08 preserveOrder)
     // 这里粘贴所有的original contigs
     u32* tmp_orignal_contig_ids = new u32[Number_of_Pixels_1D];
     for (u32 i = 0 ; i< Number_of_Pixels_1D; i++ )tmp_orignal_contig_ids[i] = Map_State->originalContigIds[i];
-    Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D);
+    Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
     UpdateContigsFromMapState(); // todo 检查粘贴后会不会影响 painted 的 scaffolds
 
     FILE *file;
@@ -13990,6 +14251,29 @@ MainArgs
     while (!glfwWindowShouldClose(window)) 
     {
         UpdateCrashReportSnapshot();
+
+        if (Pending_Clear_Cache)
+        {
+            Pending_Clear_Cache = 0;
+            SetErrorContext(error_context_state_management, "ClearCache");
+            UpdateCrashReportSnapshot();
+            try
+            {
+                ProcessPendingClearCache();
+            }
+            catch (const std::exception &e)
+            {
+                CaptureException(error_context_state_management, "ClearCache", e.what());
+                UpdateCrashReportSnapshot();
+            }
+            catch (...)
+            {
+                CaptureException(error_context_state_management, "ClearCache", "unknown exception");
+                UpdateCrashReportSnapshot();
+            }
+            SetErrorContext(error_context_none, 0);
+        }
+
         if (Redisplay) 
         {
             SetErrorContext(error_context_visual_rendering, "Render");
@@ -14062,7 +14346,11 @@ MainArgs
             UpdateCrashReportSnapshot();
             try
             {
-                LoadFile((const char *)currFile, Loading_Arena, (char **)&currFileName, &headerHash);
+                LoadFile(
+                    Map_File_Path[0] ? (const char *)Map_File_Path : (const char *)currFile,
+                    Loading_Arena,
+                    (char **)&currFileName,
+                    &headerHash);
             }
             catch (const std::exception &e)
             {
@@ -15463,8 +15751,7 @@ MainArgs
                             nk_layout_row_dynamic(NK_Context, 80, 2);
                             if (nk_button_label(NK_Context, "Yes"))
                             {
-                                restore_initial_state();
-                                // nk_popup_close(NK_Context);
+                                Pending_Clear_Cache = 1;
                                 showClearCacheScreen = 0;
                             }
                             if (nk_button_label(NK_Context, "No")) 
