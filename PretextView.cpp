@@ -26,7 +26,7 @@ SOFTWARE.
 */
 
 
-#define PretextView_Version_Label "1.0.8-beta"
+#define PretextView_Version_Label "1.1.0-beta"
 #define PretextView_Version "PretextViewAI Version " PretextView_Version_Label
 #define PretextView_Title "PretextViewAI " PretextView_Version_Label " - Wellcome Sanger Institute"
 

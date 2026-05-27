@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.17)
-project(PretextView VERSION "1.0.8")
+project(PretextView VERSION "1.1.0")
 # User-visible version (window title, macOS CFBundleShortVersionString); keep in sync with PretextView.cpp
-set(PRETEXTVIEW_APP_VERSION_STRING "1.0.8-beta")
+set(PRETEXTVIEW_APP_VERSION_STRING "1.1.0-beta")
 
 
 option(FORCE_MAC_X86 "Force macOS x86_64 build" OFF)
@@ -437,7 +437,7 @@ endif()
 # ==== CPack: installation package ====
 include(InstallRequiredSystemLibraries)
 set(CPACK_PACKAGE_NAME ${target_name})
-# Match installer/DMG name to user-visible version (e.g. PretextViewAI-1.0.8-beta-Darwin-x86_64.dmg)
+# Match installer/DMG name to user-visible version (e.g. PretextViewAI-1.1.0-beta-Darwin-x86_64.dmg)
 set(CPACK_PACKAGE_VERSION "${PRETEXTVIEW_APP_VERSION_STRING}")
 set(CPACK_PACKAGE_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/sanger-tol/PretextView")
