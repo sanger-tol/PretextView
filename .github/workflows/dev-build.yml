@@ -29,6 +29,10 @@ jobs:
             target_arch: x86_64
             artifact_slug: windows-x86_64
             platform: windows
+          - runs-on: windows-11-arm
+            target_arch: arm64
+            artifact_slug: windows-arm64
+            platform: windows
           - runs-on: ubuntu-latest
             target_arch: x86_64
             artifact_slug: linux-x86_64
@@ -128,3 +132,4 @@ jobs:
           echo "| macOS Intel | \`.dmg\` in \`macos-x86_64\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| macOS Apple Silicon | \`.dmg\` in \`macos-arm64\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Windows x86_64 | \`.msi\` / \`.zip\` in \`windows-x86_64\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Windows ARM64 | \`.msi\` / \`.zip\` in \`windows-arm64\` |" >> "$GITHUB_STEP_SUMMARY"
