@@ -21,6 +21,8 @@ if /I "%ARCH%"=="x86" (
     )
 ) else if /I "%ARCH%"=="AMD64" (
     set "ARCH=x86_64"
+) else if /I "%ARCH%"=="ARM64" (
+    set "ARCH=ARM64"
 )
 echo Detected architecture: %ARCH%
 
