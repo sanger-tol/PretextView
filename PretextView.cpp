@@ -869,6 +869,10 @@ global_function
 void
 InvertMap(u32 pixelFrom, u32 pixelTo, bool update_contigs_flag=true);
 
+global_function
+void
+InvertContigsInRange(u32 pixelFrom, u32 pixelTo, bool update_contigs_flag=true);
+
 global_variable
 u32
 Global_Edit_Invert_Flag = 0;
@@ -2807,7 +2811,7 @@ UndoMapEdit()
 
         if (edit->finalPix1 > edit->finalPix2)
         {
-            InvertMap((u32)edit->finalPix1, (u32)edit->finalPix2);
+            InvertContigsInRange((u32)edit->finalPix1, (u32)edit->finalPix2, false);
         }
 
         u32 start = my_Min(edit->finalPix1, edit->finalPix2);
@@ -2815,6 +2819,7 @@ UndoMapEdit()
 
         RearrangeMap(start, end, -edit->delta);
 
+        UpdateContigsFromMapState();
         UpdateScaffolds();
     }
 }
@@ -2850,9 +2855,10 @@ RedoMapEdit()
         
         if (edit->finalPix1 > edit->finalPix2)
         {
-            InvertMap((u32)edit->finalPix1, (u32)edit->finalPix2);
+            InvertContigsInRange((u32)edit->finalPix1, (u32)edit->finalPix2, false);
         }
-        
+
+        UpdateContigsFromMapState();
         UpdateScaffolds();
     }
 }
@@ -6532,7 +6538,7 @@ Render() {
                         (char *)"Middle Click / Spacebar (while editing): invert sequence",
                         (char *)"P: copy highlight to clipboard",
                         (char *)"V: break at selection start",
-                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate, Space/Middle Click again: invert, Q: undo"
+                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate, Space/Middle Click again: invert each contig, Q: undo"
                     };
 
                     textBoxHeight = (f32)helpTexts.size() * (lh + 1.0f) - 1.0f;
@@ -8968,6 +8974,41 @@ InvertMap(
 
 
 global_function
+void
+InvertContigsInRange(
+    u32 pixelFrom,
+    u32 pixelTo,
+    bool update_contigs_flag)
+{
+    u32 start = my_Min(pixelFrom, pixelTo);
+    u32 end = my_Max(pixelFrom, pixelTo);
+
+    if (start >= Number_of_Pixels_1D || !Map_State)
+    {
+        return;
+    }
+    end = my_Min(end, Number_of_Pixels_1D - 1);
+
+    for (u32 pixel = start; pixel <= end; )
+    {
+        u32 contigId = Map_State->contigIds[pixel];
+        u32 segStart = pixel;
+        while (pixel <= end && Map_State->contigIds[pixel] == contigId)
+        {
+            ++pixel;
+        }
+        u32 segEnd = pixel - 1;
+        InvertMap(segStart, segEnd, false);
+    }
+
+    if (update_contigs_flag)
+    {
+        UpdateContigsFromMapState();
+    }
+}
+
+
+global_function
 s32
 RearrangeMap(       // NOTE: VERY IMPORTANT 
     u32 pixelFrom,  // start of the fragment
@@ -10414,7 +10455,7 @@ ToggleEditSelectionInvert(void)
         return;
     }
 
-    InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+    InvertContigsInRange(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
     Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
     Redisplay = 1;
 }
@@ -10430,7 +10471,7 @@ CancelActiveEditSession(GLFWwindow *window)
 
     if (Global_Edit_Invert_Flag)
     {
-        InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+        InvertContigsInRange(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
         Global_Edit_Invert_Flag = 0;
     }
 
