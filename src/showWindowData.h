@@ -84,6 +84,7 @@ struct edit_pixels
     u08 scaffSelecting : 1;
     u08 snap : 1;
     u08 tabSelecting : 1;
+    u32 editSessionBaselineEdits;
 };
 
 struct tex_vertex

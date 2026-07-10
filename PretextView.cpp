@@ -874,6 +874,10 @@ u32
 Global_Edit_Invert_Flag = 0;
 
 global_variable
+s32
+Edit_Session_NetDelta = 0;
+
+global_variable
 u08
 Scaff_Painting_Flag = 0;
 
@@ -3293,8 +3297,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
     {
         if (Edit_Mode)
         {
-            static s32 netDelta = 0;
-
             s32 w, h;
             glfwGetWindowSize(window, &w, &h);
             f32 height = (f32)h;
@@ -3400,7 +3402,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                 //newY = (s32)Edit_Pixels.pixels.y + diff;
                 
                 diff = RearrangeMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y, diff, Edit_Pixels.snap);
-                netDelta += diff;
+                Edit_Session_NetDelta += diff;
 
                 newX = (s32)Edit_Pixels.pixels.x + diff;
                 newY = (s32)Edit_Pixels.pixels.y + diff;
@@ -3413,10 +3415,10 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             }
             else  // edit_pixels.editing == 0
             {
-                if (netDelta || Global_Edit_Invert_Flag)
+                if (Edit_Session_NetDelta || Global_Edit_Invert_Flag)
                 {
-                    AddMapEdit(netDelta, Edit_Pixels.pixels, Global_Edit_Invert_Flag);
-                    netDelta = 0;
+                    AddMapEdit(Edit_Session_NetDelta, Edit_Pixels.pixels, Global_Edit_Invert_Flag);
+                    Edit_Session_NetDelta = 0;
                 }
                 
                 wx = (f32)(((f64)((2 * pixel1) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
@@ -3614,6 +3616,18 @@ ConsolidateTabSelections(GLFWwindow* window);
 
 global_function
 void
+BeginEditSession(void);
+
+global_function
+void
+ToggleEditSelectionInvert(void);
+
+global_function
+void
+CancelActiveEditSession(GLFWwindow *window);
+
+global_function
+void
 Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
 {
     s32 primaryMouse = user_profile_settings_ptr->invert_mouse ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
@@ -3654,7 +3668,11 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && !Edit_Pixels.editing)
         {
             Edit_Pixels.selecting = 0;
-            if (!Edit_Pixels.editing) Edit_Pixels.editing = 1;
+            if (!Edit_Pixels.editing)
+            {
+                BeginEditSession();
+                Edit_Pixels.editing = 1;
+            }
             MouseMove(window, x, y);
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_PRESS && !Edit_Pixels.editing)
@@ -3665,11 +3683,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && Edit_Pixels.editing && action == GLFW_PRESS)
         {
-            InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
-            Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
-            // UpdateContigsFromMapState() already invoked from InvertMap()
-
-            Redisplay = 1;
+            ToggleEditSelectionInvert();
         }
         else if (button == primaryMouse && Waypoint_Edit_Mode && action == GLFW_PRESS)
         {
@@ -6518,7 +6532,7 @@ Render() {
                         (char *)"Middle Click / Spacebar (while editing): invert sequence",
                         (char *)"P: copy highlight to clipboard",
                         (char *)"V: break at selection start",
-                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate"
+                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate, Space/Middle Click again: invert, Q: undo"
                     };
 
                     textBoxHeight = (f32)helpTexts.size() * (lh + 1.0f) - 1.0f;
@@ -7390,11 +7404,25 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         reload = 1;
     }
     else // clear all the memory, in gl and the arena
-    {   
-        glDeleteTextures(1, &Contact_Matrix->textures);
+    {
+        if (Thread_Pool)
+        {
+            ThreadPoolWait(Thread_Pool);
+        }
 
-        glDeleteVertexArrays((GLsizei)(Number_of_Textures_1D * Number_of_Textures_1D), Contact_Matrix->vaos);
-        glDeleteBuffers((GLsizei)(Number_of_Textures_1D * Number_of_Textures_1D), Contact_Matrix->vbos);
+        if (Texture_Buffer_Queue)
+        {
+            ShutdownTextureBufferQueue(Texture_Buffer_Queue);
+        }
+
+        glDeleteTextures(1, &Contact_Matrix->textures);
+        Contact_Matrix->textures = 0;
+
+        if (Contact_Matrix->vaos && Contact_Matrix->vbos)
+        {
+            glDeleteVertexArrays((GLsizei)(Number_of_Textures_1D * Number_of_Textures_1D), Contact_Matrix->vaos);
+            glDeleteBuffers((GLsizei)(Number_of_Textures_1D * Number_of_Textures_1D), Contact_Matrix->vbos);
+        }
 
         glDeleteBuffers(1, &Contact_Matrix->pixelStartLookupBuffer);
         glDeleteTextures(1, &Contact_Matrix->pixelStartLookupBufferTex);
@@ -7483,6 +7511,11 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         {
             delete frag_cut_cal_ptr;
             frag_cut_cal_ptr = nullptr;
+        }
+        if (textures_array_ptr)
+        {
+            delete textures_array_ptr;
+            textures_array_ptr = nullptr;
         }
         ResetMemoryArenaP(arena); // release all the memory allocated, avoid memory leak
         auto_curation_state.clear();
@@ -7598,14 +7631,10 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         // Allocate an array of memory from the memory pool to store the
         // original contigs.  The holds structs of type `original_contig`,
         // and the array length is `Number_of_Original_Contigs`.
-        Original_Contigs = PushArrayP(arena, original_contig, Number_of_Original_Contigs);
-
-        // Allocate an array to store floating-point numbers.
-        // f32 *contigFracs = PushArrayP(arena, f32, Number_of_Original_Contigs);
         f32 *contigFracs = new f32[Number_of_Original_Contigs];
+        u32 (*contigNames)[16] = new u32[Number_of_Original_Contigs][16];
         ForLoop(Number_of_Original_Contigs)  // Read contigs fraction (f32) and name
         {
-
             f32 frac;
             u32 name[16];
 
@@ -7615,8 +7644,8 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             {
                 *ptr++ = *header++;
             }
-            contigFracs[index] = frac;  // Store this f32 in contigFracs[index].
-            
+            contigFracs[index] = frac;
+
             // Read the name of the contig
             ptr = (u08 *)name;
             ForLoop2(64)
@@ -7624,15 +7653,10 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                 *ptr++ = *header++;
             }
 
-            // Contig name assignment
             ForLoop2(16)
             {
-                Original_Contigs[index].name[index2] = name[index2];  // Assign u32 name[16] to the name of each contig.
+                contigNames[index][index2] = name[index2];
             }
-            
-            // Allocate memory for the mapPixels variable for each contig.
-            (Original_Contigs + index)->contigMapPixels = PushArrayP(arena, u32, Number_of_Pixels_1D);
-            (Original_Contigs + index)->nContigs = 0;
         }
 
         u08 textureRes = *header++;  // Resolution
@@ -7655,6 +7679,20 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         // Update the length of one-dimensional data
         Number_of_Pixels_1D = Number_of_Textures_1D * Texture_Resolution;
+
+        Original_Contigs = PushArrayP(arena, original_contig, Number_of_Original_Contigs);
+        ForLoop(Number_of_Original_Contigs)
+        {
+            ForLoop2(16)
+            {
+                Original_Contigs[index].name[index2] = contigNames[index][index2];
+            }
+
+            (Original_Contigs + index)->contigMapPixels = PushArrayP(arena, u32, Number_of_Pixels_1D);
+            (Original_Contigs + index)->nContigs = 0;
+        }
+
+        delete[] contigNames;
 
         // update the pixel_cut consider range if high resolution
         if (Number_of_Pixels_1D > 32768) auto_curation_state.auto_cut_diag_window_for_pixel_mean = 16;
@@ -10352,9 +10390,85 @@ GatheringTextInput = 0;
 
 global_function
 void
+BeginEditSession(void)
+{
+    if (Map_Editor)
+    {
+        Edit_Pixels.editSessionBaselineEdits = Map_Editor->nEdits;
+    }
+    else
+    {
+        Edit_Pixels.editSessionBaselineEdits = 0;
+    }
+
+    Global_Edit_Invert_Flag = 0;
+    Edit_Session_NetDelta = 0;
+}
+
+global_function
+void
+ToggleEditSelectionInvert(void)
+{
+    if (!Edit_Pixels.editing)
+    {
+        return;
+    }
+
+    InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+    Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
+    Redisplay = 1;
+}
+
+global_function
+void
+CancelActiveEditSession(GLFWwindow *window)
+{
+    if (!Edit_Pixels.editing || !Map_Editor)
+    {
+        return;
+    }
+
+    if (Global_Edit_Invert_Flag)
+    {
+        InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+        Global_Edit_Invert_Flag = 0;
+    }
+
+    if (Edit_Session_NetDelta)
+    {
+        RearrangeMap(
+            Edit_Pixels.pixels.x,
+            Edit_Pixels.pixels.y,
+            -Edit_Session_NetDelta,
+            Edit_Pixels.snap,
+            false);
+        Edit_Session_NetDelta = 0;
+    }
+
+    Edit_Pixels.editing = 0;
+    Edit_Pixels.selecting = 0;
+
+    while (Map_Editor->nEdits > Edit_Pixels.editSessionBaselineEdits)
+    {
+        UndoMapEdit();
+    }
+
+    UpdateContigsFromMapState();
+    UpdateScaffolds();
+    Redisplay = 1;
+
+    f64 mx, my;
+    glfwGetCursorPos(window, &mx, &my);
+    MouseMove(window, mx, my);
+}
+
+global_function
+void
 ConsolidateTabSelections(GLFWwindow* window)
 {
     u32 nPixels = Number_of_Pixels_1D;
+
+    BeginEditSession();
 
     // Sort by start position (ascending)
     std::sort(Edit_Pixels.tabSelectedRanges.begin(), Edit_Pixels.tabSelectedRanges.end(),
@@ -10708,7 +10822,15 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                 case GLFW_KEY_Q:
                     if (Edit_Mode || Select_Sort_Area_Mode)
                     {
-                        UndoMapEdit();
+                        if (Edit_Mode && Edit_Pixels.editing)
+                        {
+                            CancelActiveEditSession(window);
+                        }
+                        else
+                        {
+                            UndoMapEdit();
+                            Redisplay = 1;
+                        }
                     }
                     else
                     {
@@ -10948,15 +11070,18 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     else if (Edit_Mode && Edit_Pixels.selecting && action == GLFW_RELEASE)
                     {
                         Edit_Pixels.selecting = 0;
-                        if (!Edit_Pixels.editing) Edit_Pixels.editing = 1;
+                        if (!Edit_Pixels.editing)
+                        {
+                            BeginEditSession();
+                            Edit_Pixels.editing = 1;
+                        }
                         f64 x, y;
                         glfwGetCursorPos(window, &x, &y);
                         MouseMove(window, x, y);
                     }
                     else if (Edit_Mode && Edit_Pixels.editing && action == GLFW_PRESS)
                     {
-                        InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
-                        Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
+                        ToggleEditSelectionInvert();
                     }
                     else if (Waypoint_Edit_Mode && Selected_Waypoint && action == GLFW_PRESS)
                     {
@@ -14347,7 +14472,7 @@ MainArgs
             try
             {
                 LoadFile(
-                    Map_File_Path[0] ? (const char *)Map_File_Path : (const char *)currFile,
+                    (const char *)currFile,
                     Loading_Arena,
                     (char **)&currFileName,
                     &headerHash);

@@ -109,9 +109,10 @@ SOFTWARE.
 #endif // _WIN32
 
 /*
-定义了一个名为 FenceIn 的宏，它的作用是在一个代码块中插入线程屏障（Thread Fence），
-会先执行第一个线程屏障 ThreadFence，然后执行你的代码，最后再执行第二个线程屏障 ThreadFence，
-确保插入的代码执行顺序正确。
+defined a macro named FenceIn, its purpose is to insert a thread fence (Thread Fence) in a code block, 
+it will first execute the first thread fence ThreadFence, then execute your code, and finally execute 
+the second thread fence ThreadFence, to ensure the correct execution order of the inserted code.
+
 */
 #define FenceIn(x) ThreadFence; \
 	x; \
@@ -128,7 +129,8 @@ typedef pthread_t thread;
 typedef pthread_mutex_t mutex;
 typedef pthread_cond_t cond;
 
-// 错误消息表明编译器认为 PTHREAD_MUTEX_INITIALIZER 不是一个有效的表达式。通常情况下，PTHREAD_MUTEX_INITIALIZER 是一个宏，它会被展开为一个结构体初始化器，而不是一个单独的表达式。
+//The error message indicates that the compiler recognise PTHREAD_MUTEX_INITIALIZER is not a valid expression. Usually, 
+// PTHREAD_MUTEX_INITIALIZER is a macro, it will be expanded into a structure initializer, instead of a single expression.
 // #define InitialiseMutex(x) x = PTHREAD_MUTEX_INITIALIZER
 // #define InitialiseCond(x) x = PTHREAD_COND_INITIALIZER
 #define InitialiseMutex(x) pthread_mutex_init(&(x), NULL)
