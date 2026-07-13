@@ -869,10 +869,6 @@ global_function
 void
 InvertMap(u32 pixelFrom, u32 pixelTo, bool update_contigs_flag=true);
 
-global_function
-void
-InvertContigsInRange(u32 pixelFrom, u32 pixelTo, bool update_contigs_flag=true);
-
 global_variable
 u32
 Global_Edit_Invert_Flag = 0;
@@ -2811,7 +2807,7 @@ UndoMapEdit()
 
         if (edit->finalPix1 > edit->finalPix2)
         {
-            InvertContigsInRange((u32)edit->finalPix1, (u32)edit->finalPix2, false);
+            InvertMap((u32)edit->finalPix1, (u32)edit->finalPix2);
         }
 
         u32 start = my_Min(edit->finalPix1, edit->finalPix2);
@@ -2819,7 +2815,6 @@ UndoMapEdit()
 
         RearrangeMap(start, end, -edit->delta);
 
-        UpdateContigsFromMapState();
         UpdateScaffolds();
     }
 }
@@ -2855,10 +2850,9 @@ RedoMapEdit()
         
         if (edit->finalPix1 > edit->finalPix2)
         {
-            InvertContigsInRange((u32)edit->finalPix1, (u32)edit->finalPix2, false);
+            InvertMap((u32)edit->finalPix1, (u32)edit->finalPix2);
         }
-
-        UpdateContigsFromMapState();
+        
         UpdateScaffolds();
     }
 }
@@ -3631,6 +3625,18 @@ ToggleEditSelectionInvert(void);
 global_function
 void
 CancelActiveEditSession(GLFWwindow *window);
+
+global_function
+u08
+FindPaintedScaffoldRangeAtPixel(u32 pixel, u32 *rangeStart, u32 *rangeEnd);
+
+global_function
+u08
+PickupPaintedScaffoldBlock(GLFWwindow *window);
+
+global_function
+u32
+GetHoverMapPixel(GLFWwindow *window);
 
 global_function
 void
@@ -6538,7 +6544,8 @@ Render() {
                         (char *)"Middle Click / Spacebar (while editing): invert sequence",
                         (char *)"P: copy highlight to clipboard",
                         (char *)"V: break at selection start",
-                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate, Space/Middle Click again: invert each contig, Q: undo"
+                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate, Space/Middle Click again: invert, Q: undo",
+                        (char *)"Tab on painted scaffold: pickup block, Space: invert block"
                     };
 
                     textBoxHeight = (f32)helpTexts.size() * (lh + 1.0f) - 1.0f;
@@ -8974,41 +8981,6 @@ InvertMap(
 
 
 global_function
-void
-InvertContigsInRange(
-    u32 pixelFrom,
-    u32 pixelTo,
-    bool update_contigs_flag)
-{
-    u32 start = my_Min(pixelFrom, pixelTo);
-    u32 end = my_Max(pixelFrom, pixelTo);
-
-    if (start >= Number_of_Pixels_1D || !Map_State)
-    {
-        return;
-    }
-    end = my_Min(end, Number_of_Pixels_1D - 1);
-
-    for (u32 pixel = start; pixel <= end; )
-    {
-        u32 contigId = Map_State->contigIds[pixel];
-        u32 segStart = pixel;
-        while (pixel <= end && Map_State->contigIds[pixel] == contigId)
-        {
-            ++pixel;
-        }
-        u32 segEnd = pixel - 1;
-        InvertMap(segStart, segEnd, false);
-    }
-
-    if (update_contigs_flag)
-    {
-        UpdateContigsFromMapState();
-    }
-}
-
-
-global_function
 s32
 RearrangeMap(       // NOTE: VERY IMPORTANT 
     u32 pixelFrom,  // start of the fragment
@@ -10455,7 +10427,7 @@ ToggleEditSelectionInvert(void)
         return;
     }
 
-    InvertContigsInRange(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+    InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
     Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
     Redisplay = 1;
 }
@@ -10471,7 +10443,7 @@ CancelActiveEditSession(GLFWwindow *window)
 
     if (Global_Edit_Invert_Flag)
     {
-        InvertContigsInRange(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+        InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
         Global_Edit_Invert_Flag = 0;
     }
 
@@ -10501,6 +10473,105 @@ CancelActiveEditSession(GLFWwindow *window)
     f64 mx, my;
     glfwGetCursorPos(window, &mx, &my);
     MouseMove(window, mx, my);
+}
+
+global_function
+u08
+FindPaintedScaffoldRangeAtPixel(u32 pixel, u32 *rangeStart, u32 *rangeEnd)
+{
+    if (!Map_State || !rangeStart || !rangeEnd || pixel >= Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 scaffId = Map_State->scaffIds[pixel];
+    if (!scaffId)
+    {
+        return(0);
+    }
+
+    u32 start = pixel;
+    while (start > 0 && Map_State->scaffIds[start - 1] == scaffId)
+    {
+        --start;
+    }
+
+    u32 end = pixel;
+    while (end < (Number_of_Pixels_1D - 1) && Map_State->scaffIds[end + 1] == scaffId)
+    {
+        ++end;
+    }
+
+    *rangeStart = start;
+    *rangeEnd = end;
+    return(1);
+}
+
+global_function
+u08
+PickupPaintedScaffoldBlock(GLFWwindow *window)
+{
+    if (!Map_State || !File_Loaded)
+    {
+        return(0);
+    }
+
+    u32 pixel = Edit_Pixels.pixels.x;
+    u32 rangeStart = 0;
+    u32 rangeEnd = 0;
+    if (!FindPaintedScaffoldRangeAtPixel(pixel, &rangeStart, &rangeEnd))
+    {
+        return(0);
+    }
+
+    BeginEditSession();
+
+    Edit_Pixels.pixels.x = rangeEnd;
+    Edit_Pixels.pixels.y = rangeStart;
+    Edit_Pixels.worldCoords.x = (f32)(((f64)((2 * rangeEnd) + 1)) / ((f64)(2 * Number_of_Pixels_1D))) - 0.5f;
+    Edit_Pixels.worldCoords.y = (f32)(((f64)((2 * rangeStart) + 1)) / ((f64)(2 * Number_of_Pixels_1D))) - 0.5f;
+    Edit_Pixels.editing = 1;
+    Edit_Pixels.selecting = 0;
+    Edit_Pixels.tabSelecting = 0;
+    Edit_Pixels.tabSelectedRanges.clear();
+
+    f64 mx, my;
+    glfwGetCursorPos(window, &mx, &my);
+    MouseMove(window, mx, my);
+    Redisplay = 1;
+    return(1);
+}
+
+global_function
+u32
+GetHoverMapPixel(GLFWwindow *window)
+{
+    if (Edit_Mode)
+    {
+        return Edit_Pixels.pixels.x;
+    }
+
+    f64 x, y;
+    glfwGetCursorPos(window, &x, &y);
+
+    s32 w, h;
+    glfwGetWindowSize(window, &w, &h);
+    f32 height = (f32)h;
+    f32 width = (f32)w;
+
+    f32 factor1 = 1.0f / (2.0f * Camera_Position.z);
+    f32 factor2 = 2.0f / height;
+    f32 factor3 = width * 0.5f;
+
+    f32 wx = (factor1 * factor2 * ((f32)x - factor3)) + Camera_Position.x;
+    f32 wy = (-factor1 * (1.0f - (factor2 * (f32)y))) - Camera_Position.y;
+
+    wx = my_Max(-0.5f, my_Min(0.5f, wx));
+    wy = my_Max(-0.5f, my_Min(0.5f, wy));
+
+    u32 nPixels = Number_of_Pixels_1D;
+    u32 pixel = (u32)((f64)nPixels * (0.5 + (f64)wx));
+    return my_Min(pixel, nPixels ? nPixels - 1 : 0);
 }
 
 global_function
@@ -11057,6 +11128,27 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     break;
 
                 case GLFW_KEY_TAB:
+                    if ((Normal_Mode || Edit_Mode || Scaff_Edit_Mode) &&
+                        !Edit_Pixels.editing && action == GLFW_PRESS && File_Loaded && Map_State)
+                    {
+                        f64 mx, my;
+                        glfwGetCursorPos(window, &mx, &my);
+                        MouseMove(window, mx, my);
+
+                        u32 hoverPixel = GetHoverMapPixel(window);
+                        if (Map_State->scaffIds[hoverPixel])
+                        {
+                            if (!Edit_Mode)
+                            {
+                                Global_Mode = mode_edit;
+                                MouseMove(window, mx, my);
+                            }
+                            if (PickupPaintedScaffoldBlock(window))
+                            {
+                                break;
+                            }
+                        }
+                    }
                     if (Edit_Mode && !Edit_Pixels.editing && action == GLFW_PRESS)
                     {
                         u32 pixel = Edit_Pixels.pixels.x;
