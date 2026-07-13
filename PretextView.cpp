@@ -868,6 +868,10 @@ u32
 Global_Edit_Invert_Flag = 0;
 
 global_variable
+s32
+Edit_Session_NetDelta = 0;
+
+global_variable
 u08
 Scaff_Painting_Flag = 0;
 
@@ -3255,7 +3259,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
     {
         if (Edit_Mode)
         {
-            static s32 netDelta = 0;
 
             s32 w, h;
             glfwGetWindowSize(window, &w, &h);
@@ -3362,7 +3365,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                 //newY = (s32)Edit_Pixels.pixels.y + diff;
                 
                 diff = RearrangeMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y, diff, Edit_Pixels.snap);
-                netDelta += diff;
+                Edit_Session_NetDelta += diff;
 
                 newX = (s32)Edit_Pixels.pixels.x + diff;
                 newY = (s32)Edit_Pixels.pixels.y + diff;
@@ -3375,10 +3378,10 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             }
             else  // edit_pixels.editing == 0
             {
-                if (netDelta || Global_Edit_Invert_Flag)
+                if (Edit_Session_NetDelta || Global_Edit_Invert_Flag)
                 {
-                    AddMapEdit(netDelta, Edit_Pixels.pixels, Global_Edit_Invert_Flag);
-                    netDelta = 0;
+                    AddMapEdit(Edit_Session_NetDelta, Edit_Pixels.pixels, Global_Edit_Invert_Flag);
+                    Edit_Session_NetDelta = 0;
                 }
                 
                 wx = (f32)(((f64)((2 * pixel1) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
@@ -3576,6 +3579,30 @@ ConsolidateTabSelections(GLFWwindow* window);
 
 global_function
 void
+BeginEditSession(void);
+
+global_function
+void
+ToggleEditSelectionInvert(void);
+
+global_function
+void
+CancelActiveEditSession(GLFWwindow *window);
+
+global_function
+u08
+FindPaintedScaffoldRangeAtPixel(u32 pixel, u32 *rangeStart, u32 *rangeEnd);
+
+global_function
+u08
+PickupPaintedScaffoldBlock(GLFWwindow *window);
+
+global_function
+u32
+GetHoverMapPixel(GLFWwindow *window);
+
+global_function
+void
 Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
 {
     s32 primaryMouse = user_profile_settings_ptr->invert_mouse ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
@@ -3616,7 +3643,11 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && !Edit_Pixels.editing)
         {
             Edit_Pixels.selecting = 0;
-            if (!Edit_Pixels.editing) Edit_Pixels.editing = 1;
+            if (!Edit_Pixels.editing)
+            {
+                BeginEditSession();
+                Edit_Pixels.editing = 1;
+            }
             MouseMove(window, x, y);
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_PRESS && !Edit_Pixels.editing)
@@ -3627,11 +3658,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && Edit_Pixels.editing && action == GLFW_PRESS)
         {
-            InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
-            Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
-            // UpdateContigsFromMapState() already invoked from InvertMap()
-
-            Redisplay = 1;
+            ToggleEditSelectionInvert();
         }
         else if (button == primaryMouse && Waypoint_Edit_Mode && action == GLFW_PRESS)
         {
@@ -6490,7 +6517,8 @@ Render() {
                         (char *)"Middle Click / Spacebar (while editing): invert sequence",
                         (char *)"P: copy highlight to clipboard",
                         (char *)"V: break at selection start",
-                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate"
+                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate, Space/Middle Click again: invert, Q: undo",
+                        (char *)"Tab on painted scaffold: pickup block, Space: invert block"
                     };
 
                     textBoxHeight = (f32)helpTexts.size() * (lh + 1.0f) - 1.0f;
@@ -10239,9 +10267,184 @@ GatheringTextInput = 0;
 
 global_function
 void
+BeginEditSession(void)
+{
+    if (Map_Editor)
+    {
+        Edit_Pixels.editSessionBaselineEdits = Map_Editor->nEdits;
+    }
+    else
+    {
+        Edit_Pixels.editSessionBaselineEdits = 0;
+    }
+
+    Global_Edit_Invert_Flag = 0;
+    Edit_Session_NetDelta = 0;
+}
+
+global_function
+void
+ToggleEditSelectionInvert(void)
+{
+    if (!Edit_Pixels.editing)
+    {
+        return;
+    }
+
+    InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+    Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
+    Redisplay = 1;
+}
+
+global_function
+void
+CancelActiveEditSession(GLFWwindow *window)
+{
+    if (!Edit_Pixels.editing || !Map_Editor)
+    {
+        return;
+    }
+
+    if (Global_Edit_Invert_Flag)
+    {
+        InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+        Global_Edit_Invert_Flag = 0;
+    }
+
+    if (Edit_Session_NetDelta)
+    {
+        RearrangeMap(
+            Edit_Pixels.pixels.x,
+            Edit_Pixels.pixels.y,
+            -Edit_Session_NetDelta,
+            Edit_Pixels.snap,
+            false);
+        Edit_Session_NetDelta = 0;
+    }
+
+    Edit_Pixels.editing = 0;
+    Edit_Pixels.selecting = 0;
+
+    while (Map_Editor->nEdits > Edit_Pixels.editSessionBaselineEdits)
+    {
+        UndoMapEdit();
+    }
+
+    UpdateContigsFromMapState();
+    UpdateScaffolds();
+    Redisplay = 1;
+
+    f64 mx, my;
+    glfwGetCursorPos(window, &mx, &my);
+    MouseMove(window, mx, my);
+}
+
+global_function
+u08
+FindPaintedScaffoldRangeAtPixel(u32 pixel, u32 *rangeStart, u32 *rangeEnd)
+{
+    if (!Map_State || !rangeStart || !rangeEnd || pixel >= Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 scaffId = Map_State->scaffIds[pixel];
+    if (!scaffId)
+    {
+        return(0);
+    }
+
+    u32 start = pixel;
+    while (start > 0 && Map_State->scaffIds[start - 1] == scaffId)
+    {
+        --start;
+    }
+
+    u32 end = pixel;
+    while (end < (Number_of_Pixels_1D - 1) && Map_State->scaffIds[end + 1] == scaffId)
+    {
+        ++end;
+    }
+
+    *rangeStart = start;
+    *rangeEnd = end;
+    return(1);
+}
+
+global_function
+u08
+PickupPaintedScaffoldBlock(GLFWwindow *window)
+{
+    if (!Map_State || !File_Loaded)
+    {
+        return(0);
+    }
+
+    u32 pixel = Edit_Pixels.pixels.x;
+    u32 rangeStart = 0;
+    u32 rangeEnd = 0;
+    if (!FindPaintedScaffoldRangeAtPixel(pixel, &rangeStart, &rangeEnd))
+    {
+        return(0);
+    }
+
+    BeginEditSession();
+
+    Edit_Pixels.pixels.x = rangeEnd;
+    Edit_Pixels.pixels.y = rangeStart;
+    Edit_Pixels.worldCoords.x = (f32)(((f64)((2 * rangeEnd) + 1)) / ((f64)(2 * Number_of_Pixels_1D))) - 0.5f;
+    Edit_Pixels.worldCoords.y = (f32)(((f64)((2 * rangeStart) + 1)) / ((f64)(2 * Number_of_Pixels_1D))) - 0.5f;
+    Edit_Pixels.editing = 1;
+    Edit_Pixels.selecting = 0;
+    Edit_Pixels.tabSelecting = 0;
+    Edit_Pixels.tabSelectedRanges.clear();
+
+    f64 mx, my;
+    glfwGetCursorPos(window, &mx, &my);
+    MouseMove(window, mx, my);
+    Redisplay = 1;
+    return(1);
+}
+
+global_function
+u32
+GetHoverMapPixel(GLFWwindow *window)
+{
+    if (Edit_Mode)
+    {
+        return Edit_Pixels.pixels.x;
+    }
+
+    f64 x, y;
+    glfwGetCursorPos(window, &x, &y);
+
+    s32 w, h;
+    glfwGetWindowSize(window, &w, &h);
+    f32 height = (f32)h;
+    f32 width = (f32)w;
+
+    f32 factor1 = 1.0f / (2.0f * Camera_Position.z);
+    f32 factor2 = 2.0f / height;
+    f32 factor3 = width * 0.5f;
+
+    f32 wx = (factor1 * factor2 * ((f32)x - factor3)) + Camera_Position.x;
+    f32 wy = (-factor1 * (1.0f - (factor2 * (f32)y))) - Camera_Position.y;
+
+    wx = my_Max(-0.5f, my_Min(0.5f, wx));
+    wy = my_Max(-0.5f, my_Min(0.5f, wy));
+
+    u32 nPixels = Number_of_Pixels_1D;
+    u32 pixel = (u32)((f64)nPixels * (0.5 + (f64)wx));
+    return my_Min(pixel, nPixels ? nPixels - 1 : 0);
+}
+
+global_function
+void
 ConsolidateTabSelections(GLFWwindow* window)
 {
     u32 nPixels = Number_of_Pixels_1D;
+
+    BeginEditSession();
 
     // Sort by start position (ascending)
     std::sort(Edit_Pixels.tabSelectedRanges.begin(), Edit_Pixels.tabSelectedRanges.end(),
@@ -10571,7 +10774,15 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                 case GLFW_KEY_Q:
                     if (Edit_Mode || Select_Sort_Area_Mode)
                     {
-                        UndoMapEdit();
+                        if (Edit_Mode && Edit_Pixels.editing)
+                        {
+                            CancelActiveEditSession(window);
+                        }
+                        else
+                        {
+                            UndoMapEdit();
+                            Redisplay = 1;
+                        }
                     }
                     else
                     {
@@ -10757,6 +10968,27 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     break;
 
                 case GLFW_KEY_TAB:
+                    if ((Normal_Mode || Edit_Mode || Scaff_Edit_Mode) &&
+                        !Edit_Pixels.editing && action == GLFW_PRESS && File_Loaded && Map_State)
+                    {
+                        f64 mx, my;
+                        glfwGetCursorPos(window, &mx, &my);
+                        MouseMove(window, mx, my);
+
+                        u32 hoverPixel = GetHoverMapPixel(window);
+                        if (Map_State->scaffIds[hoverPixel])
+                        {
+                            if (!Edit_Mode)
+                            {
+                                Global_Mode = mode_edit;
+                                MouseMove(window, mx, my);
+                            }
+                            if (PickupPaintedScaffoldBlock(window))
+                            {
+                                break;
+                            }
+                        }
+                    }
                     if (Edit_Mode && !Edit_Pixels.editing && action == GLFW_PRESS)
                     {
                         u32 pixel = Edit_Pixels.pixels.x;
@@ -10811,15 +11043,18 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     else if (Edit_Mode && Edit_Pixels.selecting && action == GLFW_RELEASE)
                     {
                         Edit_Pixels.selecting = 0;
-                        if (!Edit_Pixels.editing) Edit_Pixels.editing = 1;
+                        if (!Edit_Pixels.editing)
+                        {
+                            BeginEditSession();
+                            Edit_Pixels.editing = 1;
+                        }
                         f64 x, y;
                         glfwGetCursorPos(window, &x, &y);
                         MouseMove(window, x, y);
                     }
                     else if (Edit_Mode && Edit_Pixels.editing && action == GLFW_PRESS)
                     {
-                        InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
-                        Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
+                        ToggleEditSelectionInvert();
                     }
                     else if (Waypoint_Edit_Mode && Selected_Waypoint && action == GLFW_PRESS)
                     {
