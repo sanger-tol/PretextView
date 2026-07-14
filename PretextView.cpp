@@ -12765,7 +12765,10 @@ LoadState(u64 headerHash, char *path)
                     nBytesRead += (bytes_per_waypoint * nWayp);
                 }
 
-                // scaffs
+                // scaffs (read now; apply after meta — UpdateContigsFromMapState re-derives scaffIds)
+                u32 nScaffsLoaded = 0;
+                u32 *loadedScaffContigIds = 0;
+                u32 *loadedScaffIds = 0;
                 {
                     u32 nScaffs;
                     ((u08 *)&nScaffs)[0] = *fileContents++;
@@ -12775,7 +12778,12 @@ LoadState(u64 headerHash, char *path)
 
                     nBytesRead += 4;
 
-                    ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
+                    if (nScaffs)
+                    {
+                        loadedScaffContigIds = PushArrayP(Loading_Arena, u32, nScaffs);
+                        loadedScaffIds = PushArrayP(Loading_Arena, u32, nScaffs);
+                        nScaffsLoaded = nScaffs;
+                    }
 
                     ForLoop(nScaffs)
                     {
@@ -12790,10 +12798,12 @@ LoadState(u64 headerHash, char *path)
                         ((u08 *)&sId)[2] = *fileContents++;
                         ((u08 *)&sId)[3] = *fileContents++;
 
-                        (Contigs->contigs_arr + cId)->scaffId = sId;
+                        if (loadedScaffContigIds && loadedScaffIds)
+                        {
+                            loadedScaffContigIds[index] = cId;
+                            loadedScaffIds[index] = sId;
+                        }
                     }
-
-                    UpdateScaffolds();
 
                     nBytesRead += (8 * nScaffs);
                 }
@@ -12852,6 +12862,23 @@ LoadState(u64 headerHash, char *path)
                         fileContents += strLenPlusOne;
                         nBytesRead += (strLenPlusOne + 1);
                     }
+                }
+
+                if (nScaffsLoaded && loadedScaffContigIds && loadedScaffIds && Contigs)
+                {
+                    ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
+
+                    ForLoop(nScaffsLoaded)
+                    {
+                        u32 cId = loadedScaffContigIds[index];
+                        u32 sId = loadedScaffIds[index];
+                        if (cId < Contigs->numberOfContigs)
+                        {
+                            (Contigs->contigs_arr + cId)->scaffId = sId;
+                        }
+                    }
+
+                    UpdateScaffolds();
                 }
 
                 // extensions
