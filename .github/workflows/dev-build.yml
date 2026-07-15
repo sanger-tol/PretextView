@@ -6,6 +6,7 @@ name: Development builds
 on:
   push:
     branches:
+      - layer_state
       - layers
       - develop
   workflow_dispatch:

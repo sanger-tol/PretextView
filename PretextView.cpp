@@ -11879,7 +11879,12 @@ SetSaveStatePaths()
 
 global_variable
 u08
-SaveState_Magic[5] = {'p', 't', 's', 'x', 2};
+SaveState_Magic[5] = {'p', 't', 's', 'x', 3};
+
+#define SaveState_Format_Version_Min 2
+#define SaveState_Format_Version_Current 3
+#define SaveState_Scaff_Entry_Bytes_V2 8
+#define SaveState_Scaff_Entry_Bytes_V3 12
 
 global_variable
 u08
@@ -11888,6 +11893,136 @@ SaveState_Magic_Tail_Auto = 2;
 global_variable
 u08
 SaveState_Magic_Tail_Manual = 3;
+
+global_function
+u08
+ValidateSaveStateMagic(u08 *magicTest, u08 expectedTail)
+{
+    if (!magicTest ||
+        magicTest[0] != 'p' || magicTest[1] != 't' || magicTest[2] != 's' || magicTest[3] != 'x')
+    {
+        return(0);
+    }
+
+    u08 formatVersion = magicTest[4];
+    if (formatVersion < SaveState_Format_Version_Min || formatVersion > SaveState_Format_Version_Current)
+    {
+        return(0);
+    }
+
+    if (magicTest[5] != expectedTail)
+    {
+        return(0);
+    }
+
+    return(formatVersion);
+}
+
+global_function
+u08
+GetContigPixelRange(u32 contigIdx, u32 *rangeStart, u32 *rangeEnd)
+{
+    if (!Map_State || !Contigs || !rangeStart || !rangeEnd || contigIdx >= Contigs->numberOfContigs)
+    {
+        return(0);
+    }
+
+    u32 start = 0;
+    while (start < Number_of_Pixels_1D && Map_State->contigIds[start] != contigIdx)
+    {
+        ++start;
+    }
+
+    if (start >= Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 end = start;
+    while (end < (Number_of_Pixels_1D - 1) && Map_State->contigIds[end + 1] == contigIdx)
+    {
+        ++end;
+    }
+
+    *rangeStart = start;
+    *rangeEnd = end;
+    return(1);
+}
+
+global_function
+void
+ApplyScaffoldPaintRange(u32 startPixel, u32 endPixel, u32 scaffId)
+{
+    if (!Map_State || !Contigs || !scaffId || startPixel >= Number_of_Pixels_1D)
+    {
+        return;
+    }
+
+    endPixel = my_Min(endPixel, Number_of_Pixels_1D - 1);
+    if (startPixel > endPixel)
+    {
+        return;
+    }
+
+    for (u32 pixel = startPixel; pixel <= endPixel; ++pixel)
+    {
+        u32 cId = Map_State->contigIds[pixel];
+        if (cId < Contigs->numberOfContigs)
+        {
+            (Contigs->contigs_arr + cId)->scaffId = scaffId;
+        }
+    }
+}
+
+global_function
+void
+ApplyLoadedScaffoldPaintingByPixelRange(u32 nEntries, u32 *rangeStarts, u32 *rangeEnds, u32 *scaffIds)
+{
+    if (!nEntries || !rangeStarts || !rangeEnds || !scaffIds || !Contigs)
+    {
+        return;
+    }
+
+    ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
+
+    ForLoop(nEntries)
+    {
+        ApplyScaffoldPaintRange(rangeStarts[index], rangeEnds[index], scaffIds[index]);
+    }
+
+    UpdateScaffolds();
+}
+
+global_function
+void
+ApplyLoadedScaffoldPaintingLegacy(u32 nEntries, u32 *contigIds, u32 *scaffIds)
+{
+    if (!nEntries || !contigIds || !scaffIds || !Contigs || !Map_State)
+    {
+        return;
+    }
+
+    ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
+
+    ForLoop(nEntries)
+    {
+        u32 cId = contigIds[index];
+        u32 sId = scaffIds[index];
+        u32 rangeStart = 0;
+        u32 rangeEnd = 0;
+
+        if (GetContigPixelRange(cId, &rangeStart, &rangeEnd))
+        {
+            ApplyScaffoldPaintRange(rangeStart, rangeEnd, sId);
+        }
+        else if (cId < Contigs->numberOfContigs)
+        {
+            (Contigs->contigs_arr + cId)->scaffId = sId;
+        }
+    }
+
+    UpdateScaffolds();
+}
 
 /* 
 保存当前状态，
@@ -11944,12 +12079,23 @@ SaveState(
         }
         
         // number of scaffs and metaFlags
+        UpdateContigsFromMapState();
+        UpdateScaffolds();
         u32 nScaffs = 0;
         u32 nMetaFlags = 0;
         ForLoop(Contigs->numberOfContigs)
         {
-            if ((Contigs->contigs_arr + index)->scaffId) ++nScaffs;
-            if (*(Contigs->contigs_arr + index)->metaDataFlags) ++nMetaFlags;
+            contig *cont = Contigs->contigs_arr + index;
+            if (cont->scaffId)
+            {
+                u32 rangeStart = 0;
+                u32 rangeEnd = 0;
+                if (GetContigPixelRange(index, &rangeStart, &rangeEnd))
+                {
+                    ++nScaffs;
+                }
+            }
+            if (*(cont->metaDataFlags)) ++nMetaFlags;
         }
         // number of meta tags
         u08 nMetaTags = 0;
@@ -11964,7 +12110,7 @@ SaveState(
             }
         }
 
-        u32 nFileBytes = 352 + (13 * nWayp) + (12 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (8 * nScaffs) + sizeof(meta_mode_data) + sizeof(MetaData_Active_Tag) + 4 + (12 * nMetaFlags) + 1 + nMetaTags + totalMetaTagSpace;
+        u32 nFileBytes = 352 + (13 * nWayp) + (12 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (SaveState_Scaff_Entry_Bytes_V3 * nScaffs) + sizeof(meta_mode_data) + sizeof(MetaData_Active_Tag) + 4 + (12 * nMetaFlags) + 1 + nMetaTags + totalMetaTagSpace;
         u08 *fileContents = PushArrayP(Loading_Arena, u08, nFileBytes);
         u08 *fileWriter = fileContents;
 
@@ -12183,7 +12329,7 @@ SaveState(
             fileWriter += (bytes_per_waypoint * nWayp);
         }
 
-        // scaffs
+        // scaffs (v3: map pixel range + scaffold id — stable if edit replay matches)
         {
             *fileWriter++ = ((u08 *)&nScaffs)[0];
             *fileWriter++ = ((u08 *)&nScaffs)[1];
@@ -12191,13 +12337,25 @@ SaveState(
             *fileWriter++ = ((u08 *)&nScaffs)[3];
             ForLoop(Contigs->numberOfContigs)
             {
-                if ((Contigs->contigs_arr + index)->scaffId)
+                contig *cont = Contigs->contigs_arr + index;
+                if (cont->scaffId)
                 {
-                    u32 sId = (Contigs->contigs_arr + index)->scaffId;
-                    *fileWriter++ = ((u08 *)&index)[0];
-                    *fileWriter++ = ((u08 *)&index)[1];
-                    *fileWriter++ = ((u08 *)&index)[2];
-                    *fileWriter++ = ((u08 *)&index)[3];
+                    u32 rangeStart = 0;
+                    u32 rangeEnd = 0;
+                    u32 sId = cont->scaffId;
+                    if (!GetContigPixelRange(index, &rangeStart, &rangeEnd))
+                    {
+                        continue;
+                    }
+
+                    *fileWriter++ = ((u08 *)&rangeStart)[0];
+                    *fileWriter++ = ((u08 *)&rangeStart)[1];
+                    *fileWriter++ = ((u08 *)&rangeStart)[2];
+                    *fileWriter++ = ((u08 *)&rangeStart)[3];
+                    *fileWriter++ = ((u08 *)&rangeEnd)[0];
+                    *fileWriter++ = ((u08 *)&rangeEnd)[1];
+                    *fileWriter++ = ((u08 *)&rangeEnd)[2];
+                    *fileWriter++ = ((u08 *)&rangeEnd)[3];
                     *fileWriter++ = ((u08 *)&sId)[0];
                     *fileWriter++ = ((u08 *)&sId)[1];
                     *fileWriter++ = ((u08 *)&sId)[2];
@@ -12350,6 +12508,7 @@ LoadState(u64 headerHash, char *path)
     {
         FILE *file = 0;
         u08 fullLoad = 1;
+        u08 saveStateFormatVersion = 0;
         
         if (path) // load state file with a specific path
         {
@@ -12360,31 +12519,21 @@ LoadState(u64 headerHash, char *path)
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic))
+                    saveStateFormatVersion = ValidateSaveStateMagic(magicTest, SaveState_Magic_Tail_Manual);
+                    if (!saveStateFormatVersion)
                     {
-                        if (SaveState_Magic[index] != magicTest[index])
-                        {
-                            fclose(file);
-                            file = 0;
-                            break;
-                        }
+                        fclose(file);
+                        file = 0;
                     }
-                    if (file)
+                    else
                     {
-                        if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Manual)
+                        u64 hashTest;
+                        bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
+                        if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
                         {
                             fclose(file);
                             file = 0;
-                        }
-                        else
-                        {
-                            u64 hashTest;
-                            bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
-                            if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
-                            {
-                                fclose(file);
-                                file = 0;
-                            }
+                            saveStateFormatVersion = 0;
                         }
                     }
                 }
@@ -12414,22 +12563,11 @@ LoadState(u64 headerHash, char *path)
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic))
+                    saveStateFormatVersion = ValidateSaveStateMagic(magicTest, SaveState_Magic_Tail_Auto);
+                    if (!saveStateFormatVersion)
                     {
-                        if (SaveState_Magic[index] != magicTest[index])
-                        {
-                            fclose(file);
-                            file = 0;
-                            break;
-                        }
-                    }
-                    if (file)
-                    {
-                        if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Auto)
-                        {
-                            fclose(file);
-                            file = 0;
-                        }
+                        fclose(file);
+                        file = 0;
                     }
                 }
                 else
@@ -12466,22 +12604,11 @@ LoadState(u64 headerHash, char *path)
                             u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                             if (bytesRead == sizeof(magicTest))
                             {
-                                ForLoop(sizeof(SaveState_Magic))
+                                saveStateFormatVersion = ValidateSaveStateMagic(magicTest, SaveState_Magic_Tail_Auto);
+                                if (!saveStateFormatVersion)
                                 {
-                                    if (SaveState_Magic[index] != magicTest[index])
-                                    {
-                                        fclose(file);
-                                        file = 0;
-                                        break;
-                                    }
-                                }
-                                if (file)
-                                {
-                                    if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Auto)
-                                    {
-                                        fclose(file);
-                                        file = 0;
-                                    }
+                                    fclose(file);
+                                    file = 0;
                                 }
                             }
                             else
@@ -12713,6 +12840,9 @@ LoadState(u64 headerHash, char *path)
 
                     fileContents += nContigFlags;
                     nBytesRead += (nContigFlags + (12 * nEdits));
+
+                    EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+                    UpdateContigsFromMapState();
                 }
 
                 // waypoints
@@ -12767,7 +12897,9 @@ LoadState(u64 headerHash, char *path)
 
                 // scaffs (read now; apply after meta — UpdateContigsFromMapState re-derives scaffIds)
                 u32 nScaffsLoaded = 0;
-                u32 *loadedScaffContigIds = 0;
+                u08 scaffLoadFormat = saveStateFormatVersion;
+                u32 *loadedScaffRangeStarts = 0;
+                u32 *loadedScaffRangeEnds = 0;
                 u32 *loadedScaffIds = 0;
                 {
                     u32 nScaffs;
@@ -12778,34 +12910,68 @@ LoadState(u64 headerHash, char *path)
 
                     nBytesRead += 4;
 
+                    u32 scaffEntryBytes = (scaffLoadFormat >= SaveState_Format_Version_Current)
+                        ? SaveState_Scaff_Entry_Bytes_V3
+                        : SaveState_Scaff_Entry_Bytes_V2;
+
                     if (nScaffs)
                     {
-                        loadedScaffContigIds = PushArrayP(Loading_Arena, u32, nScaffs);
+                        loadedScaffRangeStarts = PushArrayP(Loading_Arena, u32, nScaffs);
+                        loadedScaffRangeEnds = PushArrayP(Loading_Arena, u32, nScaffs);
                         loadedScaffIds = PushArrayP(Loading_Arena, u32, nScaffs);
                         nScaffsLoaded = nScaffs;
                     }
 
                     ForLoop(nScaffs)
                     {
-                        u32 cId;
-                        u32 sId;
-                        ((u08 *)&cId)[0] = *fileContents++;
-                        ((u08 *)&cId)[1] = *fileContents++;
-                        ((u08 *)&cId)[2] = *fileContents++;
-                        ((u08 *)&cId)[3] = *fileContents++;
-                        ((u08 *)&sId)[0] = *fileContents++;
-                        ((u08 *)&sId)[1] = *fileContents++;
-                        ((u08 *)&sId)[2] = *fileContents++;
-                        ((u08 *)&sId)[3] = *fileContents++;
-
-                        if (loadedScaffContigIds && loadedScaffIds)
+                        if (scaffLoadFormat >= SaveState_Format_Version_Current)
                         {
-                            loadedScaffContigIds[index] = cId;
-                            loadedScaffIds[index] = sId;
+                            u32 rangeStart;
+                            u32 rangeEnd;
+                            u32 sId;
+                            ((u08 *)&rangeStart)[0] = *fileContents++;
+                            ((u08 *)&rangeStart)[1] = *fileContents++;
+                            ((u08 *)&rangeStart)[2] = *fileContents++;
+                            ((u08 *)&rangeStart)[3] = *fileContents++;
+                            ((u08 *)&rangeEnd)[0] = *fileContents++;
+                            ((u08 *)&rangeEnd)[1] = *fileContents++;
+                            ((u08 *)&rangeEnd)[2] = *fileContents++;
+                            ((u08 *)&rangeEnd)[3] = *fileContents++;
+                            ((u08 *)&sId)[0] = *fileContents++;
+                            ((u08 *)&sId)[1] = *fileContents++;
+                            ((u08 *)&sId)[2] = *fileContents++;
+                            ((u08 *)&sId)[3] = *fileContents++;
+
+                            if (loadedScaffRangeStarts && loadedScaffRangeEnds && loadedScaffIds)
+                            {
+                                loadedScaffRangeStarts[index] = rangeStart;
+                                loadedScaffRangeEnds[index] = rangeEnd;
+                                loadedScaffIds[index] = sId;
+                            }
+                        }
+                        else
+                        {
+                            u32 cId;
+                            u32 sId;
+                            ((u08 *)&cId)[0] = *fileContents++;
+                            ((u08 *)&cId)[1] = *fileContents++;
+                            ((u08 *)&cId)[2] = *fileContents++;
+                            ((u08 *)&cId)[3] = *fileContents++;
+                            ((u08 *)&sId)[0] = *fileContents++;
+                            ((u08 *)&sId)[1] = *fileContents++;
+                            ((u08 *)&sId)[2] = *fileContents++;
+                            ((u08 *)&sId)[3] = *fileContents++;
+
+                            if (loadedScaffRangeStarts && loadedScaffRangeEnds && loadedScaffIds)
+                            {
+                                loadedScaffRangeStarts[index] = cId;
+                                loadedScaffIds[index] = sId;
+                                loadedScaffRangeEnds[index] = 0;
+                            }
                         }
                     }
 
-                    nBytesRead += (8 * nScaffs);
+                    nBytesRead += (scaffEntryBytes * nScaffs);
                 }
 
                 // meta data
@@ -12864,21 +13030,23 @@ LoadState(u64 headerHash, char *path)
                     }
                 }
 
-                if (nScaffsLoaded && loadedScaffContigIds && loadedScaffIds && Contigs)
+                if (nScaffsLoaded && loadedScaffRangeStarts && loadedScaffRangeEnds && loadedScaffIds)
                 {
-                    ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
-
-                    ForLoop(nScaffsLoaded)
+                    if (scaffLoadFormat >= SaveState_Format_Version_Current)
                     {
-                        u32 cId = loadedScaffContigIds[index];
-                        u32 sId = loadedScaffIds[index];
-                        if (cId < Contigs->numberOfContigs)
-                        {
-                            (Contigs->contigs_arr + cId)->scaffId = sId;
-                        }
+                        ApplyLoadedScaffoldPaintingByPixelRange(
+                            nScaffsLoaded,
+                            loadedScaffRangeStarts,
+                            loadedScaffRangeEnds,
+                            loadedScaffIds);
                     }
-
-                    UpdateScaffolds();
+                    else
+                    {
+                        ApplyLoadedScaffoldPaintingLegacy(
+                            nScaffsLoaded,
+                            loadedScaffRangeStarts,
+                            loadedScaffIds);
+                    }
                 }
 
                 // extensions
@@ -12977,19 +13145,39 @@ void Load_AGP(const std::string& agp_path)
         // curation globally 
         AutoCurationFromFragsOrder( &frags_order_agp, Contigs, Map_State, nullptr );
 
-        // add scaff id to restore the painted scaffID and meta tags
-        int pix_ptr = 0, contig_start_pix_ptr = 0;
-        for (int i =0 ; i < Contigs->numberOfContigs;i++)
-        {   
+        // restore meta on pixels, rebuild contigs, then apply AGP scaffold ids directly
+        EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+        memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
+        memset(Map_State->metaDataFlags, 0, Number_of_Pixels_1D * sizeof(u64));
+
+        int pix_ptr = 0;
+        int contig_start_pix_ptr = 0;
+        for (int i = 0; i < Contigs->numberOfContigs; i++)
+        {
             auto& frag = assembly_agp.frags[i];
-            while (pix_ptr < Number_of_Pixels_1D && pix_ptr < contig_start_pix_ptr + Contigs->contigs_arr[i].length) 
+
+            while (pix_ptr < Number_of_Pixels_1D && pix_ptr < contig_start_pix_ptr + (int)Contigs->contigs_arr[i].length)
             {
-                Map_State->scaffIds[pix_ptr]        = frag.is_painted? frag.scaff_id + 1 : 0; // scaff_id
-                Map_State->metaDataFlags[pix_ptr++] = frag.meta_data_flag ;                   // meta data flag
+                Map_State->metaDataFlags[pix_ptr] = frag.meta_data_flag;
+                pix_ptr++;
             }
-            contig_start_pix_ptr += Contigs->contigs_arr[i].length;
+            contig_start_pix_ptr += (int)Contigs->contigs_arr[i].length;
         }
+
         UpdateContigsFromMapState();
+
+        ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
+        for (int i = 0; i < Contigs->numberOfContigs && i < (int)assembly_agp.frags.size(); i++)
+        {
+            auto& frag = assembly_agp.frags[i];
+            if (frag.is_painted)
+            {
+                (Contigs->contigs_arr + i)->scaffId = (u32)(frag.scaff_id + 1);
+            }
+        }
+
+        UpdateScaffolds();
+        Redisplay = 1;
     }
     catch (const std::exception& e)
     {
