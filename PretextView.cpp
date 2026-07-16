@@ -7277,6 +7277,10 @@ global_function
 u08
 LoadState(u64 headerHash, char *path = 0);
 
+global_function
+void
+EnsureContigsArrayCapacity(u32 min_capacity);
+
 global_variable
 u08
 Map_File_Path[512] = {0};
