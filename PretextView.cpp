@@ -226,6 +226,10 @@ u08
 Pending_Clear_Cache = 0;
 
 global_variable
+u08
+Skip_SaveState_On_Reload = 0;
+
+global_variable
 u64
 Active_Map_Header_Hash = 0;
 
@@ -13612,6 +13616,7 @@ ProcessPendingClearCache(void)
 
     if (Map_File_Path[0])
     {
+        Skip_SaveState_On_Reload = 1;
         Loading = 1;
         Redisplay = 1;
         printf("[PretextView] Clear cache: reloading %s\n", Map_File_Path);
@@ -14773,7 +14778,7 @@ MainArgs
 
             glfwSwapBuffers(window);
             Redisplay = 0;
-            if (currFileName)
+            if (currFileName && !Skip_SaveState_On_Reload)
             {
                 SetErrorContext(error_context_state_management, "SaveState");
                 UpdateCrashReportSnapshot();
@@ -14798,7 +14803,7 @@ MainArgs
 
         if (Loading) 
         {
-            if (currFileName)
+            if (currFileName && !Skip_SaveState_On_Reload)
             {
                 SetErrorContext(error_context_state_management, "SaveState");
                 UpdateCrashReportSnapshot();
@@ -14848,6 +14853,7 @@ MainArgs
             }
             glfwPollEvents(); 
             Loading = 0;
+            Skip_SaveState_On_Reload = 0;
             Redisplay = 1;
         }
 
