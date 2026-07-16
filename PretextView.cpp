@@ -6914,6 +6914,53 @@ Quad_EBO;
 static u08 Grid_Data_GL_heap;
 static u08 Contig_ColourBar_Data_GL_heap;
 static u08 Scaff_Bar_Data_GL_heap;
+static u08 Contigs_arr_GL_heap;
+
+global_function
+void
+ReleaseQuadDataHeapBuffers(quad_data *data, u08 *heap_flag)
+{
+    if (!data || !heap_flag || !*heap_flag)
+    {
+        return;
+    }
+
+    if (data->vaos)
+    {
+        free(data->vaos);
+        data->vaos = NULL;
+    }
+    if (data->vbos)
+    {
+        free(data->vbos);
+        data->vbos = NULL;
+    }
+
+    *heap_flag = 0;
+}
+
+global_function
+void
+ReleaseContigsArrayHeapBuffers(void)
+{
+    if (!Contigs_arr_GL_heap || !Contigs)
+    {
+        return;
+    }
+
+    if (Contigs->contigs_arr)
+    {
+        delete[] Contigs->contigs_arr;
+        Contigs->contigs_arr = NULL;
+    }
+    if (Contigs->contigInvertFlags)
+    {
+        delete[] Contigs->contigInvertFlags;
+        Contigs->contigInvertFlags = NULL;
+    }
+
+    Contigs_arr_GL_heap = 0;
+}
 
 global_function
 void
@@ -7535,32 +7582,40 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         glDeleteBuffers(1, &Contact_Matrix->pixelRearrangmentLookupBuffer);
         glDeleteTextures(1, &Contact_Matrix->pixelRearrangmentLookupBufferTex);
 
-        glDeleteVertexArrays((GLsizei)Grid_Data->nBuffers, Grid_Data->vaos);
-        glDeleteBuffers((GLsizei)Grid_Data->nBuffers, Grid_Data->vbos);
-        if (Grid_Data_GL_heap)
+        if (Grid_Data && Grid_Data->vaos && Grid_Data->vbos)
         {
-            free(Grid_Data->vaos);
-            free(Grid_Data->vbos);
-            Grid_Data_GL_heap = 0;
+            glDeleteVertexArrays((GLsizei)Grid_Data->nBuffers, Grid_Data->vaos);
+            glDeleteBuffers((GLsizei)Grid_Data->nBuffers, Grid_Data->vbos);
+            ReleaseQuadDataHeapBuffers(Grid_Data, &Grid_Data_GL_heap);
         }
 
-        glDeleteVertexArrays((GLsizei)Label_Box_Data->nBuffers, Label_Box_Data->vaos);
-        glDeleteBuffers((GLsizei)Label_Box_Data->nBuffers, Label_Box_Data->vbos);
-
-        glDeleteVertexArrays((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vaos);
-        glDeleteBuffers((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vbos);
-
-        glDeleteVertexArrays((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vaos);
-        glDeleteBuffers((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vbos);
-        if (Contig_ColourBar_Data_GL_heap)
+        if (Label_Box_Data && Label_Box_Data->vaos && Label_Box_Data->vbos)
         {
-            free(Contig_ColourBar_Data->vaos);
-            free(Contig_ColourBar_Data->vbos);
-            Contig_ColourBar_Data_GL_heap = 0;
+            glDeleteVertexArrays((GLsizei)Label_Box_Data->nBuffers, Label_Box_Data->vaos);
+            glDeleteBuffers((GLsizei)Label_Box_Data->nBuffers, Label_Box_Data->vbos);
         }
 
-        glDeleteVertexArrays((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vaos);
-        glDeleteBuffers((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vbos);
+        if (Scale_Bar_Data && Scale_Bar_Data->vaos && Scale_Bar_Data->vbos)
+        {
+            glDeleteVertexArrays((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vaos);
+            glDeleteBuffers((GLsizei)Scale_Bar_Data->nBuffers, Scale_Bar_Data->vbos);
+        }
+
+        if (Contig_ColourBar_Data && Contig_ColourBar_Data->vaos && Contig_ColourBar_Data->vbos)
+        {
+            glDeleteVertexArrays((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vaos);
+            glDeleteBuffers((GLsizei)Contig_ColourBar_Data->nBuffers, Contig_ColourBar_Data->vbos);
+            ReleaseQuadDataHeapBuffers(Contig_ColourBar_Data, &Contig_ColourBar_Data_GL_heap);
+        }
+
+        if (Scaff_Bar_Data && Scaff_Bar_Data->vaos && Scaff_Bar_Data->vbos)
+        {
+            glDeleteVertexArrays((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vaos);
+            glDeleteBuffers((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vbos);
+            ReleaseQuadDataHeapBuffers(Scaff_Bar_Data, &Scaff_Bar_Data_GL_heap);
+        }
+
+        ReleaseContigsArrayHeapBuffers();
 
         TraverseLinkedList(Extensions.head, extension_node)
         {
@@ -13948,9 +14003,16 @@ EnsureContigsArrayCapacity(u32 min_capacity)
         return;
     }
 
+    if (Contigs_arr_GL_heap)
+    {
+        delete[] Contigs->contigs_arr;
+        delete[] Contigs->contigInvertFlags;
+    }
+
     Contigs->contigs_arr = new_arr;
     Contigs->contigInvertFlags = new_flags;
     Contigs->contigs_arr_capacity = min_capacity;
+    Contigs_arr_GL_heap = 1;
 }
 
 global_function
