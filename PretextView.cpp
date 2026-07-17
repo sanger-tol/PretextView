@@ -7416,9 +7416,154 @@ global_function
 void
 EnsureContigsArrayCapacity(u32 min_capacity);
 
+global_function
+u08
+RebuildInitialMapPixelsFromFile(void);
+
+global_function
+void
+ResetPixelRearrangementLookupBuffer(void)
+{
+    if (!Contact_Matrix || !Contact_Matrix->pixelRearrangmentLookupBuffer || !Number_of_Pixels_1D)
+    {
+        return;
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+    u32 *buffer = (u32 *)glMapBufferRange(
+        GL_TEXTURE_BUFFER,
+        0,
+        Number_of_Pixels_1D * sizeof(u32),
+        GL_MAP_WRITE_BIT);
+
+    if (buffer)
+    {
+        ForLoop(Number_of_Pixels_1D)
+        {
+            buffer[index] = index;
+        }
+        glUnmapBuffer(GL_TEXTURE_BUFFER);
+    }
+    else
+    {
+        fprintf(stderr, "[PretextView] ResetPixelRearrangementLookupBuffer: glMapBufferRange failed\n");
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+}
+
+// Returns 1 if the GPU buffer is a permutation of 0 .. Number_of_Pixels_1D-1.
+global_function
+u08
+ValidatePixelRearrangementLookupBuffer(void)
+{
+    if (!Contact_Matrix || !Contact_Matrix->pixelRearrangmentLookupBuffer || !Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 nPixels = Number_of_Pixels_1D;
+    u32 *counts = (u32 *)calloc(nPixels, sizeof(u32));
+    if (!counts)
+    {
+        return(0);
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+    const u32 *buffer = (const u32 *)glMapBufferRange(
+        GL_TEXTURE_BUFFER,
+        0,
+        nPixels * sizeof(u32),
+        GL_MAP_READ_BIT);
+
+    u08 ok = 0;
+    if (buffer)
+    {
+        ok = 1;
+        ForLoop(nPixels)
+        {
+            u32 v = buffer[index];
+            if (v >= nPixels)
+            {
+                ok = 0;
+                break;
+            }
+            ++counts[v];
+        }
+
+        if (ok)
+        {
+            ForLoop(nPixels)
+            {
+                if (counts[index] != 1)
+                {
+                    ok = 0;
+                    break;
+                }
+            }
+        }
+
+        glUnmapBuffer(GL_TEXTURE_BUFFER);
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+    free(counts);
+    return(ok);
+}
+
 global_variable
 u08
 Map_File_Path[512] = {0};
+
+// Reset map + GPU rearrange buffer before replaying savestate edits (does not change UI settings).
+// Returns 0 if the map could not be reset to the .pretext header layout.
+global_function
+u08
+PrepareMapForSaveStateEditReplay(void)
+{
+    if (Map_Editor)
+    {
+        Map_Editor->nEdits = 0;
+        Map_Editor->nUndone = 0;
+        Map_Editor->editStackPtr = 0;
+    }
+
+    if (!Map_State || !Contigs)
+    {
+        return(0);
+    }
+
+    if (!Map_File_Path[0])
+    {
+        fprintf(stderr,
+            "[LoadState::error]: No .pretext path — open the map file first, then load the savestate.\n");
+        return(0);
+    }
+
+    if (!RebuildInitialMapPixelsFromFile())
+    {
+        fprintf(stderr,
+            "[LoadState::error]: Could not rebuild initial map layout from \"%s\". "
+            "Use Clear Cache (or reopen the same .pretext), then load the savestate again.\n",
+            (const char *)Map_File_Path);
+        return(0);
+    }
+
+    memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
+    memset(Map_State->metaDataFlags, 0, Number_of_Pixels_1D * sizeof(u64));
+
+    ResetPixelRearrangementLookupBuffer();
+
+    EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+    UpdateContigsFromMapState();
+
+    fmt::print(
+        "[LoadState]: Map reset for edit replay ({} frags, {} pixels).\n",
+        Contigs->numberOfContigs,
+        Number_of_Pixels_1D);
+
+    return(1);
+}
 
 u08
 PretextLayer_ReloadActiveTextures(memory_arena *arena, const char *file_path)
@@ -12284,6 +12429,7 @@ SaveState(
         }
         
         // Meta flags use contig view; scaffold painting is stored from per-pixel scaffIds (not contig scaffId).
+        EnsureContigsArrayCapacity(Number_of_Pixels_1D);
         UpdateContigsFromMapState();
         u32 nScaffs = CountScaffoldPaintRunsOnMap();
         u32 nMetaFlags = 0;
@@ -12732,6 +12878,11 @@ LoadState(u64 headerHash, char *path)
                         bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
                         if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
                         {
+                            fprintf(stderr,
+                                "[LoadState::error]: Savestate header hash (%016llx) does not match open map (%016llx). "
+                                "Open the same .pretext file this state was saved from, then use Load State again.\n",
+                                (unsigned long long)hashTest,
+                                (unsigned long long)headerHash);
                             fclose(file);
                             file = 0;
                             saveStateFormatVersion = 0;
@@ -12975,6 +13126,10 @@ LoadState(u64 headerHash, char *path)
 
             if (fullLoad)
             {
+                // Saved curation can exceed initial fragment count (especially on high-res maps).
+                // Replay must not run UpdateContigsFromMapState() while contigs_arr is still header-sized.
+                EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+
                 // camera
                 {
                     ForLoop(12)
@@ -12986,64 +13141,103 @@ LoadState(u64 headerHash, char *path)
 
                 // edits
                 {
-                    u32 nEdits  = my_Min(Edits_Stack_Size, Map_Editor->nEdits);
-                    ForLoop(nEdits) UndoMapEdit();
+                    u32 nEdits = 0;
 
                     ForLoop(4) ((u08 *)&nEdits)[index] = *fileContents++;
                     nBytesRead += 4;
 
+                    if (nEdits > Edits_Stack_Size)
+                    {
+                        fmt::print(
+                            "[LoadState::warning]: Savestate lists {} edits; replaying first {} (Edits_Stack_Size).\n",
+                            nEdits,
+                            Edits_Stack_Size);
+                        nEdits = Edits_Stack_Size;
+                    }
+
                     u08 *contigFlags = fileContents + (12 * nEdits);
                     u32 nContigFlags = ((u32)nEdits + 7) >> 3;
 
-                    ForLoop(nEdits)
+                    u08 replayOk = PrepareMapForSaveStateEditReplay();
+
+                    if (replayOk)
                     {
-                        u32 x;
-                        u32 y;
-                        s32 d;
-
-                        ((u08 *)&x)[0] = *fileContents++;
-                        ((u08 *)&x)[1] = *fileContents++;
-                        ((u08 *)&x)[2] = *fileContents++;
-                        ((u08 *)&x)[3] = *fileContents++;
-                        ((u08 *)&y)[0] = *fileContents++;
-                        ((u08 *)&y)[1] = *fileContents++;
-                        ((u08 *)&y)[2] = *fileContents++;
-                        ((u08 *)&y)[3] = *fileContents++;
-                        ((u08 *)&d)[0] = *fileContents++;
-                        ((u08 *)&d)[1] = *fileContents++;
-                        ((u08 *)&d)[2] = *fileContents++;
-                        ((u08 *)&d)[3] = *fileContents++;
-
-                        if (d == Break_Edit_Delta)
+                        ForLoop(nEdits)
                         {
-                            if (x < Number_of_Pixels_1D && BreakMap((int)x, 1))
+                            u32 x;
+                            u32 y;
+                            s32 d;
+
+                            ((u08 *)&x)[0] = *fileContents++;
+                            ((u08 *)&x)[1] = *fileContents++;
+                            ((u08 *)&x)[2] = *fileContents++;
+                            ((u08 *)&x)[3] = *fileContents++;
+                            ((u08 *)&y)[0] = *fileContents++;
+                            ((u08 *)&y)[1] = *fileContents++;
+                            ((u08 *)&y)[2] = *fileContents++;
+                            ((u08 *)&y)[3] = *fileContents++;
+                            ((u08 *)&d)[0] = *fileContents++;
+                            ((u08 *)&d)[1] = *fileContents++;
+                            ((u08 *)&d)[2] = *fileContents++;
+                            ((u08 *)&d)[3] = *fileContents++;
+
+                            if (d == Break_Edit_Delta)
                             {
-                                AddBreakEdit(x);
-                                UpdateContigsFromMapState();
-                                UpdateScaffolds();
+                                if (x < Number_of_Pixels_1D && BreakMap((int)x, 1))
+                                {
+                                    AddBreakEdit(x);
+                                    UpdateContigsFromMapState();
+                                }
+                                continue;
                             }
-                            continue;
+
+                            u32 byte = (index + 1) >> 3;
+                            u32 bit = (index + 1) & 7;
+                            u32 invert = contigFlags[byte] & (1 << bit);
+
+                            pointui startPixels = {x, y};
+                            s32 delta = d;
+                            pointui finalPixels = {(u32)((s32)startPixels.x + delta), (u32)((s32)startPixels.y + delta)};
+
+                            if (startPixels.x >= Number_of_Pixels_1D || startPixels.y >= Number_of_Pixels_1D ||
+                                finalPixels.x >= Number_of_Pixels_1D || finalPixels.y >= Number_of_Pixels_1D)
+                            {
+                                continue;
+                            }
+
+                            // Match RedoMapEdit: keep contigIds in sync during replay (needed for breaks).
+                            RearrangeMap(startPixels.x, startPixels.y, delta, 0, true);
+                            if (invert)
+                            {
+                                InvertMap(finalPixels.x, finalPixels.y, true);
+                            }
+
+                            AddMapEdit(delta, finalPixels, invert);
                         }
 
-                        u32 byte = (index + 1) >> 3; // find the byte, 1 byte saves 8 invert_flag of edits
-                        u32 bit = (index + 1) & 7; // find the bit in the byte
-                        u32 invert  = contigFlags[byte] & (1 << bit);
+                        EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+                        UpdateContigsFromMapState();
 
-                        pointui startPixels = {x, y};
-                        s32 delta = d;
-                        pointui finalPixels = {(u32)((s32)startPixels.x + delta), (u32)((s32)startPixels.y + delta)};
+                        if (!ValidatePixelRearrangementLookupBuffer())
+                        {
+                            fprintf(stderr,
+                                "[LoadState::error]: GPU pixel rearrangement buffer is invalid after edit replay. "
+                                "Try Clear Cache, reopen the .pretext, and load the savestate again.\n");
+                        }
 
-                        RearrangeMap(startPixels.x, startPixels.y, delta);
-                        if (invert) InvertMap(finalPixels.x, finalPixels.y);
-
-                        AddMapEdit(delta, finalPixels, invert);
+                        fmt::print(
+                            "[LoadState]: After edit replay: {} map frags ({} edits listed).\n",
+                            Contigs->numberOfContigs,
+                            nEdits);
+                    }
+                    else
+                    {
+                        fileContents += (12 * nEdits);
+                        nBytesRead += (12 * nEdits);
                     }
 
                     fileContents += nContigFlags;
-                    nBytesRead += (nContigFlags + (12 * nEdits));
-
-                    EnsureContigsArrayCapacity(Number_of_Pixels_1D);
-                    UpdateContigsFromMapState();
+                    nBytesRead += nContigFlags;
                 }
 
                 // waypoints
@@ -13248,6 +13442,13 @@ LoadState(u64 headerHash, char *path)
                             loadedScaffRangeStarts,
                             loadedScaffIds);
                     }
+                }
+
+                if (Contigs)
+                {
+                    EnsureGridDataBuffersForContigCount(Contigs->numberOfContigs);
+                    EnsureContigColourBarBuffersForContigCount(Contigs->numberOfContigs);
+                    EnsureScaffBarBuffersForContigCount(Contigs->numberOfContigs);
                 }
 
                 // extensions
