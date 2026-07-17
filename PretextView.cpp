@@ -26,7 +26,7 @@ SOFTWARE.
 */
 
 
-#define PretextView_Version_Label "1.0.7-beta"
+#define PretextView_Version_Label "1.1.0-beta"
 #define PretextView_Version "PretextViewAI Version " PretextView_Version_Label
 #define PretextView_Title "PretextViewAI " PretextView_Version_Label " - Wellcome Sanger Institute"
 
@@ -6872,6 +6872,7 @@ Quad_EBO;
 
 static u08 Grid_Data_GL_heap;
 static u08 Contig_ColourBar_Data_GL_heap;
+static u08 Scaff_Bar_Data_GL_heap;
 
 global_function
 void
@@ -7014,6 +7015,79 @@ EnsureContigColourBarBuffersForContigCount(u32 nContigs)
     }
 
     Contig_ColourBar_Data->nBuffers = need;
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+global_function
+void
+EnsureScaffBarBuffersForContigCount(u32 nContigs)
+{
+    if (!File_Loaded || !Scaff_Bar_Data || !Flat_Shader)
+    {
+        return;
+    }
+    u32 need = nContigs + 4;
+    if (need < 4)
+    {
+        need = 4;
+    }
+    if (Scaff_Bar_Data->nBuffers >= need)
+    {
+        return;
+    }
+
+    GLuint posAttrib = (GLuint)glGetAttribLocation(Flat_Shader->shaderProgram, "position");
+    glUseProgram(Flat_Shader->shaderProgram);
+
+    if (Scaff_Bar_Data->nBuffers > 0 && Scaff_Bar_Data->vaos && Scaff_Bar_Data->vbos)
+    {
+        glDeleteVertexArrays((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vaos);
+        glDeleteBuffers((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vbos);
+        if (Scaff_Bar_Data_GL_heap)
+        {
+            free(Scaff_Bar_Data->vaos);
+            free(Scaff_Bar_Data->vbos);
+            Scaff_Bar_Data_GL_heap = 0;
+        }
+    }
+
+    Scaff_Bar_Data->vaos = (GLuint *)malloc((size_t)need * sizeof(GLuint));
+    Scaff_Bar_Data->vbos = (GLuint *)malloc((size_t)need * sizeof(GLuint));
+    if (!Scaff_Bar_Data->vaos || !Scaff_Bar_Data->vbos)
+    {
+        if (Scaff_Bar_Data->vaos)
+        {
+            free(Scaff_Bar_Data->vaos);
+        }
+        if (Scaff_Bar_Data->vbos)
+        {
+            free(Scaff_Bar_Data->vbos);
+        }
+        Scaff_Bar_Data->vaos = NULL;
+        Scaff_Bar_Data->vbos = NULL;
+        Scaff_Bar_Data->nBuffers = 0;
+        return;
+    }
+    Scaff_Bar_Data_GL_heap = 1;
+
+    ForLoop(need)
+    {
+        glGenVertexArrays(1, Scaff_Bar_Data->vaos + index);
+        glBindVertexArray(Scaff_Bar_Data->vaos[index]);
+
+        glGenBuffers(1, Scaff_Bar_Data->vbos + index);
+        glBindBuffer(GL_ARRAY_BUFFER, Scaff_Bar_Data->vbos[index]);
+        glBufferData(GL_ARRAY_BUFFER, 4 * sizeof(vertex), NULL, GL_DYNAMIC_DRAW);
+
+        glEnableVertexAttribArray(posAttrib);
+        glVertexAttribPointer(posAttrib, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), 0);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, Quad_EBO);
+    }
+
+    Scaff_Bar_Data->nBuffers = need;
 
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -7322,6 +7396,457 @@ global_function
 u08
 LoadState(u64 headerHash, char *path = 0);
 
+global_variable
+u08
+Map_File_Path[512] = {0};
+
+static u08 Contigs_arr_GL_heap;
+
+global_function
+void
+AssignInitialMapPixelsFromContigFractions(f32 *contigFracs, u32 numberOfOriginalContigs)
+{
+    f32 total = 0.0f;
+    u32 lastPixel = 0;
+    u32 relCoord = 0;
+
+    ForLoop(numberOfOriginalContigs)
+    {
+        total += contigFracs[index];
+        u32 pixel = (u32)((f64)Number_of_Pixels_1D * (f64)total);
+
+        for (relCoord = 0; lastPixel < pixel; lastPixel++, relCoord++)
+        {
+            Map_State->originalContigIds[lastPixel] = index;
+            Map_State->contigRelCoords[lastPixel] = relCoord;
+        }
+    }
+
+    for (; lastPixel < Number_of_Pixels_1D; lastPixel++)
+    {
+        u32 lastContig = numberOfOriginalContigs - 1;
+        Map_State->originalContigIds[lastPixel] = lastContig;
+        if (lastPixel && Map_State->originalContigIds[lastPixel - 1] != lastContig)
+        {
+            relCoord = 0;
+        }
+        Map_State->contigRelCoords[lastPixel] = relCoord++;
+    }
+}
+
+global_function
+u08
+RebuildInitialMapPixelsFromFile(void)
+{
+    if (!Map_File_Path[0] || !Map_State || !Number_of_Original_Contigs || !Decompressor)
+    {
+        return(0);
+    }
+
+    u08 magic[] = {'p', 's', 't', 'm'};
+    FILE *file = fopen((const char *)Map_File_Path, "rb");
+    if (!file)
+    {
+        return(0);
+    }
+
+    u08 magicTest[4];
+    if (fread(magicTest, 1, sizeof(magicTest), file) != sizeof(magicTest))
+    {
+        fclose(file);
+        return(0);
+    }
+
+    ForLoop(sizeof(magic))
+    {
+        if (magic[index] != magicTest[index])
+        {
+            fclose(file);
+            return(0);
+        }
+    }
+
+    u32 nBytesHeaderComp = 0;
+    u32 nBytesHeader = 0;
+    if (fread(&nBytesHeaderComp, 1, 4, file) != 4 ||
+        fread(&nBytesHeader, 1, 4, file) != 4 ||
+        !nBytesHeaderComp ||
+        !nBytesHeader)
+    {
+        fclose(file);
+        return(0);
+    }
+
+    u08 *compressionBuffer = new u08[nBytesHeaderComp];
+    u08 *header = new u08[nBytesHeader];
+    if (!compressionBuffer || !header)
+    {
+        delete[] compressionBuffer;
+        delete[] header;
+        fclose(file);
+        return(0);
+    }
+
+    u08 decompress_ok = 1;
+    if (fread(compressionBuffer, 1, nBytesHeaderComp, file) != nBytesHeaderComp ||
+        libdeflate_deflate_decompress(
+            Decompressor,
+            (const void *)compressionBuffer,
+            nBytesHeaderComp,
+            (void *)header,
+            nBytesHeader,
+            NULL))
+    {
+        decompress_ok = 0;
+    }
+    delete[] compressionBuffer;
+
+    if (!decompress_ok)
+    {
+        delete[] header;
+        fclose(file);
+        return(0);
+    }
+
+    u08 *header_cursor = header;
+    header_cursor += 8;
+    u32 n_contigs = 0;
+    ForLoop(4) { ((u08 *)&n_contigs)[index] = *header_cursor++; }
+
+    if (n_contigs != Number_of_Original_Contigs)
+    {
+        delete[] header;
+        fclose(file);
+        fprintf(stderr, "[PretextView] Rebuild map: header contig count (%u) != loaded map (%u)\n",
+                n_contigs, Number_of_Original_Contigs);
+        return(0);
+    }
+
+    f32 *contigFracs = new f32[Number_of_Original_Contigs];
+    ForLoop(Number_of_Original_Contigs)
+    {
+        ForLoop2(4) { ((u08 *)(contigFracs + index))[index2] = *header_cursor++; }
+        header_cursor += 64;
+    }
+
+    delete[] header;
+    fclose(file);
+
+    AssignInitialMapPixelsFromContigFractions(contigFracs, Number_of_Original_Contigs);
+    delete[] contigFracs;
+    return(1);
+}
+
+global_function
+void
+EnsureContigsArrayCapacity(u32 min_capacity)
+{
+    if (!Contigs || Contigs->contigs_arr_capacity >= min_capacity)
+    {
+        return;
+    }
+
+    contig *new_arr = new contig[min_capacity]();
+    u08 *new_flags = new u08[(min_capacity + 7) >> 3]();
+    if (!new_arr || !new_flags)
+    {
+        delete[] new_arr;
+        delete[] new_flags;
+        fprintf(stderr, "[PretextView] EnsureContigsArrayCapacity: allocation failed\n");
+        return;
+    }
+
+    if (Contigs_arr_GL_heap)
+    {
+        delete[] Contigs->contigs_arr;
+        delete[] Contigs->contigInvertFlags;
+    }
+
+    Contigs->contigs_arr = new_arr;
+    Contigs->contigInvertFlags = new_flags;
+    Contigs->contigs_arr_capacity = min_capacity;
+    Contigs_arr_GL_heap = 1;
+}
+
+global_function
+void
+ResetPixelRearrangementLookupBuffer(void)
+{
+    if (!Contact_Matrix || !Contact_Matrix->pixelRearrangmentLookupBuffer || !Number_of_Pixels_1D)
+    {
+        return;
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+    u32 *buffer = (u32 *)glMapBufferRange(
+        GL_TEXTURE_BUFFER,
+        0,
+        Number_of_Pixels_1D * sizeof(u32),
+        GL_MAP_WRITE_BIT);
+
+    if (buffer)
+    {
+        ForLoop(Number_of_Pixels_1D)
+        {
+            buffer[index] = index;
+        }
+        glUnmapBuffer(GL_TEXTURE_BUFFER);
+    }
+    else
+    {
+        fprintf(stderr, "[PretextView] ResetPixelRearrangementLookupBuffer: glMapBufferRange failed\n");
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+}
+
+global_function
+u08
+ValidatePixelRearrangementLookupBuffer(void)
+{
+    if (!Contact_Matrix || !Contact_Matrix->pixelRearrangmentLookupBuffer || !Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 nPixels = Number_of_Pixels_1D;
+    u32 *counts = (u32 *)calloc(nPixels, sizeof(u32));
+    if (!counts)
+    {
+        return(0);
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+    const u32 *buffer = (const u32 *)glMapBufferRange(
+        GL_TEXTURE_BUFFER,
+        0,
+        nPixels * sizeof(u32),
+        GL_MAP_READ_BIT);
+
+    u08 ok = 0;
+    if (buffer)
+    {
+        ok = 1;
+        ForLoop(nPixels)
+        {
+            u32 v = buffer[index];
+            if (v >= nPixels)
+            {
+                ok = 0;
+                break;
+            }
+            ++counts[v];
+        }
+
+        if (ok)
+        {
+            ForLoop(nPixels)
+            {
+                if (counts[index] != 1)
+                {
+                    ok = 0;
+                    break;
+                }
+            }
+        }
+
+        glUnmapBuffer(GL_TEXTURE_BUFFER);
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+    free(counts);
+    return(ok);
+}
+
+global_function
+u08
+GetContigPixelRange(u32 contigIdx, u32 *rangeStart, u32 *rangeEnd)
+{
+    if (!Map_State || !Contigs || !rangeStart || !rangeEnd || contigIdx >= Contigs->numberOfContigs)
+    {
+        return(0);
+    }
+
+    u32 start = Number_of_Pixels_1D;
+    u32 end = 0;
+    u08 found = 0;
+
+    ForLoop(Number_of_Pixels_1D)
+    {
+        if (Map_State->contigIds[index] == contigIdx)
+        {
+            found = 1;
+            start = my_Min(start, index);
+            end = my_Max(end, index);
+        }
+    }
+
+    if (!found || start > end)
+    {
+        return(0);
+    }
+
+    *rangeStart = start;
+    *rangeEnd = end;
+    return(1);
+}
+
+global_function
+void
+ApplyScaffoldPaintToMapPixels(u32 startPixel, u32 endPixel, u32 scaffId)
+{
+    if (!Map_State || !scaffId || startPixel >= Number_of_Pixels_1D)
+    {
+        return;
+    }
+
+    endPixel = my_Min(endPixel, Number_of_Pixels_1D - 1);
+    if (startPixel > endPixel)
+    {
+        return;
+    }
+
+    for (u32 pixel = startPixel; pixel <= endPixel; ++pixel)
+    {
+        Map_State->scaffIds[pixel] = scaffId;
+    }
+}
+
+global_function
+u32
+CountScaffoldPaintRunsOnMap(void)
+{
+    if (!Map_State || !Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 nRuns = 0;
+    u32 pixel = 0;
+
+    while (pixel < Number_of_Pixels_1D)
+    {
+        u32 scaffId = Map_State->scaffIds[pixel];
+        if (!scaffId)
+        {
+            ++pixel;
+            continue;
+        }
+
+        ++nRuns;
+        while (pixel < Number_of_Pixels_1D && Map_State->scaffIds[pixel] == scaffId)
+        {
+            ++pixel;
+        }
+    }
+
+    return(nRuns);
+}
+
+global_function
+void
+ApplyLoadedScaffoldPaintingByPixelRange(u32 nEntries, u32 *rangeStarts, u32 *rangeEnds, u32 *scaffIds)
+{
+    if (!nEntries || !rangeStarts || !rangeEnds || !scaffIds || !Map_State)
+    {
+        return;
+    }
+
+    memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
+
+    ForLoop(nEntries)
+    {
+        ApplyScaffoldPaintToMapPixels(rangeStarts[index], rangeEnds[index], scaffIds[index]);
+    }
+
+    if (Contigs)
+    {
+        UpdateContigsFromMapState();
+        EnsureScaffBarBuffersForContigCount(Contigs->numberOfContigs);
+    }
+}
+
+global_function
+void
+ApplyLoadedScaffoldPaintingLegacy(u32 nEntries, u32 *contigIds, u32 *scaffIds)
+{
+    if (!nEntries || !contigIds || !scaffIds || !Contigs || !Map_State)
+    {
+        return;
+    }
+
+    memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
+
+    ForLoop(nEntries)
+    {
+        u32 cId = contigIds[index];
+        u32 sId = scaffIds[index];
+        u32 rangeStart = 0;
+        u32 rangeEnd = 0;
+
+        if (!sId)
+        {
+            continue;
+        }
+
+        if (GetContigPixelRange(cId, &rangeStart, &rangeEnd))
+        {
+            ApplyScaffoldPaintToMapPixels(rangeStart, rangeEnd, sId);
+        }
+    }
+
+    UpdateContigsFromMapState();
+    EnsureScaffBarBuffersForContigCount(Contigs->numberOfContigs);
+}
+
+global_function
+u08
+PrepareMapForSaveStateEditReplay(void)
+{
+    if (Map_Editor)
+    {
+        Map_Editor->nEdits = 0;
+        Map_Editor->nUndone = 0;
+        Map_Editor->editStackPtr = 0;
+    }
+
+    if (!Map_State || !Contigs)
+    {
+        return(0);
+    }
+
+    if (!Map_File_Path[0])
+    {
+        fprintf(stderr,
+            "[LoadState::error]: No .pretext path — open the map file first, then load the savestate.\n");
+        return(0);
+    }
+
+    if (!RebuildInitialMapPixelsFromFile())
+    {
+        fprintf(stderr,
+            "[LoadState::error]: Could not rebuild initial map layout from \"%s\". "
+            "Use Clear Cache (or reopen the same .pretext), then load the savestate again.\n",
+            (const char *)Map_File_Path);
+        return(0);
+    }
+
+    memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
+    memset(Map_State->metaDataFlags, 0, Number_of_Pixels_1D * sizeof(u64));
+
+    ResetPixelRearrangementLookupBuffer();
+
+    EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+    UpdateContigsFromMapState();
+
+    fmt::print(
+        "[LoadState]: Map reset for edit replay ({} frags, {} pixels).\n",
+        Contigs->numberOfContigs,
+        Number_of_Pixels_1D);
+
+    return(1);
+}
+
 global_function
 load_file_result
 LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *headerHash)
@@ -7333,6 +7858,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
     {
         return(fileErr);
     }
+    CopyNullTerminatedString((u08 *)filePath, Map_File_Path);
     
     FenceIn(File_Loaded = 0); 
 
@@ -7381,6 +7907,12 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         glDeleteVertexArrays((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vaos);
         glDeleteBuffers((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vbos);
+        if (Scaff_Bar_Data_GL_heap)
+        {
+            free(Scaff_Bar_Data->vaos);
+            free(Scaff_Bar_Data->vbos);
+            Scaff_Bar_Data_GL_heap = 0;
+        }
 
         TraverseLinkedList(Extensions.head, extension_node)
         {
@@ -11719,7 +12251,12 @@ SetSaveStatePaths()
 
 global_variable
 u08
-SaveState_Magic[5] = {'p', 't', 's', 'x', 2};
+SaveState_Magic[5] = {'p', 't', 's', 'x', 3};
+
+#define SaveState_Format_Version_Min 2
+#define SaveState_Format_Version_Current 3
+#define SaveState_Scaff_Entry_Bytes_V2 8
+#define SaveState_Scaff_Entry_Bytes_V3 12
 
 global_variable
 u08
@@ -11728,6 +12265,30 @@ SaveState_Magic_Tail_Auto = 2;
 global_variable
 u08
 SaveState_Magic_Tail_Manual = 3;
+
+global_function
+u08
+ValidateSaveStateMagic(u08 *magicTest, u08 expectedTail)
+{
+    if (!magicTest ||
+        magicTest[0] != 'p' || magicTest[1] != 't' || magicTest[2] != 's' || magicTest[3] != 'x')
+    {
+        return(0);
+    }
+
+    u08 formatVersion = magicTest[4];
+    if (formatVersion < SaveState_Format_Version_Min || formatVersion > SaveState_Format_Version_Current)
+    {
+        return(0);
+    }
+
+    if (magicTest[5] != expectedTail)
+    {
+        return(0);
+    }
+
+    return(formatVersion);
+}
 
 /* 
 保存当前状态，
@@ -11783,12 +12344,13 @@ SaveState(
             }
         }
         
-        // number of scaffs and metaFlags
-        u32 nScaffs = 0;
+        // Meta flags use contig view; scaffold painting is stored from per-pixel scaffIds (not contig scaffId).
+        EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+        UpdateContigsFromMapState();
+        u32 nScaffs = CountScaffoldPaintRunsOnMap();
         u32 nMetaFlags = 0;
         ForLoop(Contigs->numberOfContigs)
         {
-            if ((Contigs->contigs_arr + index)->scaffId) ++nScaffs;
             if (*(Contigs->contigs_arr + index)->metaDataFlags) ++nMetaFlags;
         }
         // number of meta tags
@@ -11804,7 +12366,7 @@ SaveState(
             }
         }
 
-        u32 nFileBytes = 352 + (13 * nWayp) + (12 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (8 * nScaffs) + sizeof(meta_mode_data) + sizeof(MetaData_Active_Tag) + 4 + (12 * nMetaFlags) + 1 + nMetaTags + totalMetaTagSpace;
+        u32 nFileBytes = 352 + (13 * nWayp) + (12 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (SaveState_Scaff_Entry_Bytes_V3 * nScaffs) + sizeof(meta_mode_data) + sizeof(MetaData_Active_Tag) + 4 + (12 * nMetaFlags) + 1 + nMetaTags + totalMetaTagSpace;
         u08 *fileContents = PushArrayP(Loading_Arena, u08, nFileBytes);
         u08 *fileWriter = fileContents;
 
@@ -12023,26 +12585,42 @@ SaveState(
             fileWriter += (bytes_per_waypoint * nWayp);
         }
 
-        // scaffs
+        // scaffs (v3: consecutive pixel runs with the same non-zero Map_State->scaffIds value)
         {
             *fileWriter++ = ((u08 *)&nScaffs)[0];
             *fileWriter++ = ((u08 *)&nScaffs)[1];
             *fileWriter++ = ((u08 *)&nScaffs)[2];
             *fileWriter++ = ((u08 *)&nScaffs)[3];
-            ForLoop(Contigs->numberOfContigs)
+
+            u32 pixel = 0;
+            while (pixel < Number_of_Pixels_1D)
             {
-                if ((Contigs->contigs_arr + index)->scaffId)
+                u32 sId = Map_State->scaffIds[pixel];
+                if (!sId)
                 {
-                    u32 sId = (Contigs->contigs_arr + index)->scaffId;
-                    *fileWriter++ = ((u08 *)&index)[0];
-                    *fileWriter++ = ((u08 *)&index)[1];
-                    *fileWriter++ = ((u08 *)&index)[2];
-                    *fileWriter++ = ((u08 *)&index)[3];
-                    *fileWriter++ = ((u08 *)&sId)[0];
-                    *fileWriter++ = ((u08 *)&sId)[1];
-                    *fileWriter++ = ((u08 *)&sId)[2];
-                    *fileWriter++ = ((u08 *)&sId)[3];
+                    ++pixel;
+                    continue;
                 }
+
+                u32 rangeStart = pixel;
+                while (pixel < Number_of_Pixels_1D && Map_State->scaffIds[pixel] == sId)
+                {
+                    ++pixel;
+                }
+                u32 rangeEnd = pixel - 1;
+
+                *fileWriter++ = ((u08 *)&rangeStart)[0];
+                *fileWriter++ = ((u08 *)&rangeStart)[1];
+                *fileWriter++ = ((u08 *)&rangeStart)[2];
+                *fileWriter++ = ((u08 *)&rangeStart)[3];
+                *fileWriter++ = ((u08 *)&rangeEnd)[0];
+                *fileWriter++ = ((u08 *)&rangeEnd)[1];
+                *fileWriter++ = ((u08 *)&rangeEnd)[2];
+                *fileWriter++ = ((u08 *)&rangeEnd)[3];
+                *fileWriter++ = ((u08 *)&sId)[0];
+                *fileWriter++ = ((u08 *)&sId)[1];
+                *fileWriter++ = ((u08 *)&sId)[2];
+                *fileWriter++ = ((u08 *)&sId)[3];
             }
         }
 
@@ -12190,6 +12768,7 @@ LoadState(u64 headerHash, char *path)
     {
         FILE *file = 0;
         u08 fullLoad = 1;
+        u08 saveStateFormatVersion = 0;
         
         if (path) // load state file with a specific path
         {
@@ -12200,31 +12779,26 @@ LoadState(u64 headerHash, char *path)
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic))
+                    u08 formatVersion = ValidateSaveStateMagic(magicTest, SaveState_Magic_Tail_Manual);
+                    if (!formatVersion)
                     {
-                        if (SaveState_Magic[index] != magicTest[index])
-                        {
-                            fclose(file);
-                            file = 0;
-                            break;
-                        }
+                        fclose(file);
+                        file = 0;
                     }
-                    if (file)
+                    else
                     {
-                        if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Manual)
+                        saveStateFormatVersion = formatVersion;
+                        u64 hashTest;
+                        bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
+                        if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
                         {
+                            fprintf(stderr,
+                                "[LoadState::error]: Savestate header hash (%016llx) does not match open map (%016llx). "
+                                "Open the same .pretext file this state was saved from, then use Load State again.\n",
+                                (unsigned long long)hashTest,
+                                (unsigned long long)headerHash);
                             fclose(file);
                             file = 0;
-                        }
-                        else
-                        {
-                            u64 hashTest;
-                            bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
-                            if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
-                            {
-                                fclose(file);
-                                file = 0;
-                            }
                         }
                     }
                 }
@@ -12254,22 +12828,15 @@ LoadState(u64 headerHash, char *path)
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic))
+                    u08 formatVersion = ValidateSaveStateMagic(magicTest, SaveState_Magic_Tail_Auto);
+                    if (!formatVersion)
                     {
-                        if (SaveState_Magic[index] != magicTest[index])
-                        {
-                            fclose(file);
-                            file = 0;
-                            break;
-                        }
+                        fclose(file);
+                        file = 0;
                     }
-                    if (file)
+                    else
                     {
-                        if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Auto)
-                        {
-                            fclose(file);
-                            file = 0;
-                        }
+                        saveStateFormatVersion = formatVersion;
                     }
                 }
                 else
@@ -12306,22 +12873,15 @@ LoadState(u64 headerHash, char *path)
                             u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                             if (bytesRead == sizeof(magicTest))
                             {
-                                ForLoop(sizeof(SaveState_Magic))
+                                u08 formatVersion = ValidateSaveStateMagic(magicTest, SaveState_Magic_Tail_Auto);
+                                if (!formatVersion)
                                 {
-                                    if (SaveState_Magic[index] != magicTest[index])
-                                    {
-                                        fclose(file);
-                                        file = 0;
-                                        break;
-                                    }
+                                    fclose(file);
+                                    file = 0;
                                 }
-                                if (file)
+                                else
                                 {
-                                    if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Auto)
-                                    {
-                                        fclose(file);
-                                        file = 0;
-                                    }
+                                    saveStateFormatVersion = formatVersion;
                                 }
                             }
                             else
@@ -12487,6 +13047,10 @@ LoadState(u64 headerHash, char *path)
 
             if (fullLoad)
             {
+                // Saved curation can exceed initial fragment count (especially on high-res maps).
+                // Replay must not run UpdateContigsFromMapState() while contigs_arr is still header-sized.
+                EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+
                 // camera
                 {
                     ForLoop(12)
@@ -12498,61 +13062,103 @@ LoadState(u64 headerHash, char *path)
 
                 // edits
                 {
-                    u32 nEdits  = my_Min(Edits_Stack_Size, Map_Editor->nEdits);
-                    ForLoop(nEdits) UndoMapEdit();
+                    u32 nEdits = 0;
 
                     ForLoop(4) ((u08 *)&nEdits)[index] = *fileContents++;
                     nBytesRead += 4;
 
+                    if (nEdits > Edits_Stack_Size)
+                    {
+                        fmt::print(
+                            "[LoadState::warning]: Savestate lists {} edits; replaying first {} (Edits_Stack_Size).\n",
+                            nEdits,
+                            Edits_Stack_Size);
+                        nEdits = Edits_Stack_Size;
+                    }
+
                     u08 *contigFlags = fileContents + (12 * nEdits);
                     u32 nContigFlags = ((u32)nEdits + 7) >> 3;
 
-                    ForLoop(nEdits)
+                    u08 replayOk = PrepareMapForSaveStateEditReplay();
+
+                    if (replayOk)
                     {
-                        u32 x;
-                        u32 y;
-                        s32 d;
-
-                        ((u08 *)&x)[0] = *fileContents++;
-                        ((u08 *)&x)[1] = *fileContents++;
-                        ((u08 *)&x)[2] = *fileContents++;
-                        ((u08 *)&x)[3] = *fileContents++;
-                        ((u08 *)&y)[0] = *fileContents++;
-                        ((u08 *)&y)[1] = *fileContents++;
-                        ((u08 *)&y)[2] = *fileContents++;
-                        ((u08 *)&y)[3] = *fileContents++;
-                        ((u08 *)&d)[0] = *fileContents++;
-                        ((u08 *)&d)[1] = *fileContents++;
-                        ((u08 *)&d)[2] = *fileContents++;
-                        ((u08 *)&d)[3] = *fileContents++;
-
-                        if (d == Break_Edit_Delta)
+                        ForLoop(nEdits)
                         {
-                            if (x < Number_of_Pixels_1D && BreakMap((int)x, 1))
+                            u32 x;
+                            u32 y;
+                            s32 d;
+
+                            ((u08 *)&x)[0] = *fileContents++;
+                            ((u08 *)&x)[1] = *fileContents++;
+                            ((u08 *)&x)[2] = *fileContents++;
+                            ((u08 *)&x)[3] = *fileContents++;
+                            ((u08 *)&y)[0] = *fileContents++;
+                            ((u08 *)&y)[1] = *fileContents++;
+                            ((u08 *)&y)[2] = *fileContents++;
+                            ((u08 *)&y)[3] = *fileContents++;
+                            ((u08 *)&d)[0] = *fileContents++;
+                            ((u08 *)&d)[1] = *fileContents++;
+                            ((u08 *)&d)[2] = *fileContents++;
+                            ((u08 *)&d)[3] = *fileContents++;
+
+                            if (d == Break_Edit_Delta)
                             {
-                                AddBreakEdit(x);
-                                UpdateContigsFromMapState();
-                                UpdateScaffolds();
+                                if (x < Number_of_Pixels_1D && BreakMap((int)x, 1))
+                                {
+                                    AddBreakEdit(x);
+                                    UpdateContigsFromMapState();
+                                }
+                                continue;
                             }
-                            continue;
+
+                            u32 byte = (index + 1) >> 3;
+                            u32 bit = (index + 1) & 7;
+                            u32 invert = contigFlags[byte] & (1 << bit);
+
+                            pointui startPixels = {x, y};
+                            s32 delta = d;
+                            pointui finalPixels = {(u32)((s32)startPixels.x + delta), (u32)((s32)startPixels.y + delta)};
+
+                            if (startPixels.x >= Number_of_Pixels_1D || startPixels.y >= Number_of_Pixels_1D ||
+                                finalPixels.x >= Number_of_Pixels_1D || finalPixels.y >= Number_of_Pixels_1D)
+                            {
+                                continue;
+                            }
+
+                            // Match RedoMapEdit: keep contigIds in sync during replay (needed for breaks).
+                            RearrangeMap(startPixels.x, startPixels.y, delta, 0, true);
+                            if (invert)
+                            {
+                                InvertMap(finalPixels.x, finalPixels.y, true);
+                            }
+
+                            AddMapEdit(delta, finalPixels, invert);
                         }
 
-                        u32 byte = (index + 1) >> 3; // find the byte, 1 byte saves 8 invert_flag of edits
-                        u32 bit = (index + 1) & 7; // find the bit in the byte
-                        u32 invert  = contigFlags[byte] & (1 << bit);
+                        EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+                        UpdateContigsFromMapState();
 
-                        pointui startPixels = {x, y};
-                        s32 delta = d;
-                        pointui finalPixels = {(u32)((s32)startPixels.x + delta), (u32)((s32)startPixels.y + delta)};
+                        if (!ValidatePixelRearrangementLookupBuffer())
+                        {
+                            fprintf(stderr,
+                                "[LoadState::error]: GPU pixel rearrangement buffer is invalid after edit replay. "
+                                "Try Clear Cache, reopen the .pretext, and load the savestate again.\n");
+                        }
 
-                        RearrangeMap(startPixels.x, startPixels.y, delta);
-                        if (invert) InvertMap(finalPixels.x, finalPixels.y);
-
-                        AddMapEdit(delta, finalPixels, invert);
+                        fmt::print(
+                            "[LoadState]: After edit replay: {} map frags ({} edits listed).\n",
+                            Contigs->numberOfContigs,
+                            nEdits);
+                    }
+                    else
+                    {
+                        fileContents += (12 * nEdits);
                     }
 
+                    nBytesRead += (12 * nEdits);
                     fileContents += nContigFlags;
-                    nBytesRead += (nContigFlags + (12 * nEdits));
+                    nBytesRead += nContigFlags;
                 }
 
                 // waypoints
@@ -12607,7 +13213,9 @@ LoadState(u64 headerHash, char *path)
 
                 // scaffs (read now; apply after meta — UpdateContigsFromMapState re-derives scaffIds)
                 u32 nScaffsLoaded = 0;
-                u32 *loadedScaffContigIds = 0;
+                u08 scaffLoadFormat = saveStateFormatVersion;
+                u32 *loadedScaffRangeStarts = 0;
+                u32 *loadedScaffRangeEnds = 0;
                 u32 *loadedScaffIds = 0;
                 {
                     u32 nScaffs;
@@ -12618,34 +13226,68 @@ LoadState(u64 headerHash, char *path)
 
                     nBytesRead += 4;
 
+                    u32 scaffEntryBytes = (scaffLoadFormat >= SaveState_Format_Version_Current)
+                        ? SaveState_Scaff_Entry_Bytes_V3
+                        : SaveState_Scaff_Entry_Bytes_V2;
+
                     if (nScaffs)
                     {
-                        loadedScaffContigIds = PushArrayP(Loading_Arena, u32, nScaffs);
+                        loadedScaffRangeStarts = PushArrayP(Loading_Arena, u32, nScaffs);
+                        loadedScaffRangeEnds = PushArrayP(Loading_Arena, u32, nScaffs);
                         loadedScaffIds = PushArrayP(Loading_Arena, u32, nScaffs);
                         nScaffsLoaded = nScaffs;
                     }
 
                     ForLoop(nScaffs)
                     {
-                        u32 cId;
-                        u32 sId;
-                        ((u08 *)&cId)[0] = *fileContents++;
-                        ((u08 *)&cId)[1] = *fileContents++;
-                        ((u08 *)&cId)[2] = *fileContents++;
-                        ((u08 *)&cId)[3] = *fileContents++;
-                        ((u08 *)&sId)[0] = *fileContents++;
-                        ((u08 *)&sId)[1] = *fileContents++;
-                        ((u08 *)&sId)[2] = *fileContents++;
-                        ((u08 *)&sId)[3] = *fileContents++;
-
-                        if (loadedScaffContigIds && loadedScaffIds)
+                        if (scaffLoadFormat >= SaveState_Format_Version_Current)
                         {
-                            loadedScaffContigIds[index] = cId;
-                            loadedScaffIds[index] = sId;
+                            u32 rangeStart;
+                            u32 rangeEnd;
+                            u32 sId;
+                            ((u08 *)&rangeStart)[0] = *fileContents++;
+                            ((u08 *)&rangeStart)[1] = *fileContents++;
+                            ((u08 *)&rangeStart)[2] = *fileContents++;
+                            ((u08 *)&rangeStart)[3] = *fileContents++;
+                            ((u08 *)&rangeEnd)[0] = *fileContents++;
+                            ((u08 *)&rangeEnd)[1] = *fileContents++;
+                            ((u08 *)&rangeEnd)[2] = *fileContents++;
+                            ((u08 *)&rangeEnd)[3] = *fileContents++;
+                            ((u08 *)&sId)[0] = *fileContents++;
+                            ((u08 *)&sId)[1] = *fileContents++;
+                            ((u08 *)&sId)[2] = *fileContents++;
+                            ((u08 *)&sId)[3] = *fileContents++;
+
+                            if (loadedScaffRangeStarts && loadedScaffRangeEnds && loadedScaffIds)
+                            {
+                                loadedScaffRangeStarts[index] = rangeStart;
+                                loadedScaffRangeEnds[index] = rangeEnd;
+                                loadedScaffIds[index] = sId;
+                            }
+                        }
+                        else
+                        {
+                            u32 cId;
+                            u32 sId;
+                            ((u08 *)&cId)[0] = *fileContents++;
+                            ((u08 *)&cId)[1] = *fileContents++;
+                            ((u08 *)&cId)[2] = *fileContents++;
+                            ((u08 *)&cId)[3] = *fileContents++;
+                            ((u08 *)&sId)[0] = *fileContents++;
+                            ((u08 *)&sId)[1] = *fileContents++;
+                            ((u08 *)&sId)[2] = *fileContents++;
+                            ((u08 *)&sId)[3] = *fileContents++;
+
+                            if (loadedScaffRangeStarts && loadedScaffRangeEnds && loadedScaffIds)
+                            {
+                                loadedScaffRangeStarts[index] = cId;
+                                loadedScaffIds[index] = sId;
+                                loadedScaffRangeEnds[index] = 0;
+                            }
                         }
                     }
 
-                    nBytesRead += (8 * nScaffs);
+                    nBytesRead += (scaffEntryBytes * nScaffs);
                 }
 
                 // meta data
@@ -12704,21 +13346,30 @@ LoadState(u64 headerHash, char *path)
                     }
                 }
 
-                if (nScaffsLoaded && loadedScaffContigIds && loadedScaffIds && Contigs)
+                if (nScaffsLoaded && loadedScaffRangeStarts && loadedScaffRangeEnds && loadedScaffIds)
                 {
-                    ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
-
-                    ForLoop(nScaffsLoaded)
+                    if (scaffLoadFormat >= SaveState_Format_Version_Current)
                     {
-                        u32 cId = loadedScaffContigIds[index];
-                        u32 sId = loadedScaffIds[index];
-                        if (cId < Contigs->numberOfContigs)
-                        {
-                            (Contigs->contigs_arr + cId)->scaffId = sId;
-                        }
+                        ApplyLoadedScaffoldPaintingByPixelRange(
+                            nScaffsLoaded,
+                            loadedScaffRangeStarts,
+                            loadedScaffRangeEnds,
+                            loadedScaffIds);
                     }
+                    else
+                    {
+                        ApplyLoadedScaffoldPaintingLegacy(
+                            nScaffsLoaded,
+                            loadedScaffRangeStarts,
+                            loadedScaffIds);
+                    }
+                }
 
-                    UpdateScaffolds();
+                if (Contigs)
+                {
+                    EnsureGridDataBuffersForContigCount(Contigs->numberOfContigs);
+                    EnsureContigColourBarBuffersForContigCount(Contigs->numberOfContigs);
+                    EnsureScaffBarBuffersForContigCount(Contigs->numberOfContigs);
                 }
 
                 // extensions
