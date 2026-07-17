@@ -1,7 +1,7 @@
 #!/bin/bash
 
 APPVERSION=$1
-app_name="PretextViewAI"
+app_name="${2:-PretextViewAI}"
 
 cat > "Info.plist" <<END
 <?xml version="1.0" encoding="UTF-8"?>

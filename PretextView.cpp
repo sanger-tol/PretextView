@@ -26,7 +26,7 @@ SOFTWARE.
 */
 
 
-#define PretextView_Version_Label "1.1.0-beta"
+#define PretextView_Version_Label "2.0.0-beta"
 #define PretextView_Version "PretextViewAI Version " PretextView_Version_Label
 #define PretextView_Title "PretextViewAI " PretextView_Version_Label " - Wellcome Sanger Institute"
 
@@ -12123,21 +12123,77 @@ ApplyScaffoldPaintRange(u32 startPixel, u32 endPixel, u32 scaffId)
 
 global_function
 void
-ApplyLoadedScaffoldPaintingByPixelRange(u32 nEntries, u32 *rangeStarts, u32 *rangeEnds, u32 *scaffIds)
+ApplyScaffoldPaintToMapPixels(u32 startPixel, u32 endPixel, u32 scaffId)
 {
-    if (!nEntries || !rangeStarts || !rangeEnds || !scaffIds || !Contigs)
+    if (!Map_State || !scaffId || startPixel >= Number_of_Pixels_1D)
     {
         return;
     }
 
-    ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
+    endPixel = my_Min(endPixel, Number_of_Pixels_1D - 1);
+    if (startPixel > endPixel)
+    {
+        return;
+    }
+
+    for (u32 pixel = startPixel; pixel <= endPixel; ++pixel)
+    {
+        Map_State->scaffIds[pixel] = scaffId;
+    }
+}
+
+global_function
+u32
+CountScaffoldPaintRunsOnMap(void)
+{
+    if (!Map_State || !Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 nRuns = 0;
+    u32 pixel = 0;
+
+    while (pixel < Number_of_Pixels_1D)
+    {
+        u32 scaffId = Map_State->scaffIds[pixel];
+        if (!scaffId)
+        {
+            ++pixel;
+            continue;
+        }
+
+        ++nRuns;
+        while (pixel < Number_of_Pixels_1D && Map_State->scaffIds[pixel] == scaffId)
+        {
+            ++pixel;
+        }
+    }
+
+    return(nRuns);
+}
+
+global_function
+void
+ApplyLoadedScaffoldPaintingByPixelRange(u32 nEntries, u32 *rangeStarts, u32 *rangeEnds, u32 *scaffIds)
+{
+    if (!nEntries || !rangeStarts || !rangeEnds || !scaffIds || !Map_State)
+    {
+        return;
+    }
+
+    memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
 
     ForLoop(nEntries)
     {
-        ApplyScaffoldPaintRange(rangeStarts[index], rangeEnds[index], scaffIds[index]);
+        ApplyScaffoldPaintToMapPixels(rangeStarts[index], rangeEnds[index], scaffIds[index]);
     }
 
-    UpdateScaffolds();
+    if (Contigs)
+    {
+        UpdateContigsFromMapState();
+        EnsureScaffBarBuffersForContigCount(Contigs->numberOfContigs);
+    }
 }
 
 global_function
@@ -12149,7 +12205,7 @@ ApplyLoadedScaffoldPaintingLegacy(u32 nEntries, u32 *contigIds, u32 *scaffIds)
         return;
     }
 
-    ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
+    memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
 
     ForLoop(nEntries)
     {
@@ -12158,17 +12214,19 @@ ApplyLoadedScaffoldPaintingLegacy(u32 nEntries, u32 *contigIds, u32 *scaffIds)
         u32 rangeStart = 0;
         u32 rangeEnd = 0;
 
+        if (!sId)
+        {
+            continue;
+        }
+
         if (GetContigPixelRange(cId, &rangeStart, &rangeEnd))
         {
-            ApplyScaffoldPaintRange(rangeStart, rangeEnd, sId);
-        }
-        else if (cId < Contigs->numberOfContigs)
-        {
-            (Contigs->contigs_arr + cId)->scaffId = sId;
+            ApplyScaffoldPaintToMapPixels(rangeStart, rangeEnd, sId);
         }
     }
 
-    UpdateScaffolds();
+    UpdateContigsFromMapState();
+    EnsureScaffBarBuffersForContigCount(Contigs->numberOfContigs);
 }
 
 /* 
@@ -12225,24 +12283,16 @@ SaveState(
             }
         }
         
-        // number of scaffs and metaFlags
+        // Meta flags use contig view; scaffold painting is stored from per-pixel scaffIds (not contig scaffId).
         UpdateContigsFromMapState();
-        UpdateScaffolds();
-        u32 nScaffs = 0;
+        u32 nScaffs = CountScaffoldPaintRunsOnMap();
         u32 nMetaFlags = 0;
         ForLoop(Contigs->numberOfContigs)
         {
-            contig *cont = Contigs->contigs_arr + index;
-            if (cont->scaffId)
+            if (*(Contigs->contigs_arr + index)->metaDataFlags)
             {
-                u32 rangeStart = 0;
-                u32 rangeEnd = 0;
-                if (GetContigPixelRange(index, &rangeStart, &rangeEnd))
-                {
-                    ++nScaffs;
-                }
+                ++nMetaFlags;
             }
-            if (*(cont->metaDataFlags)) ++nMetaFlags;
         }
         // number of meta tags
         u08 nMetaTags = 0;
@@ -12476,38 +12526,42 @@ SaveState(
             fileWriter += (bytes_per_waypoint * nWayp);
         }
 
-        // scaffs (v3: map pixel range + scaffold id — stable if edit replay matches)
+        // scaffs (v3: consecutive pixel runs with the same non-zero Map_State->scaffIds value)
         {
             *fileWriter++ = ((u08 *)&nScaffs)[0];
             *fileWriter++ = ((u08 *)&nScaffs)[1];
             *fileWriter++ = ((u08 *)&nScaffs)[2];
             *fileWriter++ = ((u08 *)&nScaffs)[3];
-            ForLoop(Contigs->numberOfContigs)
-            {
-                contig *cont = Contigs->contigs_arr + index;
-                if (cont->scaffId)
-                {
-                    u32 rangeStart = 0;
-                    u32 rangeEnd = 0;
-                    u32 sId = cont->scaffId;
-                    if (!GetContigPixelRange(index, &rangeStart, &rangeEnd))
-                    {
-                        continue;
-                    }
 
-                    *fileWriter++ = ((u08 *)&rangeStart)[0];
-                    *fileWriter++ = ((u08 *)&rangeStart)[1];
-                    *fileWriter++ = ((u08 *)&rangeStart)[2];
-                    *fileWriter++ = ((u08 *)&rangeStart)[3];
-                    *fileWriter++ = ((u08 *)&rangeEnd)[0];
-                    *fileWriter++ = ((u08 *)&rangeEnd)[1];
-                    *fileWriter++ = ((u08 *)&rangeEnd)[2];
-                    *fileWriter++ = ((u08 *)&rangeEnd)[3];
-                    *fileWriter++ = ((u08 *)&sId)[0];
-                    *fileWriter++ = ((u08 *)&sId)[1];
-                    *fileWriter++ = ((u08 *)&sId)[2];
-                    *fileWriter++ = ((u08 *)&sId)[3];
+            u32 pixel = 0;
+            while (pixel < Number_of_Pixels_1D)
+            {
+                u32 sId = Map_State->scaffIds[pixel];
+                if (!sId)
+                {
+                    ++pixel;
+                    continue;
                 }
+
+                u32 rangeStart = pixel;
+                while (pixel < Number_of_Pixels_1D && Map_State->scaffIds[pixel] == sId)
+                {
+                    ++pixel;
+                }
+                u32 rangeEnd = pixel - 1;
+
+                *fileWriter++ = ((u08 *)&rangeStart)[0];
+                *fileWriter++ = ((u08 *)&rangeStart)[1];
+                *fileWriter++ = ((u08 *)&rangeStart)[2];
+                *fileWriter++ = ((u08 *)&rangeStart)[3];
+                *fileWriter++ = ((u08 *)&rangeEnd)[0];
+                *fileWriter++ = ((u08 *)&rangeEnd)[1];
+                *fileWriter++ = ((u08 *)&rangeEnd)[2];
+                *fileWriter++ = ((u08 *)&rangeEnd)[3];
+                *fileWriter++ = ((u08 *)&sId)[0];
+                *fileWriter++ = ((u08 *)&sId)[1];
+                *fileWriter++ = ((u08 *)&sId)[2];
+                *fileWriter++ = ((u08 *)&sId)[3];
             }
         }
 
