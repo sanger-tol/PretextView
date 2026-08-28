@@ -177,55 +177,9 @@ SOFTWARE.
 #include <pwd.h>
 #endif
 
-/*
-// std::string shader_source_dir = getResourcesPath() + "/src/shaderSource/";
-std::string shader_source_dir = SHADER_DIR;
-// Contact_Matrix->shaderProgram
-global_variable
-std::string
-VertexSource_Texture = readShaderSource(shader_source_dir + "contactMatrixVertex.shader");
-
-// Contact_Matrix->shaderProgram
-global_variable
-std::string
-FragmentSource_Texture = readShaderSource( shader_source_dir + "contactMatrixFragment.shader");
-
-global_variable
-std::string
-VertexSource_Flat = readShaderSource( shader_source_dir + "flatVertex.shader");
-
-global_variable
-std::string
-FragmentSource_Flat = readShaderSource( shader_source_dir + "flatFragment.shader");
-
-global_variable
-std::string
-VertexSource_EditablePlot = readShaderSource( shader_source_dir + "editVertex.shader");
-
-global_variable
-std::string
-FragmentSource_EditablePlot = readShaderSource( shader_source_dir + "editFragment.shader");
-
-// https://blog.tammearu.eu/posts/gllines/
-global_variable
-std::string
-GeometrySource_EditablePlot = readShaderSource( shader_source_dir + "editGeometry.shader");
-
-global_variable
-std::string
-VertexSource_UI = readShaderSource( shader_source_dir + "uiVertex.shader");
-
-global_variable
-std::string
-FragmentSource_UI = readShaderSource( shader_source_dir + "uiFragment.shader");
-*/
-
-
-
 #define UI_SHADER_LOC_POSITION 0
 #define UI_SHADER_LOC_TEXCOORD 1
 #define UI_SHADER_LOC_COLOR 2
-
 
 global_variable
 memory_arena
@@ -258,8 +212,6 @@ Theme_Name[THEME_COUNT];
 global_function
 void
 SetTheme(struct nk_context *ctx, enum theme theme);
-
-
 
 global_variable
     f32
@@ -3304,9 +3256,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                     testContig = Map_State->contigIds[testPixel];
 
                     if (testPixel == 0 || testPixel >= (nPixels - 1)) break;
-
-                    // testContig = pixel1 < pixel2 ? Map_State->contigIds[++testPixel] : Map_State->contigIds[--testPixel];
-                    // if (testPixel == 0 || testPixel >= (nPixels - 1)) break;
                 }   
                 if (Map_State->contigIds[testPixel] == contig)
                 {
@@ -3322,7 +3271,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             if (Edit_Pixels.selecting) // select the contig
             {
                 Edit_Pixels.selectPixels.x = my_Max(pixel1, my_Max(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y)); // used to select multiple contigs with pressing space and dragging the mouse
-                // Edit_Pixels.selectPixels.x = pixel1;
                 while(  Edit_Pixels.selectPixels.x < (Number_of_Pixels_1D - 1) &&
                         ((Edit_Pixels.scaffSelecting && Map_State->scaffIds[Edit_Pixels.selectPixels.x] && Map_State->scaffIds[Edit_Pixels.selectPixels.x] == Map_State->scaffIds[1 + Edit_Pixels.selectPixels.x] ) || 
                           Map_State->contigIds[Edit_Pixels.selectPixels.x] == Map_State->contigIds[1 + Edit_Pixels.selectPixels.x]))
@@ -3331,7 +3279,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                 }
 
                 Edit_Pixels.selectPixels.y = my_Min(pixel1, my_Min(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y));
-                // Edit_Pixels.selectPixels.y = pixel1;
                 while(  Edit_Pixels.selectPixels.y > 0 &&
                         ((Edit_Pixels.scaffSelecting && Map_State->scaffIds[Edit_Pixels.selectPixels.y] && Map_State->scaffIds[Edit_Pixels.selectPixels.y] == Map_State->scaffIds[Edit_Pixels.selectPixels.y - 1]) || Map_State->contigIds[Edit_Pixels.selectPixels.y] == Map_State->contigIds[Edit_Pixels.selectPixels.y - 1]))
                 {
@@ -3359,9 +3306,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                 s32 diffy = newY - (s32)Edit_Pixels.pixels.y;
 
                 diff = forward ? my_Min(diffx, diffy) : my_Max(diffx, diffy);
-                
-                //newX = (s32)Edit_Pixels.pixels.x + diff;
-                //newY = (s32)Edit_Pixels.pixels.y + diff;
                 
                 diff = RearrangeMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y, diff, Edit_Pixels.snap);
                 netDelta += diff;
@@ -4261,14 +4205,6 @@ global_function
 void
 ColourGenerator(u32 index, f32 *rgb)
 {
-// #define RedFreq 1.666f
-// #define GreenFreq 2.666f
-// #define BlueFreq 3.666f
-
-//     rgb[0] = 0.5f * (sinf((f32)index * RedFreq) + 1.0f);
-//     rgb[1] = 0.5f * (sinf((f32)index * GreenFreq) + 1.0f);
-//     rgb[2] = 0.5f * (sinf((f32)index * BlueFreq) + 1.0f);
-
     f32 RedFreq = meta_dataColors[meta_data_curcolorProfile][0];
     f32 GreenFreq = meta_dataColors[meta_data_curcolorProfile][1];
     f32 BlueFreq = meta_dataColors[meta_data_curcolorProfile][2];
@@ -4314,7 +4250,7 @@ void DrawOutlinedText(
         fonsDrawText(FontStash_Context, x + offset, y + offset, text, 0);
     }
 
-    // // Draw the original text on top
+    // Draw the original text on top
     fonsSetColor(FontStash_Context, textColorU32);
     fonsDrawText(FontStash_Context, x, y, text, 0);
 }
@@ -4367,7 +4303,6 @@ Render() {
     f32 height;
     {
         glClear(GL_COLOR_BUFFER_BIT);
-        // glClearColor(0.2f, 0.6f, 0.4f, 1.0f); // classic background color
         glClearColor(bgcolor[active_bgcolor][0], bgcolor[active_bgcolor][1], bgcolor[active_bgcolor][2], bgcolor[active_bgcolor][3]);
 
         s32 viewport[4];
@@ -4383,22 +4318,6 @@ Render() {
         mat[12] = -2.0f * height * Camera_Position.x * Camera_Position.z / width;
         mat[13] = -2.0f * Camera_Position.y * Camera_Position.z;
         mat[15] = 1.0f;
-
-        /*
-        template<typename T>
-        GLM_FUNC_QUALIFIER mat<4, 4, T, defaultp> orthoRH_NO(T left, T right, T bottom, T top, T zNear, T zFar)
-        {
-            mat<4, 4, T, defaultp> Result(1);
-            Result[0][0] = static_cast<T>(2) / (right - left);  // 0 
-            Result[1][1] = static_cast<T>(2) / (top - bottom);  // 5
-            Result[2][2] = - static_cast<T>(2) / (zFar - zNear);// 10
-            Result[3][0] = - (right + left) / (right - left);   // 12 
-            Result[3][1] = - (top + bottom) / (top - bottom);   // 13
-            Result[3][2] = - (zFar + zNear) / (zFar - zNear);   // 14
-            return Result;
-        }
-        glm::mat4 projection_mat = glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f);
-        */
 
         // apply the transformation
         glUseProgram(Contact_Matrix->shaderProgram);
@@ -4557,7 +4476,6 @@ Render() {
     }
 
     // Quad Trees
-    //if (Waypoint_Edit_Mode)
     {
         glUseProgram(Flat_Shader->shaderProgram);
         glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&QuadTrees->bg);
@@ -5080,6 +4998,7 @@ Render() {
             glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textNormalMat);
 
             glViewport(0, 0, (s32)width, (s32)height);
+
 #define DefaultWaypointSize 18.0f
             glUseProgram(Flat_Shader->shaderProgram);
             glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Waypoint_Mode_Data->base);
@@ -5140,27 +5059,13 @@ Render() {
                 // draw the horizontal line (originally: the left part, not sure why Ed draw them seperately, if problem arises we can returen here)  maybe avoid drawing the cross part twice...
                 vert[0].x = long_horizontal ? screenXRange.x : screen.x - lineHeight;  vert[0].y = screen.y - lineWidth;
                 vert[1].x = long_horizontal ? screenXRange.x : screen.x - lineHeight;  vert[1].y = screen.y + lineWidth;
-                vert[2].x = long_horizontal ? screenXRange.y : screen.x + lineHeight;  vert[2].y = screen.y + lineWidth;// vert[2].x = screen.x - lineWidth; 
-                vert[3].x = long_horizontal ? screenXRange.y : screen.x + lineHeight;  vert[3].y = screen.y - lineWidth;// vert[3].x = screen.x - lineWidth; 
+                vert[2].x = long_horizontal ? screenXRange.y : screen.x + lineHeight;  vert[2].y = screen.y + lineWidth; 
+                vert[3].x = long_horizontal ? screenXRange.y : screen.x + lineHeight;  vert[3].y = screen.y - lineWidth; 
                 glBindBuffer(GL_ARRAY_BUFFER, Waypoint_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Waypoint_Data->vaos[ptr++]);
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
-                // draw the horizontal line (originally: the right part, not sure why Ed draw them seperately, if problem arises we can returen here)
-                // vert[0].x = screen.x + lineWidth;
-                // vert[0].y = screen.y - lineWidth;
-                // vert[1].x = screen.x + lineWidth;
-                // vert[1].y = screen.y + lineWidth;
-                // vert[2].x = screen.x + lineHeight;
-                // vert[2].y = screen.y + lineWidth;
-                // vert[3].x = screen.x + lineHeight;
-                // vert[3].y = screen.y - lineWidth;
-                // glBindBuffer(GL_ARRAY_BUFFER, Waypoint_Data->vbos[ptr]);
-                // glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
-                // glBindVertexArray(Waypoint_Data->vaos[ptr++]);
-                // glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
-               
                 if (node == Selected_Waypoint)
                 {
                     glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Waypoint_Mode_Data->base);
@@ -5206,7 +5111,6 @@ Render() {
                 textBoxHeight += (f32)helpTexts.size() - 1.0f;
                 f32 spacing = 10.0f; // distance from the edge of the text box
 
-                // f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, helpText4, 0, NULL);
                 f32 textWidth = 0;
                 for (auto i : helpTexts){
                     textWidth = my_Max(textWidth, fonsTextBounds(FontStash_Context, 0, 0, i, 0, NULL)) + 0.5f * spacing;
@@ -5253,11 +5157,6 @@ Render() {
             glViewport(0, 0, (s32)width, (s32)height);
 
 #define DefaultExtensionSize 20.0f
-            // glUseProgram(Flat_Shader->shaderProgram);
-            // glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Waypoint_Mode_Data->base);
-
-            // f32 lineWidth = Waypoint_Mode_Data->size / DefaultWaypointSize * 0.7f * Screen_Scale.x;
-            // f32 lineHeight = Waypoint_Mode_Data->size / DefaultWaypointSize * 8.0f * Screen_Scale.x;
 
             fonsSetSize(FontStash_Context, text_box_size.font_size * Screen_Scale.x);
             fonsVertMetrics(FontStash_Context, 0, 0, &lh);
@@ -5615,7 +5514,6 @@ Render() {
 
                     // draw the cover on selected area
                     {   
-                        // f32 mask_color[4] = {0.906f, 0.03921f, 0.949f, 0.5f}; 
                         vert[0].x = ModelXToScreen(start_fraction - 0.5f);     vert[0].y = ModelYToScreen(0.5f - start_fraction);
                         vert[1].x = ModelXToScreen(start_fraction - 0.5f);     vert[1].y = ModelYToScreen(0.5f - end_fraction);
                         vert[2].x = ModelXToScreen(end_fraction - 0.5f);       vert[2].y = ModelYToScreen(0.5f - end_fraction);
@@ -5700,8 +5598,6 @@ Render() {
                         {
                             f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, (char *)Meta_Data->tags[index2], 0, NULL);
                             ColourGenerator(index2 + 1, colour);
-                            // fonsSetColor(FontStash_Context, FourFloatColorToU32(*((nk_colorf *)colour)));
-                            // fonsDrawText(FontStash_Context, ModelXToScreen(0.5f * (end_contig + start_contig - 1.0f)) - (0.5f * textWidth), ModelYToScreen((0.5f * (1.0f - end_contig - start_contig))) - (lh * (f32)(++tmp)), (char *)Meta_Data->tags[index2], 0);
                             if (meta_outline->on)
                             {
                                 // position of text
