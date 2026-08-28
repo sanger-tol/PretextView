@@ -13534,20 +13534,7 @@ MainArgs
         UI_On = 1;
     }
 
-    // if (1)
-    // {   
-    //     bool show_flag = true;
-    //     auto tmp = new TexturesArray4AI(32, 1024, (char*)"123", Contigs);
-    //     tmp->copy_buffer_to_textures(Contact_Matrix, show_flag);
-    //     delete tmp;
-    //     if (show_flag)
-    //     {
-    //         glfwSetWindowShouldClose(window, false);
-    //     }
-    // }
-
-    Stuck_Problem_Check_Debug
-    
+    Stuck_Problem_Check_Debug 
 
     u32 showClearCacheScreen = 0;
 
@@ -13895,48 +13882,6 @@ MainArgs
                     push_nk_style(NK_Context, sort_button_normal, sort_button_hover, sort_button_active);
                     nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 3);
 
-                    // AI sort button
-                    /*
-                    {
-                        if (ai_sort_button && currFileName)
-                        {   
-                            printf("AISort button clicked\n");
-                            // check if the ai model is loaded
-                            if (!frag_sort_method) 
-                            {
-                                printf("Loading AI Model...\n");
-                                frag_sort_method = std::make_unique<FragSortTool>();
-                            }
-
-                            // prepare the graph data 
-                            auto texture_array_4_ai = TexturesArray4AI(Number_of_Textures_1D, Texture_Resolution, (char*)currFileName, Contigs);
-                            texture_array_4_ai.copy_buffer_to_textures(Contact_Matrix);
-                            texture_array_4_ai.cal_compressed_hic(Contigs, Extensions);
-                            FragsOrder frags_order(texture_array_4_ai.get_num_frags()); // intilize the frags_order with the number of fragments including the filtered out ones
-                            bool ai_flag = false;
-                            if (ai_flag)
-                            {
-                                GraphData* graph_data;
-                                texture_array_4_ai.cal_graphData(graph_data);
-                                frag_sort_method->cal_curated_fragments_order( graph_data, frags_order);
-                                delete graph_data;
-                            }
-                            else 
-                            {
-                                std::vector<std::string> exclude_tags = {"haplotig", "unloc"};
-                                std::vector<s32> exclude_frag_idx = get_exclude_metaData_idx(exclude_tags);
-                                LikelihoodTable likelihood_table(
-                                    texture_array_4_ai.get_frags(), 
-                                    texture_array_4_ai.get_compressed_hic(), 
-                                    (f32)auto_curation_state.smallest_frag_size_in_pixel / ((f32)Number_of_Pixels_1D + 1.f), 
-                                    exclude_frag_idx);
-                                // use the compressed_hic to calculate the frags_order directly
-                                frag_sort_method->sort_according_likelihood_dfs( likelihood_table, frags_order, 0.4, texture_array_4_ai.get_frags());
-                            }
-                            std::cout << std::endl;
-                        }
-                    }
-                    */
                     // Pixel Cut
                     {
                         bounds = nk_widget_bounds(NK_Context);
@@ -13986,8 +13931,6 @@ MainArgs
                                     fmt::print("[Pixel Cut] pixel mean window size:      {}\n", auto_curation_state.auto_cut_diag_window_for_pixel_mean);
                                     fmt::print("[Pixel Cut] smallest_frag_size_in_pixel: {}\n", auto_curation_state.auto_cut_smallest_frag_size_in_pixel);
 
-                                    // auto_cut_button = 0;
-                                    // nk_popup_close(NK_Context);
                                 }
                                 /* run cut 按钮 */
                                 if (nk_button_label(NK_Context, "Run") && currFileName) {
@@ -14071,8 +14014,6 @@ MainArgs
                                 fmt::print("[Pixel Sort] smallest_frag_size_in_pixel: {}\n", auto_curation_state.smallest_frag_size_in_pixel);
                                 fmt::print("[Pixel Sort] link_score_threshold:        {:.3f}\n", auto_curation_state.link_score_threshold);
                                 fmt::print("[Pixel Sort] Sort mode:                   {}\n", auto_curation_state.get_sort_mode_name());
-                                // auto_sort_button = 0;
-                                // nk_popup_close(NK_Context);
                             }
                             /* run sort 按钮 */
                             if (nk_button_label(NK_Context, "Run") && currFileName) {
@@ -14095,56 +14036,6 @@ MainArgs
                                 auto_curation_state.set_buf();
                                 nk_popup_close(NK_Context);
                             }
-                            /*
-                            // redo all the changes
-                            if (!auto_curation_state.show_autoSort_redo_confirm_popup)
-                            {
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                                if (nk_button_label(NK_Context, "Redo All (Careful!)")) 
-                                {   
-                                    auto_curation_state.show_autoSort_redo_confirm_popup=true;
-                                }
-                            } else
-                            {
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                                nk_label(NK_Context, "Are you sure to redo all edits?", NK_TEXT_LEFT);
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
-                                if (nk_button_label(NK_Context, "Yes")) 
-                                {
-                                    auto_curation_state.show_autoSort_redo_confirm_popup=false;
-                                    printf("[Pixel Sort] Redo all edits.\n");
-                                    RedoAllEdits(Map_Editor);
-                                }
-                                if (nk_button_label(NK_Context, "No")) 
-                                {
-                                    auto_curation_state.show_autoSort_redo_confirm_popup=false;
-                                }
-                            }
-                            // reject all the edits
-                            if (!auto_curation_state.show_autoSort_erase_confirm_popup)
-                            {   
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                                if (nk_button_label(NK_Context, "Erase All (Careful!)")) 
-                                {   
-                                    auto_curation_state.show_autoSort_erase_confirm_popup=true;
-                                }
-                            } else
-                            {
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                                nk_label(NK_Context, "Are you sure to erase all edits?", NK_TEXT_LEFT);
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
-                                if (nk_button_label(NK_Context, "Yes")) 
-                                {
-                                    auto_curation_state.show_autoSort_erase_confirm_popup=false;
-                                    printf("[Pixel Sort] Erase all edits.\n");
-                                    EraseAllEdits(Map_Editor);
-                                }
-                                if (nk_button_label(NK_Context, "No")) 
-                                {
-                                    auto_curation_state.show_autoSort_erase_confirm_popup=false;
-                                }
-                            }
-                            */
                                 
                             nk_popup_end(NK_Context);
 
@@ -14573,8 +14464,6 @@ MainArgs
                     
                     if (File_Loaded)
                     {
-                        // nk_layout_row_static(NK_Context, Screen_Scale.y * 30.0f, (s32)(Screen_Scale.x * 300), 1);
-                        // if (nk_button_label(NK_Context, "Sort Map by Meta Data Tags")) SortMapByMetaTags();
 
                         nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
                         nk_label(NK_Context, "Sort Map by Meta Data Tags:", NK_TEXT_ALIGN_LEFT);
@@ -14842,10 +14731,6 @@ MainArgs
                                             stbsp_snprintf((char *)buff, sizeof(buff), "%u", index2 + 1);
                                             if (nk_button_label(NK_Context, (char *)buff))
                                             {
-                                                // f32 pos = (f32)((f64)cont->contigMapPixels[index2] / (f64)Number_of_Pixels_1D) - 0.5f;
-                                                // Camera_Position.x = pos;
-                                                // Camera_Position.y = -pos;
-
                                                 f32 pos = (f32)((f64)cont->contigMapPixels[index2] / (f64)Number_of_Pixels_1D) - 0.5f;
                                                 Camera_Position.x = pos;
                                                 Camera_Position.y = -pos;
@@ -14854,7 +14739,6 @@ MainArgs
                                                 f32 contigSizeInPixels = (f32)cont->contigMapPixels[index2];
                                                 f32 screenWidth = (f32)width;
 
-                                                // f32 zoomLevel =(f32)(contigSizeInPixels / (screenWidth * index2));
                                                 f32 zoomLevel = (f32)(contigSizeInPixels / (screenWidth));
                                                 ZoomCamera(zoomLevel);
 
@@ -15061,12 +14945,10 @@ MainArgs
                             if (nk_button_label(NK_Context, "Yes"))
                             {
                                 restore_initial_state();
-                                // nk_popup_close(NK_Context);
                                 showClearCacheScreen = 0;
                             }
                             if (nk_button_label(NK_Context, "No")) 
                             {
-                                // nk_popup_close(NK_Context);
                                 showClearCacheScreen = 0;
                             }
 
