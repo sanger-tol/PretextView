@@ -34,6 +34,9 @@ to accommodate further changes.
 These changes should then set the stage for splitting the file
 into modules.
 
+Steps 1 and 2 will be combined into single merge requests to `dev`,
+then the subsequent steps will be independent.
+
 ## Merge request 2: Move items into modules based on category
 
 This merge request will modularise the system, and move the code out
