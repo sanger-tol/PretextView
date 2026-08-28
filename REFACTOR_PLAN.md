@@ -23,11 +23,13 @@ to accommodate further changes.
 
 2. Remove commented-out blocks.
 
-3. Extract constants to a header file, using `constexpr` rather than pre-proc macros.
+3. Translate Mandarin comments.
 
-4. Extract reusable utilities to an independent file.
+4. Extract constants to a header file, using `constexpr` rather than pre-proc macros.
 
-5. Set up appropriate linking and building to a standard layout.
+5. Extract reusable utilities to an independent file.
+
+6. Set up appropriate linking and building to a standard layout.
 
 These changes should then set the stage for splitting the file
 into modules.
@@ -55,3 +57,14 @@ smart pointers e.g. `std::unique_ptr`.
 
 This pass will be identifying the pointers with unsafe memory
 management and implementing clean initialisation (i.e. RAII). 
+
+## Going forward
+
+We will evaluate the impact on maintainability of the code
+following the above changes, and the impact of the safe pointer
+implementation on the segmentation issues before identifying
+new directions.
+
+The likely approach will be to generalise the approach to all
+source files, and to implement more stringent OOP than is currently
+part of the repository.
