@@ -1818,7 +1818,6 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                     i += 1)
             {   
                 size_t n = j + cols;
-                // nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 25.0f, 2, iconRatio);
                 for (   ; 
                         j < count && j < n;
                         ++j)
@@ -10166,32 +10165,6 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
             }
 #endif
-            /*nk_input_key(NK_Context, NK_KEY_DEL, glfwGetKey(window, GLFW_KEY_DELETE) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_ENTER, glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_TAB, glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_BACKSPACE, glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_LEFT, glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_RIGHT, glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_UP, glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_DOWN, glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS);
-
-            if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS)
-            {
-                nk_input_key(NK_Context, NK_KEY_COPY, glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
-                nk_input_key(NK_Context, NK_KEY_PASTE, glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS);
-                nk_input_key(NK_Context, NK_KEY_CUT, glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
-                nk_input_key(NK_Context, NK_KEY_CUT, glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS);
-                nk_input_key(NK_Context, NK_KEY_SHIFT, 1);
-            } 
-            else
-            {
-                nk_input_key(NK_Context, NK_KEY_COPY, 0);
-                nk_input_key(NK_Context, NK_KEY_PASTE, 0);
-                nk_input_key(NK_Context, NK_KEY_CUT, 0);
-                nk_input_key(NK_Context, NK_KEY_SHIFT, 0);
-            }*/
-
-
             else if (key == GLFW_KEY_ESCAPE)
             {
                 Deferred_Close_UI = 1;
