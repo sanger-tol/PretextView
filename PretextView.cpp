@@ -5693,9 +5693,6 @@ Render() {
                                 paint_func(vert_v1);
                             } 
                         }
-                        else { // not grey out vertically, horizontally or crossly.
-                            // throw std::runtime_error(fmt::format("This part is unreachable! File: {}, line: {}\n", __FILE__, __LINE__));
-                        }
                     }
 
                 }
