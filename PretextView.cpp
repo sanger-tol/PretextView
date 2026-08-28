@@ -158,6 +158,25 @@ SOFTWARE.
 #include "parse_agp.h"
 
 #include "shaderSource.h"
+
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
+
+#include "copy_texture.h"
+#include "spectral_cluster.h"
+
+#if defined __unix__ || defined __APPLE__
+#include <dirent.h>
+#include <unistd.h>
+#endif
+
+#ifndef _WIN32
+#include <pwd.h>
+#endif
+
 /*
 // std::string shader_source_dir = getResourcesPath() + "/src/shaderSource/";
 std::string shader_source_dir = SHADER_DIR;
@@ -1206,7 +1225,6 @@ map_state *
 Map_State;
 
 
-#include "copy_texture.h"
 // define the struct to store the ai model mask
 FragSortTool* frag_sort_method = new FragSortTool();
 global_variable auto auto_curation_state = AutoCurationState();
@@ -1214,9 +1232,6 @@ global_variable auto auto_curation_state = AutoCurationState();
 #ifdef PYTHON_SCOPED_INTERPRETER
     global_variable KmeansClusters* kmeans_cluster = nullptr;
 #endif // PYTHON_SCOPED_INTERPRETER
-
-#include "spectral_cluster.h"
-
 
 global_function void
 UserSaveState(const char *headerHash = "userprofile", u08 overwrite = 1, char *path = 0);
@@ -1331,16 +1346,6 @@ struct file_browser saveEditsBrowser;
 struct file_browser saveClipboardBrowser;
 struct file_browser saveDebugReportBrowser;
 struct file_browser loadAGPBrowser;
-
-
-#if defined __unix__ || defined __APPLE__
-#include <dirent.h>
-#include <unistd.h>
-#endif
-
-#ifndef _WIN32
-#include <pwd.h>
-#endif
 
 global_function
 char*
@@ -11288,12 +11293,6 @@ MessageCallback( GLenum source,
 //     // (void)BreakHere;
 // }
 // #endif
-
-#ifndef _WIN32
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
 
 global_variable
 u08 *
