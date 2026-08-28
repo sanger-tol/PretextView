@@ -6593,7 +6593,6 @@ LoadTexture(void *in)
         // // // ...
         ========================
     */
-    // u32 linearIndex =  (buffer->x * (Number_of_Textures_1D - 1)) - ((buffer->x * (buffer->x-1)) >> 1) + buffer->y;  // get the index accoding to index in x and y diretion 
     u32 linearIndex = texture_id_cal((u32)buffer->x, (u32)buffer->y, (u32)Number_of_Textures_1D); 
 
     file_atlas_entry *entry = File_Atlas + linearIndex;  // set a tempory pointer 
@@ -6635,7 +6634,10 @@ PopulateTextureLoadQueue(void *in) // 填充已经初始化过的 所有的queue
     {
         for (u32 index2 = index; index2 < Number_of_Textures_1D; index2++ ) // column number
         {
-            packedTextureIndexes[ptr] = (index << 16) | (index2); // first 16 bits is the raw number and the second 16 bits is the column number, there will be problem if number of texture in one dimension is larger than 2^16, but it is not possible ... just for a reminder
+	    // first 16 bits is the raw number and the second 16 bits is the column number,
+	    // there will be problem if number of texture in one dimension is larger than
+	    // 2^16, but it is not possible ... just for a reminder
+            packedTextureIndexes[ptr] = (index << 16) | (index2);
             ThreadPoolAddTask(Thread_Pool, LoadTexture, (void *)(packedTextureIndexes + ptr++)); // 填充当前的任务队列，输入为对应的texture的行、列编号
         }
     }
@@ -6923,7 +6925,7 @@ TestFile(const char *fileName, u64 *fileSize = 0)
             u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
             if (bytesRead == sizeof(magicTest))
             {
-                ForLoop(sizeof(Magic)) // #define ForLoop(n) for (u32 index=0; index<n; index++)
+                ForLoop(sizeof(Magic))
                 {
                     if (Magic[index] != magicTest[index]) 
                     {
@@ -6989,7 +6991,6 @@ void
 push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1.f)
 {   
     u32 exIndex = 0;
-    // TraverseLinkedList(Extensions.head, extension_node)
 
     extension_node* node = Extensions.head ;
     while (added_index--)
@@ -7112,8 +7113,11 @@ load_file_result
 LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *headerHash)
 {
     u64 fileSize = 0;
+    // Check the data read from the first 4 bytes. If it matches
+    // u08 Magic[] = {'p', 's', 't', 'm'}, the verification passes;
+    // otherwise, set the pointer file to a null pointer.
+    FILE *file = TestFile(filePath, &fileSize);
 
-    FILE *file = TestFile(filePath, &fileSize); //  Check the data read from the first 4 bytes. If it matches u08 Magic[] = {'p', 's', 't', 'm'}, the verification passes; otherwise, set the pointer file to a null pointer.
     if (!file)    // 如果为空指针， 返回读取错误fileErr
     {
         return(fileErr);
@@ -7271,7 +7275,6 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             nBytesHeaderComp,  
             FastHash64(intBuff, sizeof(intBuff), 0xbafd06832de619c2)
             );
-        // fprintf(stdout, "The headerHash is calculated accordig to the compressed head, the hash number is (%llu) and the cache file name is (%s)\n", *headerHash, (u08*) headerHash);
         if (libdeflate_deflate_decompress(
                 Decompressor,                    // Pointer to decompressor.
                 (const void *)compressionBuffer, // Pointer to the data to be
@@ -7473,7 +7476,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         u32 nBytesPerText = 0;
         ForLoop(Number_of_MipMaps)
         {
-            nBytesPerText += Pow2((2 * textureRes--));  // sum([2**(2*i) for i in range(10, 10-Number_of_MipMaps, -1)])/2
+            nBytesPerText += Pow2((2 * textureRes--));
         }
         nBytesPerText >>= 1; // Divide by 2 because the data is compressed.
         Bytes_Per_Texture = nBytesPerText;  // Number of bytes corresponding to a texture
@@ -7579,7 +7582,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 #pragma clang diagnostic pop                                       
                                         extensionSize += (compSize + sizeof(u32));
                                         u08 *compBuffer = PushArrayP(arena, u08, compSize);
-                                        fread(compBuffer, 1, compSize, file);    // read the extension data from the file pointer
+                                        fread(compBuffer, 1, compSize, file);  // read the extension data from the file pointer
                                         // Decompress compBuffer to dataPlusName
                                         if (libdeflate_deflate_decompress(
                                                 Decompressor,
@@ -7643,8 +7646,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         InitialiseTextureBufferQueue(arena, Texture_Buffer_Queue, Bytes_Per_Texture, filePath); // 初始化所有的queue texture_buffer_queue, 一共有8个queue，每个queue有8个buffer
 
         u32 nTextures = (Number_of_Textures_1D + 1) * (Number_of_Textures_1D >> 1);     // number of textures (528)
-        // u32 *packedTextureIndexes = PushArrayP(arena, u32, nTextures);               // using a pointer of sequences of u32 as the texture index 
-        u32* packedTextureIndexes = new u32[nTextures]; // (u32*) malloc(sizeof(u32) * nTextures);              // this is released so new is ok
+        u32* packedTextureIndexes = new u32[nTextures];
         ThreadPoolAddTask(Thread_Pool, PopulateTextureLoadQueue, packedTextureIndexes); // multi-thread for loading the texture entries
 
         glActiveTexture(GL_TEXTURE0);   // 所有的子图加载在 texture 0 
@@ -7683,7 +7685,6 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                     #ifndef _WIN32 // unix
                     __atomic_load(&Current_Loaded_Texture, &loadedTexture, __ATOMIC_SEQ_CST); 
                     #else // windows 
-                    // loadedTexture = InterlockedCompareExchangePointer(&Current_Loaded_Texture, nullptr, nullptr);
                     loadedTexture = (texture_buffer*)InterlockedCompareExchangePointer(
                          (PVOID volatile*)&Current_Loaded_Texture, 
                          NULL, 
@@ -7736,8 +7737,8 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         // Contact_Matrix->vaos = PushArrayP(arena, GLuint, Number_of_Textures_1D * Number_of_Textures_1D);  //
         // Contact_Matrix->vbos = PushArrayP(arena, GLuint, Number_of_Textures_1D * Number_of_Textures_1D);  //
-        Contact_Matrix->vaos =  new GLuint[ Number_of_Textures_1D * Number_of_Textures_1D]; //  (GLuint*) malloc(sizeof(GLuint) * Number_of_Textures_1D * Number_of_Textures_1D );  // TODO make sure the memory is freed before the re-allocation
-        Contact_Matrix->vbos = new GLuint[ Number_of_Textures_1D * Number_of_Textures_1D]; // (GLuint*) malloc(sizeof(GLuint) * Number_of_Textures_1D * Number_of_Textures_1D );
+        Contact_Matrix->vaos =  new GLuint[ Number_of_Textures_1D * Number_of_Textures_1D]; // TODO make sure the memory is freed before the re-allocation
+        Contact_Matrix->vbos = new GLuint[ Number_of_Textures_1D * Number_of_Textures_1D];
 
         setContactMatrixVertexArray(Contact_Matrix, false, false);  // set the vertex data of the contact matrix
 
@@ -8818,12 +8819,6 @@ RearrangeMap(       // NOTE: VERY IMPORTANT
         delete[] tmpBuffer3;
         delete[] tmpBuffer4;
         delete[] tmpBuffer5;
-        // FreeLastPush(Working_Set); // tmpBuffer
-        // FreeLastPush(Working_Set); // tmpBuffer2
-        // FreeLastPush(Working_Set); // tmpBuffer3
-        // FreeLastPush(Working_Set); // tmpBuffer4
-        // FreeLastPush(Working_Set); // tmpBuffer5
-
 
         if (update_contigs_flag) UpdateContigsFromMapState();
         
@@ -9554,7 +9549,7 @@ auto_sort_func(char* currFileName)
         if (auto_curation_state.num_clusters == 1)
         {
             fmt::print(stdout, "[Pixel Sort] sort without clustering.\n");
-        } else  // (selected_area.selected_frag_ids.size() <= std::max(auto_curation_state.min_frag_num_for_cluster, (s32)auto_curation_state.num_clusters) ) 
+        } else 
         {
             fmt::print(
                 stdout, 
@@ -11111,7 +11106,6 @@ UserProfileEditorRun(const char *name, struct file_browser *browser, struct nk_c
             }
             nk_tree_pop(NK_Context);
         }
-        // nk_tree_pop(NK_Context); // used to have this here, but it was causing a crash
 
         nk_style_set_font(ctx, &NK_Font->handle);
     }
@@ -11165,27 +11159,6 @@ MessageCallback( GLenum source,
            ( type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "" ),
             type, severity, message );
 }
-
-// #ifdef DEBUG
-// global_function
-// void GLAPIENTRY
-// MessageCallback( 
-//     GLenum source,
-//     GLenum type,
-//     GLuint id,
-//     GLenum severity,
-//     GLsizei length,
-//     const GLchar* message,
-//     const void* userParam )
-// {
-//     fprintf( stderr, "GL CALLBACK: %s type = 0x%x, severity = 0x%x, message = %s\n",
-//             ( type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "" ),
-//             type, severity, message );
-    
-//     // u32 BreakHere = 0;
-//     // (void)BreakHere;
-// }
-// #endif
 
 global_variable
 u08 *
@@ -11588,12 +11561,6 @@ SaveState(
                 fileContents[--ptr] = ((u08 *)&x)[2];
                 fileContents[--ptr] = ((u08 *)&x)[1];
                 fileContents[--ptr] = ((u08 *)&x)[0];
-
-                // if (bytes_per_waypoint == 15){  // better not to change the datasaved
-                //     u16 long_waypoint_mode = (u16) node->long_waypoint_mode;
-                //     fileContents[--ptr] = ((u08 *)&long_waypoint_mode)[1];
-                //     fileContents[--ptr] = ((u08 *)&long_waypoint_mode)[0];
-                // }
             }
 
             fileWriter += (bytes_per_waypoint * nWayp);
@@ -11731,9 +11698,6 @@ SaveState(
 
         if (!path) // save the name SaveState_Name to file named as ptlsn 
         {
-            // u08 nameCache[17];
-            // CopyNullTerminatedString((u08 *)SaveState_Name, (u08 *)nameCache);
-
             std::string nameCache_string = std::string((char *)SaveState_Name);
 
             *(SaveState_Name + 0) = 'p';
@@ -11744,7 +11708,6 @@ SaveState(
             *(SaveState_Name + 5) = '\0';
 
             file = fopen((const char *)SaveState_Path, "wb");
-            // fwrite((u08 *)nameCache, 1, sizeof(nameCache), file);
             fwrite((u08 *)nameCache_string.c_str(), 1, nameCache_string.size(), file);
             fclose(file);
         }
@@ -11951,7 +11914,6 @@ LoadState(u64 headerHash, char *path)
                 Grid->on = settings & (1 << 3);
                 Contig_Ids->on = settings & (1 << 4);
                 Tool_Tip->on = settings & (1 << 5);
-                // user_profile_settings_ptr->invert_mouse = settings & (1 << 6); // this is moved to the user settings, then this setting will not be influnced by clearcache
                 Scaffs_Always_Visible = settings & (1 << 7);
 
                 nBytesRead += 2;
@@ -12148,13 +12110,6 @@ LoadState(u64 headerHash, char *path)
                         f32 x;
                         f32 y;
                         f32 z;
-                        
-                        // it is better not change the saved data structure
-                        // u16 long_waypoint_mode;
-                        // if (bytes_per_waypoint == 15){
-                        //     ((u08 *)&long_waypoint_mode)[0] = *fileContents++;
-                        //     ((u08 *)&long_waypoint_mode)[1] = *fileContents++;
-                        // }
 
                         ((u08 *)&x)[0] = *fileContents++;
                         ((u08 *)&x)[1] = *fileContents++;
@@ -12173,9 +12128,6 @@ LoadState(u64 headerHash, char *path)
                         AddWayPoint({x, y});
                         Waypoint_Editor->activeWaypoints.next->z = z;
                         Waypoint_Editor->activeWaypoints.next->index = (u32)id;
-                        // if (bytes_per_waypoint == 15) { // better not change the data structure
-                        //     Waypoint_Editor->activeWaypoints.next->long_waypoint_mode = (u16)long_waypoint_mode;
-                        // }
                     }
 
                     nBytesRead += (bytes_per_waypoint * nWayp);
@@ -12412,7 +12364,6 @@ restore_initial_state()
         Grid->on                 = 1;
         Contig_Ids->on           = 1;
         Tool_Tip->on             = 1;
-        // user_profile_settings_ptr   = 0;
         Scaffs_Always_Visible    = 1;
         MetaData_Always_Visible  = 1;
 
@@ -12893,8 +12844,6 @@ global_function
         break;
         }
     }
-    // u08 waypointsVisible;
-    // u08 contigLabels;
 
     u16 ngphextensions;
     fread(&ngphextensions, sizeof(ngphextensions), 1, file);
@@ -13041,7 +12990,6 @@ TextInput(GLFWwindow* window, u32 codepoint)
         Global_Text_Buffer[Global_Text_Buffer_Ptr++] = codepoint;
         
         if (Global_Text_Buffer_Ptr == ArrayCount(Global_Text_Buffer)) Global_Text_Buffer_Ptr = 0;
-        //nk_input_unicode(NK_Context, codepoint); 
     }
 }
 
@@ -13394,40 +13342,6 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons, u08 preserveOrder)
     delete[] tmp_orignal_contig_ids;
     return;
 }
-
-
-// global_function
-// void
-// SortMapByMetaTags()
-// {
-//     u32 nPixelToConsider = Number_of_Pixels_1D;
-//     for (;;)
-//     {
-//         u64 maxFlag = 0;
-//         ForLoop(nPixelToConsider) maxFlag = my_Max(maxFlag, Map_State->metaDataFlags[index]);
-//         if (!maxFlag) break;
-
-//         ForLoop(nPixelToConsider)
-//         {
-//             u32 pixelEnd = nPixelToConsider - index - 1;
-//             s32 delta = (s32)(Number_of_Pixels_1D - pixelEnd - 1);
-//             if (Map_State->metaDataFlags[pixelEnd] == maxFlag)
-//             {
-//                 u32 pixelStart = pixelEnd;
-//                 while (pixelStart && Map_State->metaDataFlags[pixelStart - 1] == maxFlag) --pixelStart;
-                
-//                 if (delta)
-//                 {
-//                     RearrangeMap(pixelStart, pixelEnd, delta);
-//                     AddMapEdit(delta, {(u32)((s32)pixelStart + delta), (u32)((s32)pixelEnd + delta)}, 0);
-//                 }
-
-//                 nPixelToConsider -= (pixelEnd - pixelStart + 1);
-//                 break;
-//             }
-//         }
-//     }
-// }
 
 
 void SortMapByMetaTags(u64 tagMask)
