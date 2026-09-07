@@ -26,7 +26,7 @@ SOFTWARE.
 */
 
 
-#define PretextView_Version_Label "2.0.0-beta"
+#define PretextView_Version_Label "2.0.0-gamma"
 #define PretextView_Version "PretextViewAI Version " PretextView_Version_Label
 #define PretextView_Title "PretextViewAI " PretextView_Version_Label " - Wellcome Sanger Institute"
 
@@ -9477,6 +9477,121 @@ RearrangeMap(       // NOTE: VERY IMPORTANT
 }
 
 
+global_function
+u08
+IsHapMetaTag(const char *tagName)
+{
+    if (!tagName || !tagName[0])
+    {
+        return(0);
+    }
+
+    return((u08)(tagName[0] == 'H' && tagName[1] == 'A' && tagName[2] == 'P' && tagName[3]));
+}
+
+global_function
+s32
+GetHapTagIndexAtPixel(u32 pixel)
+{
+    if (!Map_State || !Meta_Data || pixel >= Number_of_Pixels_1D)
+    {
+        return(-1);
+    }
+
+    ForLoop(ArrayCount(Meta_Data->tags))
+    {
+        const char *tagName = (const char *)Meta_Data->tags[index];
+        if (!tagName[0])
+        {
+            continue;
+        }
+
+        if (IsHapMetaTag(tagName) && (Map_State->metaDataFlags[pixel] & (1ULL << index)))
+        {
+            return((s32)index);
+        }
+    }
+
+    return(-1);
+}
+
+global_function
+u32
+MaxScaffoldIdOnMap()
+{
+    u32 maxScaffId = 0;
+    ForLoop(Number_of_Pixels_1D) maxScaffId = my_Max(maxScaffId, Map_State->scaffIds[index]);
+    return(maxScaffId);
+}
+
+/*
+    When a cut separates two different hap meta tags (e.g. HAP1 vs HAP2), assign
+    distinct scaffold IDs so AGP treats them as different chromosomes. Same hap or
+    untagged sides keep the existing scaffold assignment.
+*/
+global_function
+void
+SplitScaffoldsAtCutIfDifferentHap(u32 loc, u32 ptr_left, u32 ptr_right)
+{
+    if (!Map_State || loc + 1 >= Number_of_Pixels_1D || ptr_right <= loc)
+    {
+        return;
+    }
+
+    s32 leftHap = GetHapTagIndexAtPixel(loc);
+    s32 rightHap = GetHapTagIndexAtPixel(loc + 1);
+
+    if (leftHap < 0 || rightHap < 0 || leftHap == rightHap)
+    {
+        return;
+    }
+
+    const char *leftTag = (const char *)Meta_Data->tags[leftHap];
+    const char *rightTag = (const char *)Meta_Data->tags[rightHap];
+    u32 leftScaff = Map_State->scaffIds[loc];
+
+    if (leftScaff)
+    {
+        u32 newRightScaff = MaxScaffoldIdOnMap() + 1;
+        for (u32 pixel = loc + 1; pixel <= ptr_right; ++pixel)
+        {
+            Map_State->scaffIds[pixel] = newRightScaff;
+        }
+
+        fmt::print(
+            "[Pixel Cut]: Split scaffold at pixel {} ({} -> {}): left keeps scaffold {}, right -> scaffold {}\n",
+            loc,
+            leftTag,
+            rightTag,
+            leftScaff,
+            newRightScaff);
+    }
+    else
+    {
+        u32 maxScaffId = MaxScaffoldIdOnMap();
+        u32 newLeftScaff = maxScaffId + 1;
+        u32 newRightScaff = maxScaffId + 2;
+
+        for (u32 pixel = ptr_left; pixel <= loc; ++pixel)
+        {
+            Map_State->scaffIds[pixel] = newLeftScaff;
+        }
+        for (u32 pixel = loc + 1; pixel <= ptr_right; ++pixel)
+        {
+            Map_State->scaffIds[pixel] = newRightScaff;
+        }
+
+        fmt::print(
+            "[Pixel Cut]: Auto-painted scaffolds at pixel {} ({} -> {}): left -> scaffold {}, right -> scaffold {}\n",
+            loc,
+            leftTag,
+            rightTag,
+            newLeftScaff,
+            newRightScaff);
+    }
+}
+
+
 /*
     BreakMap: cut the contig at loc, and update the original contig ids
         loc: the location to cut
@@ -9565,6 +9680,8 @@ BreakMap(
         ptr_right,
         inversed ? "inverted" : "not inverted",
         loc);
+
+    SplitScaffoldsAtCutIfDifferentHap((u32)loc, (u32)ptr_left, (u32)ptr_right);
 
     return 1; 
 

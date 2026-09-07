@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleGetInfoString</key>
-  <string>PretextViewAI-2.0.0-beta</string>
+  <string>PretextViewAI-2.0.0-gamma</string>
   <key>CFBundleExecutable</key>
-  <string>PretextViewAI-2.0.0-beta</string>
+  <string>PretextViewAI-2.0.0-gamma</string>
   <key>CFBundleIdentifier</key>
   <string>com.example.www</string>
   <key>CFBundleName</key>
-  <string>PretextViewAI-2.0.0-beta</string>
+  <string>PretextViewAI-2.0.0-gamma</string>
   <key>CFBundleIconFile</key>
   <string>icon.icns</string>
   <key>CFBundleShortVersionString</key>
-  <string>2.0.0-beta</string>
+  <string>2.0.0-gamma</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundlePackageType</key>

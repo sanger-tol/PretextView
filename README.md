@@ -174,7 +174,7 @@ Application will be installed to the 'app' folder in the source directory.
 ```bash
 xattr -d com.apple.quarantine /path/to/the/downloaded/dmg/file
 ```
-to remove the **quarantine** and then unmount and re-mount the dmg file. And then try to open the `PretextViewAI-2.0.0-beta.app`.
+to remove the **quarantine** and then unmount and re-mount the dmg file. And then try to open the `PretextViewAI-2.0.0-gamma.app`.
 
 
 # Details of sorting algorithm
