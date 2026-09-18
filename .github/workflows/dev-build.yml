@@ -68,14 +68,8 @@ jobs:
           echo "branch_slug=$BRANCH_SLUG" >> "$GITHUB_OUTPUT"
           echo "Building branch: $BRANCH (${{ github.sha }}) on ${{ matrix.runs-on }} (${{ matrix.artifact_slug }})"
 
-      - name: Enable MSVC developer command prompt
-        if: matrix.platform == 'windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.target_arch == 'arm64' && 'arm64' || 'amd64' }}
-
       - name: Install NSIS on Windows
-        if: matrix.platform == 'windows' && matrix.target_arch != 'arm64'
+        if: matrix.platform == 'windows'
         shell: powershell
         run: choco install nsis -y --no-progress
 
