@@ -91,6 +91,11 @@ include_directories(
     subprojects/eigen
 )
 
+# GLFW 3.5 still declares cmake_minimum_required 3.4; CMake 4.0+ errors without this.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Allow vendored CMake < 3.5 projects")
+endif()
+
 add_subdirectory(subprojects/glfw)
 add_subdirectory(subprojects/glm)
 

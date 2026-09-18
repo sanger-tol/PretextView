@@ -89,6 +89,8 @@ jobs:
       - name: Run install script on Windows
         if: matrix.platform == 'windows'
         shell: cmd
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: install.cmake.bat
 
       - name: Run install script on Linux

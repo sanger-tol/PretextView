@@ -11,6 +11,9 @@ SET CC=clang-cl
 SET CXX=clang-cl
 SET WINDRES=rc
 
+rem CMake 4 removed compat for projects that declare cmake_minimum_required < 3.5 (vendored GLFW).
+set "CMAKE_POLICY_VERSION_MINIMUM=3.5"
+
 rem --- check architecture ---
 set "ARCH=%PROCESSOR_ARCHITECTURE%"
 if /I "%ARCH%"=="x86" (
@@ -26,11 +29,21 @@ if /I "%ARCH%"=="x86" (
 )
 echo Detected architecture: %ARCH%
 
-rem Visual Studio generator defaults to x64 even on ARM64 hosts unless -A is set.
-set "CMAKE_PLATFORM_ARGS="
+rem ARM64: Ninja + MSVC cl from vcvars. CMake 4.4 on windows-11-arm may pick a
+rem VS 2026 generator while the image is still VS 2022; -A ARM64 with clang-cl
+rem is also unreliable. Ninja is on the runner (and survives the VS 2026 cutover).
+set "CMAKE_GEN_ARGS="
 if /I "%ARCH%"=="arm64" (
-    set "CMAKE_PLATFORM_ARGS=-A ARM64"
+    SET CC=cl
+    SET CXX=cl
+    set "CMAKE_GEN_ARGS=-G Ninja -DCMAKE_C_COMPILER=cl -DCMAKE_CXX_COMPILER=cl"
 )
+
+echo CC=%CC% CXX=%CXX%
+cmake --version
+where cl
+where ninja
+where clang-cl
 
 
 REM ========= pull git repo =========
@@ -39,7 +52,7 @@ git submodule update --init --recursive
 
 REM ========= fmt =========
 cd subprojects\fmt
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=%ARCH% %CMAKE_PLATFORM_ARGS% -S . -B build
+cmake -DCMAKE_BUILD_TYPE=Release %CMAKE_GEN_ARGS% -S . -B build
 cmake --build build --config Release --target fmt 
 if errorlevel 1 (
     echo "CMake fmt failed."
@@ -52,7 +65,7 @@ cd ..\..\
 
 REM ========= deflate =========
 cd subprojects\libdeflate
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=%ARCH% %CMAKE_PLATFORM_ARGS% -S . -B build
+cmake -DCMAKE_BUILD_TYPE=Release %CMAKE_GEN_ARGS% -S . -B build
 cmake --build build --config Release --target libdeflate_static 
 if errorlevel 1 (
     echo "CMake delfate failed."
@@ -91,7 +104,7 @@ if exist app (
     echo "Removed existing app directory."
 )
 
-cmake -DCMAKE_BUILD_TYPE=Release -DGLFW_BUILD_WAYLAND=OFF -DGLFW_BUILD_X11=OFF -DCMAKE_INSTALL_PREFIX=app -DCMAKE_PREFIX_PATH=%cmake_prefix_path_tmp% %CMAKE_PLATFORM_ARGS% -S . -B build_cmake
+cmake -DCMAKE_BUILD_TYPE=Release -DGLFW_BUILD_WAYLAND=OFF -DGLFW_BUILD_X11=OFF -DCMAKE_INSTALL_PREFIX=app -DCMAKE_PREFIX_PATH=%cmake_prefix_path_tmp% %CMAKE_GEN_ARGS% -S . -B build_cmake
 if errorlevel 1 (
     echo "CMake configuration failed."
     goto :error
