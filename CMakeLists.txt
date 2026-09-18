@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.17)
 project(PretextView VERSION "1.0.7")
 # User-visible version (window title, macOS CFBundleShortVersionString); keep in sync with PretextView.cpp
-set(PRETEXTVIEW_APP_VERSION_STRING "1.0.7")
+set(PRETEXTVIEW_APP_VERSION_STRING "1.0.7-beta")
 
 
 option(FORCE_MAC_X86 "Force macOS x86_64 build" OFF)
@@ -108,6 +108,7 @@ endif()
 
 
 # test the parse_agp
+option(AGP_TEST_FLAG "Build parse_agp unit test" ON)
 if (AGP_TEST_FLAG)
     add_executable(parse_agp_test src/parse_agp_test.cpp)
     target_link_libraries(parse_agp_test PRIVATE ${lib_fmt})
