@@ -6987,7 +6987,79 @@ load_file_result
     ok,
     fileErr,
     decompErr,
+    glErr,
 };
+
+static u64
+Rgtc1TextureArrayBytes(u32 resolution, u32 nTextures)
+{
+    return (u64)(resolution >> 1) * (u64)resolution * (u64)nTextures;
+}
+
+// Allocate the contact-map GL_TEXTURE_2D_ARRAY. Ultra maps (4096^2 x 528 layers)
+// overflow 32-bit imageSize in glCompressedTexImage3D and NVIDIA then SIGSEGVs
+// around layer 16 (issue #79). Prefer glTexStorage3D, which sizes from dimensions.
+static u08
+AllocateContactMatrixTextureArray(u32 nTextures)
+{
+    while (glGetError() != GL_NO_ERROR) {}
+
+    const u64 mip0Bytes = Rgtc1TextureArrayBytes(Texture_Resolution, nTextures);
+    fmt::print(
+        "Allocating contact texture array: {}x{} x {} layers, {} mip(s), mip0 {} bytes\n",
+        Texture_Resolution, Texture_Resolution, nTextures, Number_of_MipMaps, mip0Bytes);
+
+    const u08 useTexStorage = (glad_glTexStorage3D != nullptr);
+    if (useTexStorage)
+    {
+        glTexStorage3D(
+            GL_TEXTURE_2D_ARRAY,
+            (GLsizei)Number_of_MipMaps,
+            GL_COMPRESSED_RED_RGTC1,
+            (GLsizei)Texture_Resolution,
+            (GLsizei)Texture_Resolution,
+            (GLsizei)nTextures);
+    }
+    else
+    {
+        u32 resolution = Texture_Resolution;
+        ForLoop(Number_of_MipMaps)
+        {
+            const u64 bytes = Rgtc1TextureArrayBytes(resolution, nTextures);
+            if (bytes > (u64)std::numeric_limits<GLsizei>::max())
+            {
+                fmt::print(
+                    stderr,
+                    "[LoadFile::error]: compressed texture array is too large ({} bytes) for glCompressedTexImage3D. Ultra maps need glTexStorage3D (OpenGL 4.2 / ARB_texture_storage).\n",
+                    bytes);
+                return 0;
+            }
+            glCompressedTexImage3D(
+                GL_TEXTURE_2D_ARRAY,
+                (GLint)index,
+                GL_COMPRESSED_RED_RGTC1,
+                (GLsizei)resolution,
+                (GLsizei)resolution,
+                (GLsizei)nTextures,
+                0,
+                (GLsizei)bytes,
+                0);
+            resolution >>= 1;
+        }
+    }
+
+    const GLenum err = glGetError();
+    if (err != GL_NO_ERROR)
+    {
+        fmt::print(
+            stderr,
+            "[LoadFile::error]: failed to allocate GPU texture array (OpenGL error 0x{:x}). Ultra maps need several GB of VRAM (mip0 {} bytes).\n",
+            (u32)err,
+            mip0Bytes);
+        return 0;
+    }
+    return 1;
+}
 
 global_variable
 libdeflate_decompressor *
@@ -7745,16 +7817,13 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
     // Load Textures: reading from file and pushing into glTexture with index Contact_Matrix->textures
     {
-        InitialiseTextureBufferQueue(arena, Texture_Buffer_Queue, Bytes_Per_Texture, filePath); // 初始化所有的queue texture_buffer_queue, 一共有8个queue，每个queue有8个buffer
+        InitialiseTextureBufferQueue(arena, Texture_Buffer_Queue, Bytes_Per_Texture, filePath); // initialize all the queue texture_buffer_queue, there are 8 queues, each queue has 8 buffers
 
         u32 nTextures = (Number_of_Textures_1D + 1) * (Number_of_Textures_1D >> 1);     // number of textures (528)
-        // u32 *packedTextureIndexes = PushArrayP(arena, u32, nTextures);               // using a pointer of sequences of u32 as the texture index 
-        u32* packedTextureIndexes = new u32[nTextures]; // (u32*) malloc(sizeof(u32) * nTextures);              // this is released so new is ok
-        ThreadPoolAddTask(Thread_Pool, PopulateTextureLoadQueue, packedTextureIndexes); // multi-thread for loading the texture entries
 
-        glActiveTexture(GL_TEXTURE0);   // 所有的子图加载在 texture 0 
-        glGenTextures(1, &Contact_Matrix->textures);   // 获取一个texture 存到
-        glBindTexture(GL_TEXTURE_2D_ARRAY, Contact_Matrix->textures); // 绑定到当前的texture
+        glActiveTexture(GL_TEXTURE0);   // all the sub-textures are loaded on texture 0 
+        glGenTextures(1, &Contact_Matrix->textures);   // get a texture and store it in Contact_Matrix->textures
+        glBindTexture(GL_TEXTURE_2D_ARRAY, Contact_Matrix->textures); // bind the texture to the current texture
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
@@ -7762,21 +7831,19 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, (GLint)Number_of_MipMaps - 1);
 
-        u32 resolution = Texture_Resolution;
-        ForLoop(Number_of_MipMaps) // 初始一个texture的一个维度有1024个像素点，放大后一个texture的一个维度只有32（1024 / 2**5）个像素点
-        {   // 初始化所有层级mipmap level的 gl_texture_2d_array
-            glCompressedTexImage3D  (
-                GL_TEXTURE_2D_ARRAY,       // 指定纹理目标 例如GL_TEXTURE_3D
-                (GLint)index,              // 指定纹理层级
-                GL_COMPRESSED_RED_RGTC1,   // texture数据的压缩格式  Unsigned normalized 1-component only.
-                (GLsizei)resolution, (GLsizei)resolution, (GLsizei)nTextures, // 纹理宽度， 高度， 深度
-                0,      // border
-                (GLsizei)((resolution >> 1) * resolution * nTextures),  // 每一个texture 的数据大小 （bytes），注意此处初始化了全部的 nTextures 个texture
-                0); // 指向数据的指针
-            resolution >>= 1;
+        if (!AllocateContactMatrixTextureArray(nTextures))
+        {
+            glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+            glDeleteTextures(1, &Contact_Matrix->textures);
+            Contact_Matrix->textures = 0;
+            return glErr;
         }
-        
+
+        u32* packedTextureIndexes = new u32[nTextures];
+        ThreadPoolAddTask(Thread_Pool, PopulateTextureLoadQueue, packedTextureIndexes);
+
         u32 ptr = 0;
+        u32 resolution = Texture_Resolution;
         printf("Loading textures...\n");
         ForLoop(Number_of_Textures_1D)
         {
@@ -7803,36 +7870,37 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                         level < (GLint)Number_of_MipMaps;
                         ++level )
                 {
-                    GLsizei nBytes = (GLsizei)(resolution * (resolution >> 1));  // 为什么每一个mipmap存储的像素点个数是 resolution ** 2 / 2 ，不应该是resolution**2吗
-                    // 此处将texture的数据压入到gl中，存储为gl_texture_2d_array的对象
+                    const u64 layerBytes = (u64)resolution * (u64)(resolution >> 1);
+                    GLsizei nBytes = (GLsizei)layerBytes;
+                    // push the texture data (number_of_mipmaps) to the gl_texture_2d_array
                     glCompressedTexSubImage3D(
                          GL_TEXTURE_2D_ARRAY,        //  target texture. Must be GL_TEXTURE_3D or GL_TEXTURE_2D_ARRAY.
                          level,                      //  level-of-detail number. Level 0 is the base image level. Level n is the nth mipmap reduction image. 
                          0, 0, (GLint)Texture_Ptr,   //  Texture_Ptr is the index of Current_loaded_texture
                          (GLsizei)resolution, (GLsizei)resolution, 1,   // Specifies the width, height, depth of the texture subimage.
-                         GL_COMPRESSED_RED_RGTC1,    // 压缩数据的格式，这就是为什么只用了一半的 （nBytes） bytes 的数据表示了 resolution * resolution 的图片
+                         GL_COMPRESSED_RED_RGTC1,    //  compressed format, that is the reason why only half byte used（nBytes） to represent the resolution * resolution image
                          nBytes,                     //  the number of unsigned bytes of image data starting at the address specified by data.
                          texture                     //  a pointer to the compressed image data in memory.
-                         );   // 是否此处将texture给到 GL_TEXTURE_2D_ARRAY, check the doc on https://registry.khronos.org/OpenGL-Refpages/es3.0/html/glCompressedTexSubImage3D.xhtml
+                         );   // whether the texture is pushed to the GL_TEXTURE_2D_ARRAY, check the doc on https://registry.khronos.org/OpenGL-Refpages/es3.0/html/glCompressedTexSubImage3D.xhtml
 
                     resolution >>= 1;
-                    texture += nBytes;
+                    texture += nBytes; // move the texture pointer to the next texture
                 }
 
                 printf("\r%3d/%3d (%1.2f%%) textures loaded from disk...", Texture_Ptr + 1, nTextures, 100.0 * (f64)((f32)(Texture_Ptr + 1) / (f32)((Number_of_Textures_1D >> 1) * (Number_of_Textures_1D + 1)))); // echo out 读取到了第Texture_Ptr个texture
                 fflush(stdout);
 
-                AddTextureBufferToQueue(Texture_Buffer_Queue, (texture_buffer *)loadedTexture);  // texture_buffer_queue 是全部的读取任务队列，读取后的buffer重新添加到队列中，供下一次读取。解决了从队列中弹出任务后任务队列空了的疑问。读取文件的任务队列在别的地方还会被调用吗？
-                FenceIn(Current_Loaded_Texture = 0); // 将临时变量置空，重新读取到current_loaded_texture后会跳出上面的循环
+                AddTextureBufferToQueue(Texture_Buffer_Queue, (texture_buffer *)loadedTexture);  // texture_buffer_queue is the queue of all the read tasks, the buffer read after adding it back to the queue, for the next read.解决了从队列中弹出任务后任务队列空了的疑问。读取文件的任务队列在别的地方还会被调用吗？
+                FenceIn(Current_Loaded_Texture = 0); // set the temporary variable to empty, and jump out of the loop after reading the current_loaded_texture
                 __atomic_fetch_add(&Texture_Ptr, 1, 0); // 更新全局的 texture_ptr 
                 ptr ++ ;
             }
         }
 
         printf("\n");
-        CloseTextureBufferQueueFiles(Texture_Buffer_Queue); // 关闭所有的buffer_texture中的文件流指针file，并且释放解压器内存
-        delete[] packedTextureIndexes; // packedTextureIndexes 返回  
-        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);  // 给之前已经压入的GL_TEXTURE_2D_ARRAY解除绑定
+        CloseTextureBufferQueueFiles(Texture_Buffer_Queue); // close the file stream pointer file in buffer_texture, and release the decompressor memory
+        delete[] packedTextureIndexes; // free the memory of packedTextureIndexes
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);  // unbind the previously bound GL_TEXTURE_2D_ARRAY
     }
 
     
@@ -7855,36 +7923,34 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         u32 nTex = (Number_of_Textures_1D + 1) * (Number_of_Textures_1D >> 1); // (32 + 1) * 32 / 2 = 528 
         u32 nPix1D = Number_of_Textures_1D * Texture_Resolution; // 32 * 1024 
 
-        glActiveTexture(GL_TEXTURE2);  // 调用 glActiveTexture 函数，可以选择当前活动的纹理单元，并且后续的纹理操作都会影响到该纹理单元
+        glActiveTexture(GL_TEXTURE2);  // call glActiveTexture function, to select the current active texture unit, and subsequent texture operations will affect the texture unit
 
-        u32 *pixStartLookup = PushArrayP(arena, u32, 2 * nTex); // 申请空间 2 * 528 个 u32
+        u32 *pixStartLookup = PushArrayP(arena, u32, 2 * nTex); // allocate memory for 2 * 528 u32
         u32 ptr = 0;
-        for (u32 i = 0; i < Number_of_Textures_1D; i ++ ) // 遍历每一个texture
+        for (u32 i = 0; i < Number_of_Textures_1D; i ++ ) //   traverse each texture
         {
             for (u32 j = i ; j < Number_of_Textures_1D; j ++ ) 
             {
-                pixStartLookup[ptr++] = (u32)(j * Texture_Resolution); // 列 * 1024   双数索引是列，单数是行
-                pixStartLookup[ptr++] = (u32)(i * Texture_Resolution);            // 行 * 1024
+                pixStartLookup[ptr++] = (u32)(j * Texture_Resolution); // column * 1024   even index is column, odd index is row
+                pixStartLookup[ptr++] = (u32)(i * Texture_Resolution);            // row * 1024
             }
         }
 
-        glGenBuffers(1, &pixStart); // 生成一个缓冲区对象，并将其标识符存储到 pixStart 变量中。这样，pixStart 变量就可以用于引用这个生成的缓冲区对象
-        glBindBuffer(GL_TEXTURE_BUFFER, pixStart); // 缓冲区对象 pixStart 就会被绑定到当前的纹理缓冲区上，后续的操作会影响这个缓冲区对象
-        glBufferData(GL_TEXTURE_BUFFER, sizeof(u32) * 2 * nTex, pixStartLookup, GL_STATIC_DRAW);  // 将数据从 pixStartLookup 指向的内存区域拷贝到绑定到 GL_TEXTURE_BUFFER 目标的缓冲区对象中，大小为 sizeof(u32) * 2 * nTex 字节，并且告诉 OpenGL 这些数据是静态的，不会频繁地变化
+        glGenBuffers(1, &pixStart); // generate a buffer object, and store the identifier in pixStart variable. so that pixStart variable can be used to reference this generated buffer object
+        glBindBuffer(GL_TEXTURE_BUFFER, pixStart); // bind the buffer object pixStart to the current texture buffer
+        glBufferData(GL_TEXTURE_BUFFER, sizeof(u32) * 2 * nTex, pixStartLookup, GL_STATIC_DRAW);  // copy the data from pixStartLookup to the buffer object, and tell OpenGL that the data is static and will not change frequently
 
-        glGenTextures(1, &pixStartTex);  // 生成一个纹理对象，并将其标识符存储到 pixStartTex 变量中
-        glBindTexture(GL_TEXTURE_BUFFER, pixStartTex); // 纹理对象 pixStartTex 就会被绑定到当前的纹理缓冲区上，后续的纹理操作（比如使用 glTexBuffer 函数将其与纹理缓冲区对象关联）将会影响到这个纹理对象
-        glTexBuffer(  // 纹理缓冲区对象与缓冲区对象关联的函数
-            GL_TEXTURE_BUFFER,  // 要关联到缓冲区的纹理目标，这里是 GL_TEXTURE_BUFFER，表示纹理缓冲区。
-            GL_RG32UI,     // 纹理缓冲区数据的格式， GL_RG32UI表示每个像素由两个u32组成，一个红色分量和一个绿色分量
-            pixStart);  //  缓冲区对象的标识符，这个缓冲区会与纹理缓冲区关联
+        glGenTextures(1, &pixStartTex);  // generate a texture object, and store the identifier in pixStartTex variable
+        glBindTexture(GL_TEXTURE_BUFFER, pixStartTex); // bind the texture object pixStartTex to the current texture buffer
+        glTexBuffer(  // texture buffer object and buffer object associated function
+            GL_TEXTURE_BUFFER,  // the texture target to associate with the buffer, here is GL_TEXTURE_BUFFER, which means texture buffer
+            GL_RG32UI,     // the format of the texture buffer data, GL_RG32UI means each pixel is represented by two u32, one for red component and one for green component
+            pixStart);  //  buffer object identifier, this buffer will be associated with the texture buffer
 
-        Contact_Matrix->pixelStartLookupBuffer = pixStart;       // 缓冲区对象标识符 
-        Contact_Matrix->pixelStartLookupBufferTex = pixStartTex; // 纹理对象标识符
+        Contact_Matrix->pixelStartLookupBuffer = pixStart;       // buffer object identifier 
+        Contact_Matrix->pixelStartLookupBufferTex = pixStartTex; // texture object identifier
 
         FreeLastPushP(arena); // pixStartLookup  释放存放像素点开始的空间
-
-        glActiveTexture(GL_TEXTURE3); // 激活第三个texture，以下代码会影响第三个texture
 
         u32 *pixRearrageLookup = PushArrayP(arena, u32, nPix1D); // allocte 1024 * 32 u32 memory
         for (u32 i = 0 ; i < nPix1D; i ++ )
@@ -7900,8 +7966,8 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         glBindTexture(GL_TEXTURE_BUFFER, pixRearrageTex);
         glTexBuffer(GL_TEXTURE_BUFFER, GL_R32UI, pixRearrage);
 
-        Contact_Matrix->pixelRearrangmentLookupBuffer = pixRearrage; // 32 * 1024 u32, this is a ascending order of 0 to 1024 * 32
-        Contact_Matrix->pixelRearrangmentLookupBufferTex = pixRearrageTex; // texture 的索引
+        Contact_Matrix->pixelRearrangmentLookupBuffer = pixRearrage; // 32 * 1024 u32, this is a ascending order of 0 to 1024 * 32-1
+        Contact_Matrix->pixelRearrangmentLookupBufferTex = pixRearrageTex; // texture index
 
         FreeLastPushP(arena); // free pixRearrageLookup as it has already been copied to the buffer object with index pixRearrage
 
@@ -7909,7 +7975,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         glUniform1f(glGetUniformLocation(Contact_Matrix->shaderProgram, "oopixpertex"), 1.0f / (f32)Texture_Resolution); // 将 1 / 1024 传递给 oopixpertex 
         glUniform1ui(glGetUniformLocation(Contact_Matrix->shaderProgram, "ntex1dm1"), Number_of_Textures_1D - 1); // 将31传递给 ntex1dm1 
 
-        glActiveTexture(GL_TEXTURE0); //  关闭激活的texture 3
+        glActiveTexture(GL_TEXTURE0); //  unbind the previously bound texture 3
     }
 
     GLuint posAttribFlatShader = (GLuint)glGetAttribLocation(Flat_Shader->shaderProgram, "position");
@@ -8051,7 +8117,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         // 添加数据到extensions
         std::string graph_name = "pixel_discontinuity";
         bool is_pix_density_added = Extensions.is_graph_name_exist(graph_name);
-        if (!is_pix_density_added) // 未添加pixel density
+        if (!is_pix_density_added) // pixel density not added
         {
             u32 added_num = Extensions.get_num_extensions();
             u32* graph_data = new u32[Number_of_Pixels_1D];

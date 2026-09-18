@@ -107,10 +107,10 @@ else()
 endif()
 
 
-# test the parse_agp
-option(AGP_TEST_FLAG "Build parse_agp unit test" ON)
+# test the parse_agp (not part of the installer package)
+option(AGP_TEST_FLAG "Build parse_agp unit test" OFF)
 if (AGP_TEST_FLAG)
-    add_executable(parse_agp_test src/parse_agp_test.cpp)
+    add_executable(parse_agp_test EXCLUDE_FROM_ALL src/parse_agp_test.cpp)
     target_link_libraries(parse_agp_test PRIVATE ${lib_fmt})
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(parse_agp_test PRIVATE DEBUG)
