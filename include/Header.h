@@ -99,7 +99,7 @@ SOFTWARE.
 #ifndef _WIN32
 #define ThreadFence __asm__ volatile("" ::: "memory")
 #else
-#define ThreadFence _mm_mfence()
+#define ThreadFence MemoryBarrier()
 #endif // _WIN32
 
 /*
@@ -1224,5 +1224,4 @@ global_function u32 NextPrime(u32 N)
 } 
 
 #endif // HEADER_H
-
 
