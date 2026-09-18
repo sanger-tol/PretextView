@@ -75,7 +75,7 @@ jobs:
           arch: ${{ matrix.target_arch == 'arm64' && 'arm64' || 'amd64' }}
 
       - name: Install NSIS on Windows
-        if: matrix.platform == 'windows'
+        if: matrix.platform == 'windows' && matrix.target_arch != 'arm64'
         shell: powershell
         run: choco install nsis -y --no-progress
 

@@ -94,14 +94,25 @@ include_directories(
 add_subdirectory(subprojects/glfw)
 add_subdirectory(subprojects/glm)
 
+# Visual Studio puts libs in <platform>/<config> (e.g. ARM64/Release),
+# while Ninja/NMake use build/ or build/Release.
+set(_prebuilt_lib_suffixes Release Debug release debug)
+if(CMAKE_VS_PLATFORM_NAME)
+    list(APPEND _prebuilt_lib_suffixes
+        "${CMAKE_VS_PLATFORM_NAME}/Release"
+        "${CMAKE_VS_PLATFORM_NAME}/Debug")
+endif()
+list(APPEND _prebuilt_lib_suffixes
+    ARM64/Release ARM64/Debug
+    x64/Release x64/Debug)
+
 find_library(
     lib_fmt
     NAMES fmt libfmt
-    PATHS 
-        subprojects/fmt/build 
-        subprojects/fmt/build/debug 
-        subprojects/fmt/build/Release
-        subprojects/fmt/build/release)
+    PATHS
+        "${CMAKE_SOURCE_DIR}/subprojects/fmt/build"
+        subprojects/fmt/build
+    PATH_SUFFIXES ${_prebuilt_lib_suffixes})
 if(NOT lib_fmt)
     message(FATAL_ERROR "lib_fmt not found")
 else()
@@ -122,11 +133,11 @@ endif()
 find_library(
     lib_deflate_static 
     NAMES deflate deflatestatic
-    PATHS 
-        subprojects/libdeflate/build 
-        subprojects/libdeflate/build/debug 
-        subprojects/libdeflate/build/Release
-        subprojects/libdeflate/build/release)
+    PATHS
+        "${CMAKE_SOURCE_DIR}/subprojects/libdeflate/build"
+        subprojects/libdeflate/build
+    PATH_SUFFIXES ${_prebuilt_lib_suffixes})
+unset(_prebuilt_lib_suffixes)
 if(NOT lib_deflate_static)
     message(FATAL_ERROR "lib_deflate_static not found")
 else()
@@ -496,14 +507,20 @@ elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux") # Linux (Ubuntu)
     set(CPACK_DEBIAN_PACKAGE_SECTION "utils") 
 elseif(WIN32) # Windows
     message(STATUS "[CPack]: Generate on Windows")
-    set(CPACK_GENERATOR "NSIS")
-    set(CPACK_NSIS_DISPLAY_NAME "${target_name}")
-    set(CPACK_NSIS_PACKAGE_NAME "${target_name} Installer")
-    set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/pretextview_icon.ico")
-    set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/pretextview_icon.ico") 
-    set(CPACK_NSIS_INSTALLED_ICON_NAME "${target_name}.exe")
-    set(CPACK_NSIS_HELP_LINK "https://github.com/guanshaoheng/PretextView") 
-    set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/guanshaoheng/PretextView") 
+    if(ARCH_TYPE STREQUAL "ARM64")
+        # Chocolatey NSIS is x86; ARM64 target support needs NSIS 3.11+ and is
+        # unreliable in CI. ZIP is enough for development artifacts.
+        set(CPACK_GENERATOR "ZIP")
+    else()
+        set(CPACK_GENERATOR "NSIS")
+        set(CPACK_NSIS_DISPLAY_NAME "${target_name}")
+        set(CPACK_NSIS_PACKAGE_NAME "${target_name} Installer")
+        set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/pretextview_icon.ico")
+        set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/pretextview_icon.ico")
+        set(CPACK_NSIS_INSTALLED_ICON_NAME "${target_name}.exe")
+        set(CPACK_NSIS_HELP_LINK "https://github.com/guanshaoheng/PretextView")
+        set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/guanshaoheng/PretextView")
+    endif()
 endif()
 
 include(CPack)
