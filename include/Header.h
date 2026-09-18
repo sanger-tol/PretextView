@@ -67,7 +67,11 @@ SOFTWARE.
 #if defined(_WIN32) || defined(_WIN64)
     // Windows-specific includes
     #include <intrin.h>
-    #define ARCH_X86 1
+    #if defined(_M_ARM64) || defined(_M_ARM)
+        #define ARCH_ARM 1
+    #else
+        #define ARCH_X86 1
+    #endif
 #elif defined(__x86_64__) || defined(__i386__)
     // Non-Windows x86 architectures
     #include <x86intrin.h>
@@ -98,6 +102,8 @@ SOFTWARE.
 
 #ifndef _WIN32
 #define ThreadFence __asm__ volatile("" ::: "memory")
+#elif defined(_M_ARM64) || defined(_M_ARM)
+#define ThreadFence MemoryBarrier()
 #else
 #define ThreadFence _mm_mfence()
 #endif // _WIN32
