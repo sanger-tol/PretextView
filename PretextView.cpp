@@ -4423,7 +4423,17 @@ Render() {
     if (File_Loaded)
     {
         glUseProgram(Contact_Matrix->shaderProgram);
+        // NVIDIA Linux does not keep leftover sampler bindings the way macOS
+        // does. Re-bind the four units the contact-matrix shader samples.
+        glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, Contact_Matrix->textures);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_BUFFER, Color_Maps->maps[Color_Maps->currMap]);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_BUFFER, Contact_Matrix->pixelStartLookupBufferTex);
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBufferTex);
+        glActiveTexture(GL_TEXTURE0);
         u32 ptr = 0;
         while (ptr < Number_of_Textures_1D * Number_of_Textures_1D)
         {
@@ -7952,6 +7962,8 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         FreeLastPushP(arena); // pixStartLookup  释放存放像素点开始的空间
 
+        glActiveTexture(GL_TEXTURE3); // shader samples pixrearrangelookup from texture unit 3
+
         u32 *pixRearrageLookup = PushArrayP(arena, u32, nPix1D); // allocte 1024 * 32 u32 memory
         for (u32 i = 0 ; i < nPix1D; i ++ )
         {
@@ -9437,7 +9449,7 @@ auto_cut_func(
             return ;
         }
         fmt::print(stdout, "[Pixel cut] restoring the cutted frags within the selected area: [{}, {}]\n", start, end);
-        Map_State->restore_cutted_contigs( start, end );
+        Map_State->restore_cutted_contigs( start, end, Number_of_Original_Contigs );
         UpdateContigsFromMapState();
         Redisplay = 1;
         return ;
@@ -12508,12 +12520,50 @@ find_pixel_for_original_rel(u32 oid, int local_pixel)
     return best;
 }
 
+static u32
+agp_map_contig_low_coord(u32 contig_idx)
+{
+    const contig *cont = Contigs->contigs_arr + contig_idx;
+    if (IsContigInverted(contig_idx) && cont->length)
+        return cont->startCoord - (cont->length - 1);
+    return cont->startCoord;
+}
+
+// Closest unused map contig of original contig `oid` whose low local pixel
+// matches `local_pixel`. Returns -1 if none remain.
+static int
+find_map_contig_for_agp_frag(u32 oid, int local_pixel, const std::vector<u08>& used)
+{
+    int best = -1;
+    int best_dist = std::numeric_limits<int>::max();
+    for (u32 i = 0; i < Contigs->numberOfContigs; ++i)
+    {
+        if (i < used.size() && used[i]) continue;
+        const contig *cont = Contigs->contigs_arr + i;
+        if (cont->originalContigId != oid) continue;
+        const int dist = std::abs((int)agp_map_contig_low_coord(i) - local_pixel);
+        if (dist < best_dist)
+        {
+            best_dist = dist;
+            best = (int)i;
+        }
+    }
+    return best;
+}
+
+static void
+restore_map_to_uncut_originals()
+{
+    if (Map_Editor && Map_Editor->nEdits)
+        EraseAllEdits(Map_Editor);
+    Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
+    UpdateContigsFromMapState();
+}
+
 /*
     load the .agp file to restore the curated state
-    NOTE: please make sure to clear the cache before loading the agp file. 
-        which means after clearing the cache, all edits will be lost. if you want 
-        to keep the edits, please try to change the file name and reopen that. as 
-        the cache is automatically named as the hash of the file name.
+    NOTE: Load AGP first restores the uncut original-contig layout, so it can
+        be applied more than once in a session. Clear Cache still discards edits.
 */
 void Load_AGP(const std::string& agp_path)
 {
@@ -12522,6 +12572,8 @@ void Load_AGP(const std::string& agp_path)
     {
         AssemblyAGP assembly_agp(agp_path, Original_Contigs, (int)Number_of_Original_Contigs, Meta_Data);
         fmt::println("{}", assembly_agp.__str__());
+
+        restore_map_to_uncut_originals();
 
         double bp_per_pixel = assembly_agp.bp_per_pixel;
         if (!(bp_per_pixel > 0.0) && Number_of_Pixels_1D)
@@ -12548,9 +12600,9 @@ void Load_AGP(const std::string& agp_path)
             }
             else
             {
-                throw std::runtime_error(fmt::format(
-                    "[Load AGP::error]: Original_Contig name ({}) not found in the assembly_agp.original_contigs.\n",
-                    name));
+                fmt::print(
+                    "[Load AGP::warning]: Original contig '{}' is not in the AGP; it will be left unmatched at the end of the map.\n",
+                    name);
             }
         }
 
@@ -12582,6 +12634,12 @@ void Load_AGP(const std::string& agp_path)
             representative_frags.push_back(i);
         }
 
+        if (representative_frags.empty())
+        {
+            throw std::runtime_error(
+                "[Load AGP::error]: No AGP sequence lines matched original contigs on the map.\n");
+        }
+
         std::vector<int> merged_split_points;
         for (int idx : representative_frags)
         {
@@ -12601,48 +12659,87 @@ void Load_AGP(const std::string& agp_path)
 
         cut_frags(merged_split_points, false, false);
 
-        if (Contigs->numberOfContigs != (u32)representative_frags.size())
+        const u32 n_map = Contigs->numberOfContigs;
+        if (!n_map)
+        {
+            throw std::runtime_error("[Load AGP::error]: Map has no contigs after applying AGP splits.\n");
+        }
+
+        std::vector<u08> used(n_map, 0);
+        std::vector<int> contigs_order_agp;
+        std::vector<const Frag*> paint_frags;
+        contigs_order_agp.reserve(n_map);
+        paint_frags.reserve(n_map);
+
+        for (int idx : representative_frags)
+        {
+            const Frag& frag = assembly_agp.frags[idx];
+            const int local_pixel = agp_local_bp_to_rel_pixel(
+                frag.start, bp_per_pixel, contig_pixel_count[frag.orig_contig_id]);
+            const int map_idx = find_map_contig_for_agp_frag((u32)frag.orig_contig_id, local_pixel, used);
+            if (map_idx < 0)
+            {
+                fmt::print(
+                    "[Load AGP::warning]: AGP fragment of '{}' starting at {} bp has no unused map contig; skipped.\n",
+                    (char*)Original_Contigs[frag.orig_contig_id].name,
+                    frag.start);
+                continue;
+            }
+            used[(u32)map_idx] = 1;
+            contigs_order_agp.push_back((map_idx + 1) * (frag.is_reverse ? -1 : 1));
+            paint_frags.push_back(&frag);
+        }
+
+        u32 n_unmatched = 0;
+        for (u32 i = 0; i < n_map; ++i)
+        {
+            if (used[i]) continue;
+            contigs_order_agp.push_back((int)i + 1);
+            paint_frags.push_back(nullptr);
+            ++n_unmatched;
+        }
+
+        if (contigs_order_agp.size() != n_map)
         {
             throw std::runtime_error(fmt::format(
-                "[Load AGP::error]: The number of contigs between Contigs({}) and contigs_agp({}) are not the same.\n",
-                Contigs->numberOfContigs, representative_frags.size()));
+                "[Load AGP::error]: Built order size ({}) does not match map contig count ({}).\n",
+                contigs_order_agp.size(), n_map));
         }
 
-        std::vector<int> global_frag_start_Contigs(Number_of_Original_Contigs, 0);
-        for (u32 i = 1; i < Number_of_Original_Contigs; i++)
-            global_frag_start_Contigs[i] = global_frag_start_Contigs[i - 1] + (int)Original_Contigs[i - 1].nContigs;
-
-        std::vector<std::vector<int64_t>> starts_on_map(Number_of_Original_Contigs);
-        for (int idx : representative_frags)
-            starts_on_map[assembly_agp.frags[idx].orig_contig_id].push_back(assembly_agp.frags[idx].start);
-        for (auto& starts : starts_on_map) std::sort(starts.begin(), starts.end());
-
-        std::vector<int> contigs_order_agp(representative_frags.size());
-        for (size_t i = 0; i < representative_frags.size(); ++i)
+        if (n_unmatched)
         {
-            const Frag& frag = assembly_agp.frags[representative_frags[i]];
-            const auto& starts = starts_on_map[frag.orig_contig_id];
-            const auto it = std::find(starts.begin(), starts.end(), frag.start);
-            const int local_index = (int)std::distance(starts.begin(), it);
-            contigs_order_agp[i] = (global_frag_start_Contigs[frag.orig_contig_id] + local_index + 1) * (frag.is_reverse ? -1 : 1);
+            fmt::print(
+                "[Load AGP::warning]: {} map contig(s) were not in the AGP (or were leftover prefixes after rounding) and were appended after the AGP order.\n",
+                n_unmatched);
         }
+
         FragsOrder frags_order_agp(contigs_order_agp);
         AutoCurationFromFragsOrder(&frags_order_agp, Contigs, Map_State, nullptr);
+        UpdateContigsFromMapState();
 
-        int pix_ptr = 0, contig_start_pix_ptr = 0;
+        int pix_ptr = 0;
         for (u32 i = 0; i < Contigs->numberOfContigs; i++)
         {
-            const Frag& frag = assembly_agp.frags[representative_frags[i]];
-            while (pix_ptr < (int)Number_of_Pixels_1D && pix_ptr < contig_start_pix_ptr + (int)Contigs->contigs_arr[i].length)
+            const Frag *frag = (i < paint_frags.size()) ? paint_frags[i] : nullptr;
+            const int contig_end = pix_ptr + (int)Contigs->contigs_arr[i].length;
+            while (pix_ptr < (int)Number_of_Pixels_1D && pix_ptr < contig_end)
             {
-                Map_State->scaffIds[pix_ptr]        = frag.is_painted ? (u32)frag.scaff_id + 1 : 0;
-                Map_State->metaDataFlags[pix_ptr++] = frag.meta_data_flag;
+                if (frag)
+                {
+                    Map_State->scaffIds[pix_ptr]        = frag->is_painted ? (u32)frag->scaff_id + 1 : 0;
+                    Map_State->metaDataFlags[pix_ptr++] = frag->meta_data_flag;
+                }
+                else
+                {
+                    Map_State->scaffIds[pix_ptr]        = 0;
+                    Map_State->metaDataFlags[pix_ptr++] = 0;
+                }
             }
-            contig_start_pix_ptr += (int)Contigs->contigs_arr[i].length;
         }
         UpdateContigsFromMapState();
-        fmt::print("[Load AGP]: Done. Restored {} map fragments from {} AGP sequence lines.\n",
-            representative_frags.size(), assembly_agp.frags.size());
+        fmt::print(
+            "[Load AGP]: Done. Restored {} AGP fragments ({} unmatched map contig(s) appended) from {} AGP sequence lines into {} map contig(s).\n",
+            paint_frags.size() - n_unmatched, n_unmatched, assembly_agp.frags.size(), Contigs->numberOfContigs);
     }
     catch (const std::exception& e)
     {
@@ -12769,7 +12866,7 @@ restore_initial_state()
     
     // restore all the splited contigs
     {
-        Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D);
+        Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
     }
 
 
@@ -13530,7 +13627,7 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons, u08 preserveOrder)
     // 这里粘贴所有的original contigs
     u32* tmp_orignal_contig_ids = new u32[Number_of_Pixels_1D];
     for (u32 i = 0 ; i< Number_of_Pixels_1D; i++ )tmp_orignal_contig_ids[i] = Map_State->originalContigIds[i];
-    Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D);
+    Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
     UpdateContigsFromMapState(); // todo 检查粘贴后会不会影响 painted 的 scaffolds
 
     FILE *file;

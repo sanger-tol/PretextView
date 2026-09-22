@@ -101,25 +101,20 @@ struct map_state
     u32 *scaffIds = nullptr;          // [num_pixels_1d]
     u64 *metaDataFlags = nullptr;     // [num_pixels_1d], 256kb for 32768 pixels
 
-    void restore_cutted_contigs_all(const u32& num_pixel_1d)
+    // BreakMap marks a cut by adding n_original_contigs to originalContigIds
+    // on the right-hand side. Modulo recovers the uncut original-contig ids.
+    void restore_cutted_contigs_all(const u32& num_pixel_1d, u32 n_original_contigs)
     {
+        if (!originalContigIds || !n_original_contigs) return;
         for (u32 i = 0; i < num_pixel_1d; i++)
-        {
-            // These are now no-ops.  I don't understand what they originally did:
-            // originalContigIds[i] = originalContigIds[i] % Max_Number_of_Contigs;
-            originalContigIds[i] = originalContigIds[i];
-        }
+            originalContigIds[i] %= n_original_contigs;
     }
 
-    void restore_cutted_contigs(const s32 start_pixel, const s32 end_pixel)
+    void restore_cutted_contigs(const s32 start_pixel, const s32 end_pixel, u32 n_original_contigs)
     {   
-        if (start_pixel < 0 || end_pixel < 0) return;
-        for (u32 i = start_pixel; i <= end_pixel; i++)
-        {
-            // These are now no-ops.  I don't understand what they originally did:
-            // originalContigIds[i] = originalContigIds[i] % Max_Number_of_Contigs;
-            originalContigIds[i] = originalContigIds[i];
-        }
+        if (start_pixel < 0 || end_pixel < 0 || !originalContigIds || !n_original_contigs) return;
+        for (u32 i = (u32)start_pixel; i <= (u32)end_pixel; i++)
+            originalContigIds[i] %= n_original_contigs;
     }
 
     map_state(int num_pixel_1d)
