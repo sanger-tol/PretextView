@@ -12291,11 +12291,11 @@ ValidateSaveStateMagic(u08 *magicTest, u08 expectedTail)
 }
 
 /* 
-保存当前状态，
-    headerHash: 用于生成文件名的哈希值
-    path: 保存路径
-    overwrite: 是否覆盖
-    version: 版本号，用于控制生成文件的版本，兼容上一个版本
+save current state
+    headerHash: hash value used to generate the file name
+    path: path to the file
+    overwrite: whether to overwrite the file if it already exists
+    version: version number, used to control the version of the generated file, for compatibility with the previous version
 */
 global_function
 u08
