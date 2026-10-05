@@ -45,6 +45,7 @@ SOFTWARE.
 
 #include "utilsPretextView.h"
 #include "auto_curation_state.h"
+#include "linkage.h"
 
 #include "TextureLoadQueue.cpp"  // 
 #include "ColorMapData.cpp"      // add color maps 
@@ -159,6 +160,7 @@ SOFTWARE.
 #include <cmath>
 #include <limits>
 #include <utility>
+#include <iterator>
 
 #include "shaderSource.h"
 /*
@@ -2686,7 +2688,7 @@ MoveWayPoints(map_edit *edit, u32 undo = 0);
 
 global_function
 u08
-BreakMap(const int& loc, const u32& ignore_len);
+BreakMap(const int& loc, const u32& ignore_len, bool verbose = true);
 
 global_function
 void
@@ -7305,7 +7307,12 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
                     } else if (strcmp((char*)gph->name, EXT_NAME_3P_TELOMERE) == 0) {
                         gph->colour = Colour_3p_telomere;
                     } else {
-                        gph->colour = DefaultGraphColour;
+                        linkage_colour groupColour;
+                        if (LinkageGroupColour((const char *)gph->name, &groupColour)) {
+                            gph->colour = {groupColour.r, groupColour.g, groupColour.b, groupColour.a};
+                        } else {
+                            gph->colour = DefaultGraphColour;
+                        }
                     }
                     
                     // Show labels for all extensions by default
@@ -7330,19 +7337,10 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
 
                     u32 nValues = Number_of_Pixels_1D;
                     auto* xValues = new f32[nValues]; // allocate memory for xValues, actually, x is the coordinate of the pixel
-                    auto* yValues = new f32[nValues];
-                    
-                    u32 max = 0;
-                    ForLoop(Number_of_Pixels_1D)
-                    {
-                        max = my_Max(max, gph->data[index]);
-                    }
-
-                    ForLoop(Number_of_Pixels_1D)
-                    {
-                        xValues[index] = (f32)index;
-                        yValues[index] = (f32)gph->data[index] / (f32)max ;   // normalise the data
-                    }
+                    // An "alg" track stores PretextGraph group ids, not a height. Paint each pixel
+                    // from that id and keep the bar flat.
+                    int linkageTrack = strcmp((const char *)gph->name, "alg") == 0;
+                    glUniform1i(glGetUniformLocation(gph->shader->shaderProgram, "useGroupColour"), linkageTrack ? 1 : 0);
 
                     glActiveTexture(GL_TEXTURE4 + exIndex++);
 
@@ -7351,12 +7349,50 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
                     // generate a buffer object named yVal and save data to yVal
                     glGenBuffers(1, &yVal);
                     glBindBuffer(GL_TEXTURE_BUFFER, yVal);
-                    glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues, yValues, GL_STATIC_DRAW);
 
                     // add texture and link to the buffer object
                     glGenTextures(1, &yValTex);
                     glBindTexture(GL_TEXTURE_BUFFER, yValTex);
-                    glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, yVal);
+
+                    if (linkageTrack)
+                    {
+                        auto *packed = new f32[nValues * 4];
+                        ForLoop(nValues)
+                        {
+                            xValues[index] = (f32)index;
+                            u32 value = gph->data[index];
+                            linkage_colour groupColour = DefaultGraphColour;
+                            if (value)
+                            {
+                                LinkageGroupColourByValue(value, &groupColour);
+                            }
+                            packed[index * 4 + 0] = value ? 1.0f : 0.0f;
+                            packed[index * 4 + 1] = groupColour.r;
+                            packed[index * 4 + 2] = groupColour.g;
+                            packed[index * 4 + 3] = groupColour.b;
+                        }
+                        glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues * 4, packed, GL_STATIC_DRAW);
+                        glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, yVal);
+                        delete[] packed;
+                    }
+                    else
+                    {
+                        auto* yValues = new f32[nValues];
+                        u32 max = 0;
+                        ForLoop(Number_of_Pixels_1D)
+                        {
+                            max = my_Max(max, gph->data[index]);
+                        }
+
+                        ForLoop(Number_of_Pixels_1D)
+                        {
+                            xValues[index] = (f32)index;
+                            yValues[index] = (f32)gph->data[index] / (f32)max ;   // normalise the data
+                        }
+                        glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues, yValues, GL_STATIC_DRAW);
+                        glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, yVal);
+                        delete[] yValues;
+                    }
 
                     gph->shader->yValuesBuffer = yVal;
                     gph->shader->yValuesBufferTex = yValTex;
@@ -7375,7 +7411,6 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
                     glVertexAttribPointer(posAttrib, 1, GL_FLOAT, GL_FALSE, 0, 0);
 
                     delete[] xValues;
-                    delete[] yValues;
 
                     glActiveTexture(GL_TEXTURE0);
                 }
@@ -9588,8 +9623,9 @@ global_function
 u08
 BreakMap(
     const int& loc, 
-    const u32& ignore_len  // Contigs whose length from the cut point to the beginning
-                           // or end is less than ignore_len will not be cut.
+    const u32& ignore_len,  // Contigs whose length from the cut point to the beginning
+                            // or end is less than ignore_len will not be cut.
+    bool verbose
 )
 {   
     if (loc < 0 || loc >= (int)Number_of_Pixels_1D)
@@ -9657,14 +9693,17 @@ BreakMap(
         Map_State->originalContigIds[tmp] += Number_of_Original_Contigs;
     }
 
-    fmt::print(
-        "[Pixel Cut] original_contig_id={} map_contig_id={} fragment_pixel_range=[{}, {}] {} cut_at_pixel={}\n",
-        original_contig_id,
-        contig_id,
-        ptr_left,
-        ptr_right,
-        inversed ? "inverted" : "not inverted",
-        loc);
+    if (verbose)
+    {
+        fmt::print(
+            "[Pixel Cut] original_contig_id={} map_contig_id={} fragment_pixel_range=[{}, {}] {} cut_at_pixel={}\n",
+            original_contig_id,
+            contig_id,
+            ptr_left,
+            ptr_right,
+            inversed ? "inverted" : "not inverted",
+            loc);
+    }
 
     return 1; 
 
@@ -9771,9 +9810,46 @@ void run_ai_detection()
     }
 }
 
-void cut_frags(const std::vector<int>& problem_locs, bool consider_gap_extension_flag=true, bool consider_min_len_flag=true)
+// After BreakMap has marked the cut in originalContigIds, give the right-hand
+// piece its own contig id so the next BreakMap stops at this boundary.
+// Avoids rebuilding every contig from the full pixel array after each cut.
+static bool
+split_contig_ids_after_break(int loc, u32& next_contig_id)
+{
+    if (!Contigs || !Map_State || loc < 0 || (u32)loc >= Number_of_Pixels_1D)
+        return false;
+    if (next_contig_id >= Contigs->contigs_arr_capacity)
+        return false;
+
+    const u32 contig_id = Map_State->contigIds[loc];
+    const u08 inversed = IsContigInverted(contig_id);
+    s32 ptr_right = loc;
+    while (
+        ptr_right < (int)Number_of_Pixels_1D - 1 &&
+        Map_State->contigIds[ptr_right] == contig_id &&
+        (Map_State->contigRelCoords[ptr_right] == Map_State->contigRelCoords[ptr_right + 1] + (inversed ? +1 : -1)))
+    {
+        ++ptr_right;
+    }
+    if (ptr_right <= loc)
+        return false;
+
+    const u32 new_id = next_contig_id++;
+    if (inversed)
+        Contigs->contigInvertFlags[new_id >> 3] |= (1 << (new_id & 7));
+    else
+        Contigs->contigInvertFlags[new_id >> 3] &= ~(1 << (new_id & 7));
+
+    for (s32 p = loc + 1; p <= ptr_right; ++p)
+        Map_State->contigIds[(u32)p] = new_id;
+    return true;
+}
+
+void cut_frags(const std::vector<int>& problem_locs, bool consider_gap_extension_flag=true, bool consider_min_len_flag=true, bool rebuild_each_cut=true)
 {   
     const u32* gap_data_ptr = (auto_curation_state.auto_cut_with_extension && consider_gap_extension_flag) ? Extensions.get_graph_data_ptr(EXT_NAME_GAP):nullptr; 
+    u32 next_contig_id = Contigs ? Contigs->numberOfContigs : 0;
+    u32 n_applied = 0;
 
     for (auto & loc_orig : problem_locs)
     {   
@@ -9808,10 +9884,27 @@ void cut_frags(const std::vector<int>& problem_locs, bool consider_gap_extension
             }
         }
         // cut the fragment
-        BreakMap(
+        if (BreakMap(
             loc,   // cut loc
-            consider_min_len_flag ? auto_curation_state.auto_cut_smallest_frag_size_in_pixel:1); // ignore length
+            consider_min_len_flag ? auto_curation_state.auto_cut_smallest_frag_size_in_pixel:1,
+            rebuild_each_cut))
+        {
+            ++n_applied;
+            if (rebuild_each_cut)
+            {
+                UpdateContigsFromMapState();
+            }
+            else if (!split_contig_ids_after_break(loc, next_contig_id))
+            {
+                UpdateContigsFromMapState();
+                next_contig_id = Contigs ? Contigs->numberOfContigs : next_contig_id;
+            }
+        }
+    }
+    if (!rebuild_each_cut)
+    {
         UpdateContigsFromMapState();
+        fmt::print("[Pixel Cut] applied {} cut(s)\n", n_applied);
     }
     Redisplay = 1;
 }
@@ -13410,21 +13503,42 @@ agp_local_bp_to_rel_pixel(int64_t start_bp, double bp_per_pixel, u32 pixel_count
     return lp;
 }
 
-static int
-find_pixel_for_original_rel(u32 oid, int local_pixel)
+struct agp_pixel_ref
 {
+    u32 rel;
+    u32 pix;
+};
+
+// `refs` is sorted by (rel, pix). Equal distance keeps the smaller pixel index,
+// matching a left-to-right scan of the map.
+static int
+find_closest_agp_pixel(const std::vector<agp_pixel_ref>& refs, int local_pixel)
+{
+    if (refs.empty()) return -1;
+    const auto it = std::lower_bound(
+        refs.begin(), refs.end(), local_pixel,
+        [](const agp_pixel_ref& ref, int pix) { return (int)ref.rel < pix; });
+
     int best = -1;
     int best_dist = std::numeric_limits<int>::max();
-    for (u32 p = 0; p < Number_of_Pixels_1D; ++p)
+    auto consider = [&](const agp_pixel_ref& ref)
     {
-        if (GetOriginalContigBaseId(Map_State->originalContigIds[p]) != oid) continue;
-        const int dist = std::abs((int)Map_State->contigRelCoords[p] - local_pixel);
-        if (dist < best_dist)
+        const int dist = std::abs((int)ref.rel - local_pixel);
+        if (dist < best_dist || (dist == best_dist && (best < 0 || (int)ref.pix < best)))
         {
             best_dist = dist;
-            best = (int)p;
-            if (dist == 0) break;
+            best = (int)ref.pix;
         }
+    };
+
+    if (it != refs.end()) consider(*it);
+    if (it != refs.begin())
+    {
+        auto floor_it = std::prev(it);
+        const u32 rel = floor_it->rel;
+        while (floor_it != refs.begin() && std::prev(floor_it)->rel == rel)
+            --floor_it;
+        consider(*floor_it);
     }
     return best;
 }
@@ -13438,23 +13552,27 @@ agp_map_contig_low_coord(u32 contig_idx)
     return cont->startCoord;
 }
 
-// Closest unused map contig of original contig `oid` whose low local pixel
-// matches `local_pixel`. Returns -1 if none remain.
+struct agp_contig_cand
+{
+    int low;
+    u32 idx;
+};
+
+// Closest unused map contig in `cands` (one original contig, contig-index order).
+// Equal distance keeps the earlier contig, matching a scan from index 0.
 static int
-find_map_contig_for_agp_frag(u32 oid, int local_pixel, const std::vector<u08>& used)
+find_map_contig_for_agp_frag(const std::vector<agp_contig_cand>& cands, int local_pixel, const std::vector<u08>& used)
 {
     int best = -1;
     int best_dist = std::numeric_limits<int>::max();
-    for (u32 i = 0; i < Contigs->numberOfContigs; ++i)
+    for (const agp_contig_cand& cand : cands)
     {
-        if (i < used.size() && used[i]) continue;
-        const contig *cont = Contigs->contigs_arr + i;
-        if (cont->originalContigId != oid) continue;
-        const int dist = std::abs((int)agp_map_contig_low_coord(i) - local_pixel);
+        if (cand.idx < used.size() && used[cand.idx]) continue;
+        const int dist = std::abs(cand.low - local_pixel);
         if (dist < best_dist)
         {
             best_dist = dist;
-            best = (int)i;
+            best = (int)cand.idx;
         }
     }
     return best;
@@ -13467,6 +13585,115 @@ restore_map_to_uncut_originals()
         EraseAllEdits(Map_Editor);
     Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
     UpdateContigsFromMapState();
+}
+
+// Place contigs in `order` (signed 1-based ids, negative = reverse) by permuting
+// pixel arrays once. Same arrangement as InvertMap/RearrangeMap, without a GL
+// upload per fragment.
+static u08
+apply_signed_contig_order(const std::vector<int>& order)
+{
+    if (!Contigs || !Map_State || !Contact_Matrix || !Contact_Matrix->pixelRearrangmentLookupBuffer)
+        return 0;
+    const u32 n = Contigs->numberOfContigs;
+    const u32 nPixels = Number_of_Pixels_1D;
+    if (!n || !nPixels || order.size() != n)
+        return 0;
+
+    std::vector<u32> rangeStart(n + 1, 0);
+    u32 covered = 0;
+    for (u32 i = 0; i < n; ++i)
+    {
+        rangeStart[i + 1] = rangeStart[i] + Contigs->contigs_arr[i].length;
+        covered += Contigs->contigs_arr[i].length;
+    }
+    if (covered != nPixels)
+        return 0;
+
+    std::vector<u08> seen(n, 0);
+    std::vector<u32> srcOfDest(nPixels);
+    std::vector<u32> destOfSrc(nPixels);
+    for (u32 i = 0; i < nPixels; ++i) destOfSrc[i] = i;
+
+    u32 dest = 0;
+    for (int signed_id : order)
+    {
+        const u32 id = (u32)std::abs(signed_id);
+        if (id < 1 || id > n || seen[id - 1])
+            return 0;
+        seen[id - 1] = 1;
+        const bool inverted = signed_id < 0;
+        const u32 srcContig = id - 1;
+        const u32 begin = rangeStart[srcContig];
+        const u32 len = Contigs->contigs_arr[srcContig].length;
+        for (u32 j = 0; j < len; ++j)
+        {
+            if (dest >= nPixels) return 0;
+            const u32 src = inverted ? (begin + len - 1 - j) : (begin + j);
+            srcOfDest[dest] = src;
+            destOfSrc[src] = dest;
+            ++dest;
+        }
+    }
+    if (dest != nPixels)
+        return 0;
+
+    glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+    u32 *buffer = (u32 *)glMapBufferRange(
+        GL_TEXTURE_BUFFER, 0, nPixels * sizeof(u32), GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
+    if (!buffer)
+    {
+        glBindBuffer(GL_TEXTURE_BUFFER, 0);
+        fprintf(stderr, "[Load AGP] Could not map pixel rearrange buffer\n");
+        return 0;
+    }
+
+    std::vector<u32> tmp32(nPixels);
+    std::vector<u64> tmp64(nPixels);
+    auto permute32 = [&](u32 *arr)
+    {
+        for (u32 d = 0; d < nPixels; ++d) tmp32[d] = arr[srcOfDest[d]];
+        std::copy(tmp32.begin(), tmp32.end(), arr);
+    };
+    permute32(buffer);
+    permute32(Map_State->originalContigIds);
+    permute32(Map_State->contigRelCoords);
+    permute32(Map_State->scaffIds);
+    for (u32 d = 0; d < nPixels; ++d) tmp64[d] = Map_State->metaDataFlags[srcOfDest[d]];
+    std::copy(tmp64.begin(), tmp64.end(), Map_State->metaDataFlags);
+
+    glUnmapBuffer(GL_TEXTURE_BUFFER);
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+
+    if (Waypoint_Editor && Waypoint_Editor->nWaypointsActive)
+    {
+        waypoint *ways[Waypoints_Stack_Size];
+        u32 nways = 0;
+        TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
+        {
+            if (nways < Waypoints_Stack_Size) ways[nways++] = node;
+        }
+        const f32 ooNPixels = (f32)(1.0 / (f64)nPixels);
+        for (u32 i = 0; i < nways; ++i)
+        {
+            waypoint *wayp = ways[i];
+            const u32 upperTri = wayp->coords.x > wayp->coords.y;
+            u32 pixX = (u32)((0.5f + wayp->coords.x) / ooNPixels);
+            u32 pixY = (u32)((0.5f + wayp->coords.y) / ooNPixels);
+            if (pixX >= nPixels) pixX = nPixels - 1;
+            if (pixY >= nPixels) pixY = nPixels - 1;
+            pixX = destOfSrc[pixX];
+            pixY = destOfSrc[pixY];
+            point2f newCoords = {((f32)pixX * ooNPixels) - 0.5f, ((f32)pixY * ooNPixels) - 0.5f};
+            if ((newCoords.x > newCoords.y) != (upperTri != 0))
+                newCoords = {newCoords.y, newCoords.x};
+            UpdateWayPoint(wayp, newCoords);
+        }
+    }
+
+    UpdateContigsFromMapState();
+    Redisplay = 1;
+    return 1;
 }
 
 /*
@@ -13549,6 +13776,24 @@ void Load_AGP(const std::string& agp_path)
                 "[Load AGP::error]: No AGP sequence lines matched original contigs on the map.\n");
         }
 
+        std::vector<std::vector<agp_pixel_ref>> pixels_by_orig(Number_of_Original_Contigs);
+        for (u32 oid = 0; oid < Number_of_Original_Contigs; ++oid)
+            pixels_by_orig[oid].reserve(contig_pixel_count[oid]);
+        for (u32 p = 0; p < Number_of_Pixels_1D; ++p)
+        {
+            const u32 oid = GetOriginalContigBaseId(Map_State->originalContigIds[p]);
+            if (oid < Number_of_Original_Contigs)
+                pixels_by_orig[oid].push_back({Map_State->contigRelCoords[p], p});
+        }
+        for (auto& refs : pixels_by_orig)
+        {
+            std::sort(refs.begin(), refs.end(), [](const agp_pixel_ref& a, const agp_pixel_ref& b)
+            {
+                if (a.rel != b.rel) return a.rel < b.rel;
+                return a.pix < b.pix;
+            });
+        }
+
         std::vector<int> merged_split_points;
         for (int idx : representative_frags)
         {
@@ -13557,7 +13802,7 @@ void Load_AGP(const std::string& agp_path)
             const int local_pixel = agp_local_bp_to_rel_pixel(
                 frag.start, bp_per_pixel, contig_pixel_count[frag.orig_contig_id]);
             if (local_pixel <= 0) continue;
-            const int global_pixel = find_pixel_for_original_rel((u32)frag.orig_contig_id, local_pixel);
+            const int global_pixel = find_closest_agp_pixel(pixels_by_orig[frag.orig_contig_id], local_pixel);
             if (global_pixel <= 0 || global_pixel >= (int)Number_of_Pixels_1D) continue;
             merged_split_points.push_back(global_pixel);
         }
@@ -13566,7 +13811,7 @@ void Load_AGP(const std::string& agp_path)
             std::unique(merged_split_points.begin(), merged_split_points.end()),
             merged_split_points.end());
 
-        cut_frags(merged_split_points, false, false);
+        cut_frags(merged_split_points, false, false, false);
 
         const u32 n_map = Contigs->numberOfContigs;
         if (!n_map)
@@ -13580,12 +13825,23 @@ void Load_AGP(const std::string& agp_path)
         contigs_order_agp.reserve(n_map);
         paint_frags.reserve(n_map);
 
+        std::vector<std::vector<agp_contig_cand>> cands_by_orig(Number_of_Original_Contigs);
+        for (u32 i = 0; i < n_map; ++i)
+        {
+            const contig *cont = Contigs->contigs_arr + i;
+            if (cont->originalContigId < Number_of_Original_Contigs)
+                cands_by_orig[cont->originalContigId].push_back({(int)agp_map_contig_low_coord(i), i});
+        }
+
         for (int idx : representative_frags)
         {
             const Frag& frag = assembly_agp.frags[idx];
+            if (frag.orig_contig_id < 0 || (u32)frag.orig_contig_id >= Number_of_Original_Contigs)
+                continue;
             const int local_pixel = agp_local_bp_to_rel_pixel(
                 frag.start, bp_per_pixel, contig_pixel_count[frag.orig_contig_id]);
-            const int map_idx = find_map_contig_for_agp_frag((u32)frag.orig_contig_id, local_pixel, used);
+            const int map_idx = find_map_contig_for_agp_frag(
+                cands_by_orig[(u32)frag.orig_contig_id], local_pixel, used);
             if (map_idx < 0)
             {
                 fmt::print(
@@ -13622,9 +13878,13 @@ void Load_AGP(const std::string& agp_path)
                 n_unmatched);
         }
 
-        FragsOrder frags_order_agp(contigs_order_agp);
-        AutoCurationFromFragsOrder(&frags_order_agp, Contigs, Map_State, nullptr);
-        UpdateContigsFromMapState();
+        if (!apply_signed_contig_order(contigs_order_agp))
+        {
+            fmt::print("[Load AGP] Direct reorder unavailable; applying order fragment by fragment.\n");
+            FragsOrder frags_order_agp(contigs_order_agp);
+            AutoCurationFromFragsOrder(&frags_order_agp, Contigs, Map_State, nullptr);
+            UpdateContigsFromMapState();
+        }
 
         int pix_ptr = 0;
         for (u32 i = 0; i < Contigs->numberOfContigs; i++)
@@ -14539,7 +14799,7 @@ GenerateAGP(char *path, u08 overwrite, u08 preserveOrder)
     u32* tmp_orignal_contig_ids = new u32[Number_of_Pixels_1D];
     for (u32 i = 0 ; i< Number_of_Pixels_1D; i++ )tmp_orignal_contig_ids[i] = Map_State->originalContigIds[i];
     Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
-    UpdateContigsFromMapState(); // todo 检查粘贴后会不会影响 painted 的 scaffolds
+    UpdateContigsFromMapState(); // todo :check if it affects painted scaffolds    
 
     FILE *file;
     if (!overwrite && (file = fopen((const char *)path, "rb")))
@@ -16300,7 +16560,18 @@ MainArgs
                                                             colour = nk_color_picker(NK_Context, colour, NK_RGBA);
 
                                                             nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
-                                                            if (nk_button_label(NK_Context, "Default")) colour = DefaultGraphColour;
+                                                            if (nk_button_label(NK_Context, "Default"))
+                                                            {
+                                                                linkage_colour groupColour;
+                                                                if (LinkageGroupColour((const char *)gph->name, &groupColour))
+                                                                {
+                                                                    colour = {groupColour.r, groupColour.g, groupColour.b, groupColour.a};
+                                                                }
+                                                                else
+                                                                {
+                                                                    colour = DefaultGraphColour;
+                                                                }
+                                                            }
 
                                                             gph->colour = colour;
 

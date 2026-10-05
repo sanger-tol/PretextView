@@ -148,6 +148,9 @@ if(NOT lib_deflate_static)
 else()
     message(STATUS "lib_deflate_static found: ${lib_deflate_static}")
 endif()
+# find_library often returns libdeflate.dylib, a symlink to libdeflate.0.dylib.
+# install(FILES) would copy that symlink and leave the soname missing at runtime.
+get_filename_component(lib_deflate_real ${lib_deflate_static} REALPATH)
 
 add_library(yahs STATIC 
     src/yahs_sort.cpp
@@ -182,9 +185,9 @@ add_library(copy_texture STATIC src/copy_texture.cpp)
 
 
 if(NOT APPLE)
-    add_executable( ${target_name} PretextView.cpp )
+    add_executable( ${target_name} PretextView.cpp src/linkage.cpp )
 else()
-    add_executable( ${target_name} MACOSX_BUNDLE PretextView.cpp )
+    add_executable( ${target_name} MACOSX_BUNDLE PretextView.cpp src/linkage.cpp )
     set_target_properties(
         ${target_name} PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/Info.plist"
@@ -362,7 +365,7 @@ if(APPLE)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/icon.icns"
             DESTINATION "${target_name}.app/Contents/Resources" )
     install(
-        FILES ${lib_deflate_static}
+        FILES ${lib_deflate_real}
         DESTINATION "${target_name}.app/Contents/Frameworks")
     # Install libfmt dylib - get the real file path
     get_filename_component(lib_fmt_real ${lib_fmt} REALPATH)
@@ -406,7 +409,7 @@ elseif(UNIX AND NOT APPLE) # Linux
         RUNTIME DESTINATION "bin"
         COMPONENT Runtime)
     install(
-        FILES ${lib_deflate_static}
+        FILES ${lib_deflate_real}
         DESTINATION "lib")
     if (WITH_TORCH)
         install(
@@ -432,7 +435,7 @@ else () # windows
         RUNTIME DESTINATION .
         COMPONENT Runtime)
     install(
-        FILES ${lib_deflate_static}
+        FILES ${lib_deflate_real}
         DESTINATION .)
     if (WITH_TORCH)
         install(

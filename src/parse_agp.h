@@ -7,7 +7,6 @@
 #include <vector>
 #include <fstream>
 #include <algorithm>
-#include <sstream>
 #include <unordered_map>
 #include <cstdint>
 #include <cmath>
@@ -16,6 +15,9 @@
 #include <limits>
 #include <stdexcept>
 #include <cassert>
+#include <string_view>
+#include <charconv>
+#include <system_error>
 #include "genomeData.h"
 
 
@@ -102,67 +104,79 @@ inline std::string agp_trim(const std::string& s)
 }
 
 
-inline std::vector<std::string> agp_split_tabs(const std::string& line)
+inline std::string_view agp_trim_view(std::string_view s)
 {
-    std::vector<std::string> fields;
-    std::string cur;
-    for (char c : line)
-    {
-        if (c == '\t')
-        {
-            fields.push_back(cur);
-            cur.clear();
-        }
-        else if (c != '\r')
-        {
-            cur.push_back(c);
-        }
-    }
-    fields.push_back(cur);
-    while (!fields.empty() && agp_trim(fields.back()).empty()) fields.pop_back();
-    return fields;
+    size_t a = 0;
+    while (a < s.size() && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
+    size_t b = s.size();
+    while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
+    return s.substr(a, b - a);
 }
 
 
-inline bool agp_parse_i64(const std::string& s, int64_t& out)
+// Fills `fields` with views into `line` (no per-field allocation). Returns the
+// field count, dropping trailing empty fields. Fields past `max_fields` are ignored.
+inline int agp_split_tabs_view(const std::string& line, std::string_view* fields, int max_fields)
 {
-    try
+    const char* p = line.data();
+    const char* end = p + line.size();
+    if (p < end && end[-1] == '\r') --end;
+
+    int n = 0;
+    const char* start = p;
+    for (; p < end; ++p)
     {
-        const std::string t = agp_trim(s);
-        if (t.empty()) return false;
-        size_t idx = 0;
-        out = std::stoll(t, &idx, 10);
-        return idx == t.size();
+        if (*p != '\t') continue;
+        if (n < max_fields) fields[n++] = std::string_view(start, static_cast<size_t>(p - start));
+        start = p + 1;
     }
-    catch (...)
-    {
-        return false;
-    }
+    if (n < max_fields) fields[n++] = std::string_view(start, static_cast<size_t>(end - start));
+    while (n > 0 && agp_trim_view(fields[n - 1]).empty()) --n;
+    return n;
 }
 
 
-inline bool agp_is_gap_component(const std::string& type)
+inline bool agp_parse_i64(std::string_view s, int64_t& out)
+{
+    s = agp_trim_view(s);
+    if (s.empty()) return false;
+    if (s.front() == '+')
+    {
+        s.remove_prefix(1);
+        if (s.empty()) return false;
+    }
+    const char* begin = s.data();
+    const char* end = begin + s.size();
+    int64_t v = 0;
+    const std::from_chars_result res = std::from_chars(begin, end, v, 10);
+    if (res.ec != std::errc() || res.ptr != end) return false;
+    out = v;
+    return true;
+}
+
+
+inline bool agp_is_gap_component(std::string_view type)
 {
     return type == "U" || type == "N";
 }
 
 
-inline bool agp_is_sequence_component(const std::string& type)
+inline bool agp_is_sequence_component(std::string_view type)
 {
     return type == "W" || type == "D" || type == "F" || type == "A" || type == "P" || type == "O" || type == "G";
 }
 
 
 // Scaffold_12 / H1.scaffold_1 -> 0-based id from the trailing _number.
-inline int get_scaff_id(const std::string& scaff_name)
+inline int get_scaff_id(std::string_view scaff_name)
 {
     const auto pos = scaff_name.find_last_of('_');
-    const std::string token = (pos != std::string::npos && pos + 1 < scaff_name.size())
+    const std::string_view token = (pos != std::string_view::npos && pos + 1 < scaff_name.size())
         ? scaff_name.substr(pos + 1)
         : scaff_name;
 
     size_t i = 0;
-    while (i < token.size() && std::isdigit((unsigned char)token[i])) ++i;
+    while (i < token.size() && std::isdigit(static_cast<unsigned char>(token[i]))) ++i;
     if (i == 0)
     {
         fmt::print(stderr, "[Load AGP::warning]: scaffold name '{}' has no trailing number; using id 0.\n", scaff_name);
@@ -194,6 +208,7 @@ public:
 
     std::vector<Frag> frags;
     std::unordered_map<std::string, Original_Contig_agp> original_contigs;
+    std::unordered_map<std::string, int> contig_name_to_id;
     std::vector<Scaff_agp> scaffs;
     int64_t total_bp = 0;
     int skipped_line_count = 0;
@@ -227,14 +242,20 @@ public:
             return;
         }
         int scaff_id = get_scaff_id(scaff_name); // start from 0
-        
-        if (this->original_contigs.find(original_contig_name) == this->original_contigs.end())
-            this->original_contigs[original_contig_name] = Original_Contig_agp(end_local, 1);
-        else {
-            this->original_contigs[original_contig_name].num_frags++;
-            this->original_contigs[original_contig_name].len = std::max(this->original_contigs[original_contig_name].len, end_local);
+
+        auto contig_it = this->original_contigs.find(original_contig_name);
+        if (contig_it == this->original_contigs.end())
+        {
+            Original_Contig_agp created(end_local, 1);
+            created.starts.push_back(start_local);
+            this->original_contigs.emplace(original_contig_name, std::move(created));
         }
-        this->original_contigs[original_contig_name].starts.push_back(start_local);
+        else
+        {
+            contig_it->second.num_frags++;
+            contig_it->second.len = std::max(contig_it->second.len, end_local);
+            contig_it->second.starts.push_back(start_local);
+        }
         const int64_t frag_len = (end_local >= start_local)
             ? (end_local - start_local + 1)
             : (start_local - end_local + 1);
@@ -279,15 +300,16 @@ public:
         const int& num_original_contigs,
         meta_data* Meta_Data)
     {
-        const std::vector<std::string> fields = agp_split_tabs(line);
-        if (fields.size() < 5)
+        std::string_view fields[64];
+        const int nfields = agp_split_tabs_view(line, fields, 64);
+        if (nfields < 5)
         {
             fmt::print(stderr, "[Load AGP::warning]: skipped unparsed AGP line {}: {}\n", line_no, line);
             ++this->skipped_line_count;
             return false;
         }
 
-        const std::string& component_type = fields[4];
+        const std::string_view component_type = fields[4];
         if (agp_is_gap_component(component_type))
             return true;
 
@@ -298,7 +320,7 @@ public:
             return false;
         }
 
-        if (fields.size() < 9)
+        if (nfields < 9)
         {
             fmt::print(stderr, "[Load AGP::warning]: skipped short sequence AGP line {}: {}\n", line_no, line);
             ++this->skipped_line_count;
@@ -313,14 +335,14 @@ public:
             return false;
         }
 
-        const std::string& scaff_name = fields[0];
-        const std::string& original_contig_name = fields[5];
+        const std::string scaff_name(fields[0]);
+        const std::string original_contig_name(fields[5]);
         const bool is_reverse = fields[8] == "-";
         bool is_painted = false;
         std::string tags_str;
-        for (size_t i = 9; i < fields.size(); ++i)
+        for (int i = 9; i < nfields; ++i)
         {
-            const std::string field = agp_trim(fields[i]);
+            const std::string_view field = agp_trim_view(fields[i]);
             if (field.empty()) continue;
             if (!is_painted && field == "Painted")
             {
@@ -328,7 +350,7 @@ public:
                 continue;
             }
             if (!tags_str.empty()) tags_str.push_back(' ');
-            tags_str += field;
+            tags_str.append(field.data(), field.size());
         }
 
         this->add_frag(
@@ -359,6 +381,8 @@ public:
 
         sample_name = agp_file.substr(agp_file.find_last_of("/\\") + 1);
         sample_name = sample_name.substr(0, sample_name.find('.'));
+        this->index_original_contig_names(Original_Contigs, num_original_contigs);
+        if (num_original_contigs > 0) this->original_contigs.reserve((size_t)num_original_contigs);
 
         std::string line;
         int line_no = 0;
@@ -377,26 +401,32 @@ public:
         this->sort_frags_local_index(Original_Contigs);
     }
 
-    uint64_t parse_tags(const std::string tags_str, meta_data* Meta_Data)
+    uint64_t parse_tags(const std::string& tags_str, meta_data* Meta_Data)
     {   
         if (tags_str.empty() || Meta_Data == nullptr) return 0;
         uint64_t tags_u64 = 0;
-        std::istringstream iss(tags_str);
-        std::string tag;
-        
-        while (iss >> tag) 
+        const char* p = tags_str.c_str();
+        while (*p)
         {
-            for (int i = 0 ; i<64 ; i ++ )
-            {   
-                if (std::string((char*)Meta_Data->tags[i]).empty()) 
-                {   
-                    const size_t n = std::min(tag.size(), sizeof(Meta_Data->tags[i]) - 1);
-                    memcpy(Meta_Data->tags[i], tag.data(), n);
+            while (*p == ' ') ++p;
+            if (!*p) break;
+            const char* start = p;
+            while (*p && *p != ' ') ++p;
+            const size_t len = (size_t)(p - start);
+
+            for (int i = 0; i < 64; ++i)
+            {
+                const char* existing = (const char*)Meta_Data->tags[i];
+                if (existing[0] == 0)
+                {
+                    const size_t n = std::min(len, sizeof(Meta_Data->tags[i]) - 1);
+                    memcpy(Meta_Data->tags[i], start, n);
                     ((char*)Meta_Data->tags[i])[n] = 0;
                     tags_u64 |= (1ULL << i);
                     break;
                 }
-                else if (tag == std::string((char*)(Meta_Data->tags[i])))
+                const size_t existing_len = strlen(existing);
+                if (existing_len == len && memcmp(existing, start, len) == 0)
                 {
                     tags_u64 |= (1ULL << i);
                     break;
@@ -488,18 +518,23 @@ public:
         return 0;
     }
 
+    void index_original_contig_names(const original_contig* Original_Contigs, int num_original_contigs)
+    {
+        contig_name_to_id.clear();
+        if (Original_Contigs == nullptr || num_original_contigs <= 0) return;
+        contig_name_to_id.reserve((size_t)num_original_contigs);
+        for (int i = 0; i < num_original_contigs; ++i)
+            contig_name_to_id.emplace((const char*)Original_Contigs[i].name, i);
+    }
+
     int get_original_contig_id(
         const original_contig* Original_Contigs, const int& num_original_contigs, const std::string& name)
     {
-        if (Original_Contigs == nullptr) return -1;
-        for (int i = 0; i < num_original_contigs; i++)
-        {
-            if (strcmp((char*)(Original_Contigs+i)->name, name.c_str()) == 0)
-            {
-                return i;
-            }
-        }
-        return -1;
+        (void)Original_Contigs;
+        (void)num_original_contigs;
+        const auto it = contig_name_to_id.find(name);
+        if (it == contig_name_to_id.end()) return -1;
+        return it->second;
     }
 
     std::string __str__() const
@@ -519,15 +554,19 @@ public:
         for (auto& it:this->original_contigs) std::sort(it.second.starts.begin(), it.second.starts.end());
         for (size_t i = 0 ; i < frags.size(); i++)
         {
-            std::string original_contig_name = std::string((char*)Original_Contigs[frags[i].orig_contig_id].name);
-            int tmp_index = 0;
-            while (tmp_index < (int)this->original_contigs[original_contig_name].starts.size() && 
-                this->frags[i].start != this->original_contigs[original_contig_name].starts[tmp_index]) tmp_index++;
-            if (tmp_index >= (int)this->original_contigs[original_contig_name].starts.size())
+            const std::string original_contig_name((char*)Original_Contigs[frags[i].orig_contig_id].name);
+            const auto contig_it = this->original_contigs.find(original_contig_name);
+            if (contig_it == this->original_contigs.end())
             {
                 throw std::runtime_error(fmt::format("Error: original contig name {} not found in Original_Contigs. file: {}, line: {}\n", original_contig_name, __FILE__, __LINE__));
             }
-            this->frags[i].local_index = tmp_index;
+            const std::vector<int64_t>& starts = contig_it->second.starts;
+            const auto start_it = std::lower_bound(starts.begin(), starts.end(), this->frags[i].start);
+            if (start_it == starts.end() || *start_it != this->frags[i].start)
+            {
+                throw std::runtime_error(fmt::format("Error: original contig name {} not found in Original_Contigs. file: {}, line: {}\n", original_contig_name, __FILE__, __LINE__));
+            }
+            this->frags[i].local_index = (int)(start_it - starts.begin());
         }
     }
 };
