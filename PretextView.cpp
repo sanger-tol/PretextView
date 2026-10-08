@@ -345,6 +345,11 @@ global_variable
     nk_colorf
         DefaultGraphColour = graphColors[activeGraphColour];
 
+// 0 shows every alg group. 1..6 show only d1..d6.
+global_variable
+u32
+Linkage_Group_Filter = 0;
+
 // Extension name constants
 global_variable const char *
     EXT_NAME_3P_TELOMERE = "3p_telomere";
@@ -2698,6 +2703,14 @@ global_function
 void
 AddMapEdit(s32 delta, pointui finalPixels, u32 invert)
 {
+    u32 pix1 = (u32)(invert ? my_Max(finalPixels.x, finalPixels.y) : my_Min(finalPixels.x, finalPixels.y));
+    u32 pix2 = (u32)(invert ? my_Min(finalPixels.x, finalPixels.y) : my_Max(finalPixels.x, finalPixels.y));
+
+    // A single pixel with no move cannot be replayed (a 1-pixel invert does not
+    // fit in finalPix1 > finalPix2). Recording it only fills the fixed stack.
+    if (delta == 0 && pix1 == pix2)
+        return;
+
     ++Map_Editor->nEdits;
     Map_Editor->nUndone = 0;
 
@@ -2707,9 +2720,6 @@ AddMapEdit(s32 delta, pointui finalPixels, u32 invert)
     {
         Map_Editor->editStackPtr = 0;
     }
-
-    u32 pix1 = (u32)(invert ? my_Max(finalPixels.x, finalPixels.y) : my_Min(finalPixels.x, finalPixels.y));
-    u32 pix2 = (u32)(invert ? my_Min(finalPixels.x, finalPixels.y) : my_Max(finalPixels.x, finalPixels.y));
 
     edit->delta = (s32)delta;
     edit->finalPix1 = pix1;
@@ -2753,7 +2763,7 @@ UndoMapEdit()
 
         if (!Map_Editor->editStackPtr)
         {
-            Map_Editor->editStackPtr = Edits_Stack_Size + 1;
+            Map_Editor->editStackPtr = Edits_Stack_Size;
         }
 
         map_edit *edit = Map_Editor->edits + (--Map_Editor->editStackPtr);
@@ -5296,9 +5306,6 @@ Render() {
             fonsVertMetrics(FontStash_Context, 0, 0, &lh);
             fonsSetColor(FontStash_Context, FourFloatColorToU32(Extension_Mode_Data->text));
 
-            f32 textBoxHeight = lh;
-            textBoxHeight *= 7.0f;
-            textBoxHeight += 6.0f;
             f32 spacing = 10.0f;
 
             // 6 lines in total
@@ -5340,11 +5347,19 @@ Render() {
                                 {
                                     helpTexts.push_back("T: Graph: telomere");
                                 }
+                                else if (strcmp((char*)gph->name, "alg") == 0)
+                                {
+                                    static const char *labels[] = {"all", "d1", "d2", "d3", "d4", "d5", "d6"};
+                                    helpTexts.push_back(gph->on ? "U: hide alg" : "U: load alg");
+                                    helpTexts.push_back(std::string("Y: alg ") + labels[Linkage_Group_Filter]);
+                                }
                             }
                             break;
                     }
                 }
             }
+
+            f32 textBoxHeight = lh * (f32)helpTexts.size() + 6.0f;
 
             f32 textWidth = 0.; 
             for (auto i : helpTexts)
@@ -7272,6 +7287,121 @@ add_graph_to_extensions(
 
 
 global_function
+void
+UploadAlgGroupColours(graph *gph)
+{
+    if (!gph || !gph->data || !gph->shader || !gph->shader->yValuesBuffer || !Number_of_Pixels_1D)
+    {
+        return;
+    }
+
+    u32 nValues = Number_of_Pixels_1D;
+    f32 *packed = new f32[nValues * 4];
+    ForLoop(nValues)
+    {
+        u32 value = gph->data[index];
+        u32 show = (!Linkage_Group_Filter || value == Linkage_Group_Filter) ? value : 0;
+        linkage_colour groupColour = {0.1f, 0.8f, 0.7f, 1.0f};
+        if (show)
+        {
+            LinkageGroupColourByValue(show, &groupColour);
+        }
+        packed[index * 4 + 0] = show ? 1.0f : 0.0f;
+        packed[index * 4 + 1] = groupColour.r;
+        packed[index * 4 + 2] = groupColour.g;
+        packed[index * 4 + 3] = groupColour.b;
+    }
+    glBindBuffer(GL_TEXTURE_BUFFER, gph->shader->yValuesBuffer);
+    glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues * 4, packed, GL_DYNAMIC_DRAW);
+    delete[] packed;
+}
+
+global_function
+void
+CycleLinkageGroup()
+{
+    static const char *labels[] = {"all groups", "d1", "d2", "d3", "d4", "d5", "d6"};
+    Linkage_Group_Filter = (Linkage_Group_Filter + 1) % 7;
+
+    u08 found = 0;
+    if (Extensions.head)
+    {
+        TraverseLinkedList(Extensions.head, extension_node)
+        {
+            if (node->type != extension_graph)
+            {
+                continue;
+            }
+            graph *gph = (graph *)node->extension;
+            if (strcmp((char *)gph->name, "alg") == 0)
+            {
+                gph->on = 1;
+                UploadAlgGroupColours(gph);
+                found = 1;
+            }
+        }
+    }
+
+    if (found)
+    {
+        fmt::println("[alg] showing {}", labels[Linkage_Group_Filter]);
+    }
+    else
+    {
+        fmt::println("[alg] no alg track in this map");
+    }
+    Redisplay = 1;
+}
+
+global_function
+void
+ToggleAlgTrack()
+{
+    u08 found = 0;
+    u08 showing = 0;
+    if (Extensions.head)
+    {
+        TraverseLinkedList(Extensions.head, extension_node)
+        {
+            if (node->type != extension_graph)
+            {
+                continue;
+            }
+            graph *gph = (graph *)node->extension;
+            if (strcmp((char *)gph->name, "alg") == 0)
+            {
+                found = 1;
+                if (gph->on)
+                {
+                    gph->on = 0;
+                }
+                else
+                {
+                    Linkage_Group_Filter = 0;
+                    gph->on = 1;
+                    UploadAlgGroupColours(gph);
+                    showing = 1;
+                }
+            }
+        }
+    }
+
+    if (!found)
+    {
+        fmt::println("[alg] no alg track in this map");
+    }
+    else if (showing)
+    {
+        fmt::println("[alg] showing all groups");
+    }
+    else
+    {
+        fmt::println("[alg] hidden");
+    }
+    Redisplay = 1;
+}
+
+global_function
 void 
 push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1.f)
 {   
@@ -7356,24 +7486,12 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
 
                     if (linkageTrack)
                     {
-                        auto *packed = new f32[nValues * 4];
                         ForLoop(nValues)
                         {
                             xValues[index] = (f32)index;
-                            u32 value = gph->data[index];
-                            linkage_colour groupColour = DefaultGraphColour;
-                            if (value)
-                            {
-                                LinkageGroupColourByValue(value, &groupColour);
-                            }
-                            packed[index * 4 + 0] = value ? 1.0f : 0.0f;
-                            packed[index * 4 + 1] = groupColour.r;
-                            packed[index * 4 + 2] = groupColour.g;
-                            packed[index * 4 + 3] = groupColour.b;
                         }
-                        glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues * 4, packed, GL_STATIC_DRAW);
+                        glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues * 4, 0, GL_DYNAMIC_DRAW);
                         glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, yVal);
-                        delete[] packed;
                     }
                     else
                     {
@@ -7396,6 +7514,10 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
 
                     gph->shader->yValuesBuffer = yVal;
                     gph->shader->yValuesBufferTex = yValTex;
+                    if (linkageTrack)
+                    {
+                        UploadAlgGroupColours(gph);
+                    }
                     
                     // add the vertext data into buffer
                     glGenBuffers(1, &gph->vbo);
@@ -11152,6 +11274,18 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
             (void)scancode;
 #endif
 
+            if (key == GLFW_KEY_Y && action == GLFW_PRESS && !GatheringTextInput)
+            {
+                CycleLinkageGroup();
+                return;
+            }
+
+            if (key == GLFW_KEY_U && action == GLFW_PRESS && !GatheringTextInput)
+            {
+                ToggleAlgTrack();
+                return;
+            }
+
             if (key == GLFW_KEY_ENTER && mods == GLFW_MOD_ALT)
             {
                 if (glfwGetWindowMonitor(window))
@@ -11460,6 +11594,13 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     }
                     break;
 
+                case GLFW_KEY_U:
+                    if (action == GLFW_PRESS)
+                    {
+                        ToggleAlgTrack();
+                    }
+                    break;
+
                 case GLFW_KEY_T:
                     if (Extension_Mode && Extensions.head)
                     {
@@ -11579,6 +11720,10 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     break;
 
                 case GLFW_KEY_Y:
+                    if (action == GLFW_PRESS)
+                    {
+                        CycleLinkageGroup();
+                    }
                     break;
 
                 case GLFW_KEY_Z:
@@ -13581,6 +13726,13 @@ find_map_contig_for_agp_frag(const std::vector<agp_contig_cand>& cands, int loca
 static void
 restore_map_to_uncut_originals()
 {
+    // A full savestate holds Edits_Stack_Size edits. Undoing each one rearranges
+    // the map, so Load AGP would sit silent after the header. Rebuild the uncut
+    // layout from the .pretext instead.
+    if (PrepareMapForSaveStateEditReplay())
+    {
+        return;
+    }
     if (Map_Editor && Map_Editor->nEdits)
         EraseAllEdits(Map_Editor);
     Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
@@ -14029,13 +14181,14 @@ restore_initial_state()
 
     // edits
     {
-        u32 nEdits  = my_Min(Edits_Stack_Size, Map_Editor->nEdits);
-        ForLoop(nEdits) UndoMapEdit();
-    }
-    
-    // restore all the splited contigs
-    {
-        Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
+        // A full savestate leaves editStackPtr at 0. Undoing that used to read
+        // one past the edit array and crash. Rebuild the uncut map instead.
+        if (!PrepareMapForSaveStateEditReplay())
+        {
+            u32 nEdits = my_Min(Edits_Stack_Size, Map_Editor->nEdits);
+            ForLoop(nEdits) UndoMapEdit();
+            Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
+        }
     }
 
 

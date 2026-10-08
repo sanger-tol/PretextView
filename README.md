@@ -18,13 +18,23 @@ PretextView is a desktop application for viewing pretext contact maps.<br/>
 - `X`: enter the extension edit mode.
 - `W`: enter the Waypoint edit mode.
 - `J`: window jump to the diagonal line without changing the zoom-level, which is useful for selecting the correct place for a small fragment.
+- `K`: return the window to the position from before the last `J`.
 - `L`: toggle the Grid Line.
 - `T`: toggle the Tooltip. When it is on, the tooltip window shows the contig names and positions for the row and column under the cursor, the scaffold id, **meta tag** names that apply at that locus (from Meta Tag mode), and values for enabled extension tracks (e.g. coverage) when those are turned on.
 - `I`: toggle the ID bar.
+- `B`: toggle the scale bars.
+- `N`: toggle contig name labels.
+- `U`: show the full **alg** track when it is hidden, or hide it when it is shown. Resets the linkage-group filter to all groups when showing. No effect if the map has no alg track.
+- `Y`: cycle the alg track through all groups, then `d1` … `d6`. Each press turns the track on.
 - `3`: toggle the 3p_telomere extension.
 - `5`: toggle the 5p_telomere extension.
+- `C`: toggle the coverage track, unless Select sort area mode has a selection (then `C` cuts that selection).
+- `G`: toggle the gap track.
+- `Shift+S`: toggle scaffolds always visible (outside Edit mode and Select sort area mode).
 - `Up` / `Down`: change the color map.
 - `Left` / `Right`: decrease / increase the Gamma mid (default: 0.5).
+- `Ctrl+=` / `Ctrl+-` / `Ctrl+0`: increase, decrease, or reset the on-screen help text size.
+- `Alt+Enter`: toggle fullscreen.
 
 ## Main GUI (`Esc`)
 <img src="doc/image_mainGUI.png" alt="" width="600">
@@ -38,7 +48,9 @@ PretextView is a desktop application for viewing pretext contact maps.<br/>
 
 ## Edit mode (`E`)
 - `left mouse button`: Click and drag with the left mouse button to select an are to zoom to. 
-- Pickup a region of a contig with the left mouse button, pickup a whole contig with the middle mouse button or spacebar. Place a region with the left mouse button. Invert a selected region with the middle mouse button or spacebar. Undo the last edit with the 'q' key. Exit edit mode with the 'e' key. Use the GUI to see a list of completed edits.
+- Pickup a region of a contig with the left mouse button, pickup a whole contig with the middle mouse button or spacebar. Place a region with the left mouse button. Invert a selected region with the middle mouse button or spacebar. Undo the last edit with the `Q` key. Redo with `W`. Exit edit mode with the `E` key. Use the GUI to see a list of completed edits.
+- `S`: toggle snap mode.
+- Hold `Shift` with middle click or `Space` to pick up the whole painted scaffold under the cursor.
 - `P`: copy the **highlighted** map range to the system clipboard. The text lists each map fragment in the selection with the contig name and a **local** span in megabases along that fragment (not a single genome-wide coordinate).
 - `V`: break (split) the contig at the start of the current selection.
 - `Tab`: mark the contig under the cursor for multi-select (press again to deselect). Selected contigs are highlighted with an orange cross pattern. Press `Space` or `middle mouse button` to consolidate all marked contigs into an adjacent group and enter editing mode. Press `Space` or `middle mouse button` again while editing to invert the entire consolidated selection. Press `Q` to undo (including while still editing, which cancels the current edit session).
@@ -52,8 +64,21 @@ PretextView is a desktop application for viewing pretext contact maps.<br/>
 - Use the GUI to see a list of waypoints, click on a waypoint in the list to vist it.
 
 ## Scaffold edit mode (`S`)
-Enter scaffolding mode with the 's' key.
+Enter scaffolding mode with the `S` key.
+- `Left click`: paint the active scaffold.
+- `Middle click` or `Space`: erase scaffold paint under the cursor.
+- Hold `A`: flood fill.
+- Hold `Shift+A`: flood fill and override existing paint.
+- `Shift+D`: clear every scaffold.
+- `S`: exit.
 - Use the GUI to see a list of scaffolds.
+
+## Meta tag edit mode (`M`)
+- `Left click`: paint the active tag.
+- `Middle click` or `Space`: erase the tag under the cursor.
+- `Left` / `Right`: select the active tag.
+- `Shift+D`: clear every meta tag.
+- `M`: exit.
 
 ## Extension edit mode (`X`)
 Enter extension mode with the `X` key to toggle various genomic feature overlays. Once in extension mode, press:
@@ -63,9 +88,11 @@ Enter extension mode with the `X` key to toggle various genomic feature overlays
 - `C`: Toggle **coverage** track on/off
 - `G`: Toggle **gap** track on/off
 - `R`: Toggle **repeat_density** track on/off
+- `U`: Show the full **alg** track, or hide it if it is already shown (also works at top level)
+- `Y`: Cycle the alg linkage group: all groups, then `d1` … `d6`. Turns the track on (also works at top level)
 - `X`: Exit extension mode
 
-**Note:** The `3` and `5` keys work both inside and outside Extension Mode. Other shortcuts (C, G, R, T) only work when in Extension Mode, as these keys have different functions outside of it.
+**Note:** `3`, `5`, `U`, and `Y` work both inside and outside Extension Mode. `C` and `G` also toggle coverage and gap outside Extension Mode; in Select sort area mode with a selection, `C` cuts that selection instead. `R` toggles repeat density only in Extension Mode. `T` toggles the telomere track only in Extension Mode; otherwise it toggles the tooltip.
 
 ## Select sort area mode (`F`)
 
@@ -74,10 +101,15 @@ After click `Pixel Sort` button in the main UI, it will defaultly run sort globa
 Enter the select sort area mode by pressing `F`.
 - `Left mouse click`: select / un-select area for sorting.
 - `S`: clear all the select area.
-- `Space`: call `Pixel Sort` to sort the select area **(NOTE: only work if select at least 3 fragments)**.
-- `Q/W`: quit/redo edit (currently will change the edit made globally not only the edit made within the selected area, so use this with caution as it can change also other parts)
+- `Space`: call `Pixel Sort` to sort the select area **(NOTE: only works if at least 2 fragments are selected)**.
+- `Q` / `W`: undo / redo. This walks the global edit stack, so it can change parts of the map outside the selection.
 - `C`: cut the scaffolds/contigs within the selected area.
 - `Z`: glue the splitted fragments within the selected area. (NOTE: only link the continuous fragments.)
+- `Up` / `Down`: increase / decrease the cut threshold.
+- `Left` / `Right`: change the sort mode.
+- `Left Shift` / `Right Shift`: decrease / increase the number of clusters.
+- `H`: toggle haplotype-name clustering.
+- `O`: toggle cutting with the gap track.
 
 ## Sort fragments according to link score
 
