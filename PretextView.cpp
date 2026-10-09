@@ -11274,18 +11274,9 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
             (void)scancode;
 #endif
 
-            if (key == GLFW_KEY_Y && action == GLFW_PRESS && !GatheringTextInput)
-            {
-                CycleLinkageGroup();
-                return;
-            }
-
-            if (key == GLFW_KEY_U && action == GLFW_PRESS && !GatheringTextInput)
-            {
-                ToggleAlgTrack();
-                return;
-            }
-
+            // Y and U toggle the alg track on the map. Do not handle them while the
+            // GUI is open: file and sequence search fields need those letters, and
+            // the shortcut was closing the dialog.
             if (key == GLFW_KEY_ENTER && mods == GLFW_MOD_ALT)
             {
                 if (glfwGetWindowMonitor(window))
