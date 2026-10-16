@@ -4662,6 +4662,7 @@ Render() {
         vertex vert[4];
 
         f32 lineWidth = Grid->size / sqrtf(Camera_Position.z);
+        f32 onePixel = 1.0f / (height * Camera_Position.z);
         f32 position = 0.0f;
 
         // left border
@@ -4675,28 +4676,37 @@ Render() {
         glBindVertexArray(Grid_Data->vaos[ptr++]);
         glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
-        f32 x = -0.5f;
+        f32 previousBoundary = -0.5f;
         ForLoop(Contigs->numberOfContigs - 1)
         {
             contig *cont = Contigs->contigs_arr + index;
 
             position += ((f32)cont->length / (f32)Number_of_Pixels_1D);
-            f32 px = x + lineWidth;
-            x = position - (0.5f * (lineWidth + 1.0f));
+            f32 boundary = position - 0.5f;
+            f32 room = boundary - previousBoundary;
+            // A full stroke is lineWidth. A microchromosome on a hires map is
+            // narrower than that, so use a one-pixel stroke that still fits in the gap.
+            f32 stroke = lineWidth;
+            if (room < lineWidth)
+            {
+                stroke = room > onePixel ? onePixel : room;
+            }
 
-            if (x > px)
+            if (stroke > 0.0f)
             {   
+                f32 left = boundary - (0.5f * stroke);
                 // contig vertical line
-                vert[0].x = x;             vert[0].y = -0.5f;
-                vert[1].x = x + lineWidth; vert[1].y = -0.5f;
-                vert[2].x = x + lineWidth; vert[2].y = 0.5f;
-                vert[3].x = x;             vert[3].y = 0.5f;
+                vert[0].x = left;             vert[0].y = -0.5f;
+                vert[1].x = left + stroke;    vert[1].y = -0.5f;
+                vert[2].x = left + stroke;    vert[2].y = 0.5f;
+                vert[3].x = left;             vert[3].y = 0.5f;
 
                 glBindBuffer(GL_ARRAY_BUFFER, Grid_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Grid_Data->vaos[ptr++]);
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
             }
+            previousBoundary = boundary;
         }
         // right border
         vert[0].x = 0.5f - lineWidth; vert[0].y = -0.5f;
@@ -4721,28 +4731,35 @@ Render() {
         glBindVertexArray(Grid_Data->vaos[ptr++]);
         glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
-        f32 y = 0.5f;
+        f32 yBoundary = 0.5f;
         ForLoop(Contigs->numberOfContigs - 1)
         {
             contig *cont = Contigs->contigs_arr + index;
 
             position += ((f32)cont->length / (f32)Number_of_Pixels_1D);
-            f32 py = y - lineWidth;
-            y = 1.0f - position + (0.5f * (lineWidth - 1.0f));
+            f32 boundary = 0.5f - position;
+            f32 room = yBoundary - boundary;
+            f32 stroke = lineWidth;
+            if (room < lineWidth)
+            {
+                stroke = room > onePixel ? onePixel : room;
+            }
 
-            if (y < py)
+            if (stroke > 0.0f)
             {   
+                f32 top = boundary + (0.5f * stroke);
                 // contig horizontal line
-                vert[0].x = -0.5f; vert[0].y = y - lineWidth;
-                vert[1].x = 0.5f;  vert[1].y = y - lineWidth;
-                vert[2].x = 0.5f;  vert[2].y = y;
-                vert[3].x = -0.5f; vert[3].y = y;
+                vert[0].x = -0.5f; vert[0].y = top - stroke;
+                vert[1].x = 0.5f;  vert[1].y = top - stroke;
+                vert[2].x = 0.5f;  vert[2].y = top;
+                vert[3].x = -0.5f; vert[3].y = top;
 
                 glBindBuffer(GL_ARRAY_BUFFER, Grid_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Grid_Data->vaos[ptr++]);
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
             }
+            yBoundary = boundary;
         }
         // bottom border
         vert[0].x = -0.5f; vert[0].y = -0.5f;
