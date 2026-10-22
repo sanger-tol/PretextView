@@ -43,6 +43,7 @@ PretextView is a desktop application for viewing pretext contact maps.<br/>
 - `Save State`: Save a specific to contain edits, painted scaffolds information, meta tags, waypoints, camera position, zoom level, window settings. Actually, the history is automatically saved into a file with hashed name in the cache file directory (for example, `/Users/[yourUserName]/.config/PretextView/` on mac).
 - `Load State`: select a file to load the state.
 - `Generate AGP`: save the curated genome into the `.agp` format.
+- `Save State + AGP`: write the savestate and the AGP in one step, into the same folder. The name field starts as the map name. **Save** produces `name.savestate_1` and `name.agp_1`. **Override** and **Preserve Order** apply to both files.
 - `Clear Cache`: Clear all edits and revert to the pre-curation state. **Please note this action is irreversible.**
 - `Clipboard Editor`: opens a text buffer tied to the system clipboard. Use **Ctrl+C / Ctrl+V / Ctrl+X** to copy, paste, and cut (**Cmd+C / Cmd+V / Cmd+X** on macOS). **Save as** opens a file dialog to save the buffer (default filename suffix `_clipboard.txt`).
 
@@ -147,10 +148,10 @@ Set the `Meta tags`, `Background Color`, `Color Map`(HiC figure), `Extension set
 
 # Saving
 Map state is automatically saved (`$XDG_CONFIG_DIR` or `~/.config` on Unix, and the `%APPDATA%` folder on Windows) while the app runs, and is loaded on map load.<br/>
-You can also manually save/load state via the UI.
+You can also manually save/load state via the UI. **Save State + AGP** writes that savestate and the AGP together.
 
 # AGP Output
-Map state can be output in [AGP](https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification/) format via the UI. Objects are first created according to the scaffolds defined in scaffolding mode, with remaining sequences output as singletons.<br/>
+Map state can be output in [AGP](https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification/) format via the UI (**Generate AGP**, or **Save State + AGP**). Objects are first created according to the scaffolds defined in scaffolding mode, with remaining sequences output as singletons.<br/>
 ## AGP Correction
 Note that object/part sizes will only be accurate up to the size of an individual map texel, and that any input sequences smaller than an individual texel will not be output.<br/>
 AGP files can be corrected by the included python script [AGPCorrect](https://github.com/wtsi-hpag/PretextView/blob/master/AGPCorrect), which requires access to the input sequences in (gzipped) FASTA format.

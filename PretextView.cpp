@@ -1680,6 +1680,10 @@ AGP_Name_Buffer[1024] = {0};
 
 global_variable
 char
+Both_Export_Name_Buffer[1024] = {0};
+
+global_variable
+char
 Edits_Name_Buffer[1024] = {0};
 
 global_variable
@@ -1700,10 +1704,13 @@ SetSaveStateNameBuffer(char *name)
         AGP_Name_Buffer[ptr] = *name;
         Edits_Name_Buffer[ptr] = *name;
         Save_State_Name_Buffer[ptr] = *name;
+        Both_Export_Name_Buffer[ptr] = *name;
         ptr++;
         name++;
     }
     
+    Both_Export_Name_Buffer[ptr] = 0;
+
     u32 ptr1 = ptr;
     name = (char *)".savestate_1";
     while (*name) Save_State_Name_Buffer[ptr++] = *name++;
@@ -1738,6 +1745,8 @@ GetSaveNameBufferForMode(u08 save)
     {
         case 2:
             return AGP_Name_Buffer;
+        case 6:
+            return Both_Export_Name_Buffer;
         case 3:
             return Edits_Name_Buffer;
         case 4:
@@ -1758,6 +1767,7 @@ GetSaveNameBufferForMode(u08 save)
             3 edits save
             4 clipboard save
             5 debug report save
+            6 savestate and agp together
 */
 global_function
 u08
@@ -1986,7 +1996,8 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                 {
                     f32 fileRatio[] = {0.8f, 0.1f, NK_UNDEFINED};
                     f32 fileRatio2[] = {0.55f, 0.15f, 0.15f, 0.15f, NK_UNDEFINED};
-                    nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 35.0f, save == 2 ? 4 : 3, save == 2 ? fileRatio2 : fileRatio);
+                    u08 agpOptions = (save == 2 || save == 6) ? 1 : 0;
+                    nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 35.0f, agpOptions ? 4 : 3, agpOptions ? fileRatio2 : fileRatio);
 
                     char *nameBuffer = GetSaveNameBufferForMode(save);
                     u08 saveViaEnter =
@@ -1998,7 +2009,7 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
 
                     // AGP export always uses map orientation; only Preserve Order remains optional.
                     static u08 preserveOrder = 0;
-                    if (save == 2)
+                    if (agpOptions)
                     {
                         preserveOrder = (u08)nk_check_label(ctx, "Preserve Order", preserveOrder);
                     }
@@ -15597,6 +15608,7 @@ MainArgs
             s32 showSaveStateScreen = 0;
             s32 showLoadStateScreen = 0;
             s32 showSaveAGPScreen = 0;
+            s32 showSaveStateAGPScreen = 0;
             s32 showSaveEditsScreen = 0;
             static s32 showSaveClipboardScreen = 0;
             s32 showLoadAGPScreen = 0;
@@ -15639,6 +15651,16 @@ MainArgs
                         showLoadStateScreen = nk_button_label(NK_Context, "Load State");
                         showSaveAGPScreen = nk_button_label(NK_Context, "Generate AGP");
                         showLoadAGPScreen = nk_button_label(NK_Context, "Load AGP");
+                    }
+                    if (currFileName)
+                    {
+                        f32 buttonRatio[] = {0.46f, 0.27f, 0.27f};
+                        nk_layout_row(NK_Context, NK_DYNAMIC, Screen_Scale.y * 30.0f, 3, buttonRatio);
+                        showSaveStateAGPScreen = nk_button_label(NK_Context, "Save State + AGP");
+                    }
+                    else
+                    {
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
                     }
                     showUserProfileScreen = nk_button_label(NK_Context, "User Profile");
                     showAboutScreen = nk_button_label(NK_Context, "About");
@@ -16804,6 +16826,33 @@ MainArgs
                     {
                         FenceIn(GenerateAGP(saveAGPBrowser.file, state & 2, state & 4));
                         FileBrowserReloadDirectoryContent(&saveAGPBrowser, saveAGPBrowser.directory);
+                    }
+
+                    if ((state = FileBrowserRun("Save State + AGP", &saveBrowser, NK_Context, (u32)showSaveStateAGPScreen, 6)))
+                    {
+                        char stem[MAX_PATH_LEN];
+                        char statePath[MAX_PATH_LEN];
+                        char agpPath[MAX_PATH_LEN];
+                        strncpy(stem, saveBrowser.file, MAX_PATH_LEN - 1);
+                        stem[MAX_PATH_LEN - 1] = 0;
+                        static const char *suffixes[] = {".savestate_1", ".agp_1", ".savestate", ".agp"};
+                        size_t stemLength = strlen(stem);
+                        ForLoop(ArrayCount(suffixes))
+                        {
+                            size_t suffixLength = strlen(suffixes[index]);
+                            if (stemLength >= suffixLength && strcmp(stem + stemLength - suffixLength, suffixes[index]) == 0)
+                            {
+                                stem[stemLength - suffixLength] = 0;
+                                break;
+                            }
+                        }
+                        stbsp_snprintf(statePath, sizeof(statePath), "%s.savestate_1", stem);
+                        stbsp_snprintf(agpPath, sizeof(agpPath), "%s.agp_1", stem);
+                        SaveState(headerHash, statePath, state & 2);
+                        FenceIn(GenerateAGP(agpPath, state & 2, state & 4));
+                        fmt::println("[export] savestate: {}", statePath);
+                        fmt::println("[export] agp: {}", agpPath);
+                        FileBrowserReloadDirectoryContent(&saveBrowser, saveBrowser.directory);
                     }
 
                     if ((state = FileBrowserRun("Save Edits", &saveEditsBrowser, NK_Context, (u32)showSaveEditsScreen, 3))) 
