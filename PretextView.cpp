@@ -163,55 +163,28 @@ SOFTWARE.
 #include <iterator>
 
 #include "shaderSource.h"
-/*
-// std::string shader_source_dir = getResourcesPath() + "/src/shaderSource/";
-std::string shader_source_dir = SHADER_DIR;
-// Contact_Matrix->shaderProgram
-global_variable
-std::string
-VertexSource_Texture = readShaderSource(shader_source_dir + "contactMatrixVertex.shader");
 
-// Contact_Matrix->shaderProgram
-global_variable
-std::string
-FragmentSource_Texture = readShaderSource( shader_source_dir + "contactMatrixFragment.shader");
+#ifndef _WIN32
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
-global_variable
-std::string
-VertexSource_Flat = readShaderSource( shader_source_dir + "flatVertex.shader");
+#include "copy_texture.h"
+#include "spectral_cluster.h"
 
-global_variable
-std::string
-FragmentSource_Flat = readShaderSource( shader_source_dir + "flatFragment.shader");
+#if defined __unix__ || defined __APPLE__
+#include <dirent.h>
+#include <unistd.h>
+#endif
 
-global_variable
-std::string
-VertexSource_EditablePlot = readShaderSource( shader_source_dir + "editVertex.shader");
-
-global_variable
-std::string
-FragmentSource_EditablePlot = readShaderSource( shader_source_dir + "editFragment.shader");
-
-// https://blog.tammearu.eu/posts/gllines/
-global_variable
-std::string
-GeometrySource_EditablePlot = readShaderSource( shader_source_dir + "editGeometry.shader");
-
-global_variable
-std::string
-VertexSource_UI = readShaderSource( shader_source_dir + "uiVertex.shader");
-
-global_variable
-std::string
-FragmentSource_UI = readShaderSource( shader_source_dir + "uiFragment.shader");
-*/
-
-
+#ifndef _WIN32
+#include <pwd.h>
+#endif
 
 #define UI_SHADER_LOC_POSITION 0
 #define UI_SHADER_LOC_TEXCOORD 1
 #define UI_SHADER_LOC_COLOR 2
-
 
 global_variable
 memory_arena
@@ -244,8 +217,6 @@ Theme_Name[THEME_COUNT];
 global_function
 void
 SetTheme(struct nk_context *ctx, enum theme theme);
-
-
 
 global_variable
     f32
@@ -1220,7 +1191,6 @@ map_state *
 Map_State;
 
 
-#include "copy_texture.h"
 // define the struct to store the ai model mask
 FragSortTool* frag_sort_method = new FragSortTool();
 global_variable auto auto_curation_state = AutoCurationState();
@@ -1228,9 +1198,6 @@ global_variable auto auto_curation_state = AutoCurationState();
 #ifdef PYTHON_SCOPED_INTERPRETER
     global_variable KmeansClusters* kmeans_cluster = nullptr;
 #endif // PYTHON_SCOPED_INTERPRETER
-
-#include "spectral_cluster.h"
-
 
 global_function void
 UserSaveState(const char *headerHash = "userprofile", u08 overwrite = 1, char *path = 0);
@@ -1345,16 +1312,6 @@ struct file_browser saveEditsBrowser;
 struct file_browser saveClipboardBrowser;
 struct file_browser saveDebugReportBrowser;
 struct file_browser loadAGPBrowser;
-
-
-#if defined __unix__ || defined __APPLE__
-#include <dirent.h>
-#include <unistd.h>
-#endif
-
-#ifndef _WIN32
-#include <pwd.h>
-#endif
 
 global_function
 char*
@@ -1885,7 +1842,6 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                     i += 1)
             {   
                 size_t n = j + cols;
-                // nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 25.0f, 2, iconRatio);
                 for (   ; 
                         j < count && j < n;
                         ++j)
@@ -3324,9 +3280,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                     testContig = Map_State->contigIds[testPixel];
 
                     if (testPixel == 0 || testPixel >= (nPixels - 1)) break;
-
-                    // testContig = pixel1 < pixel2 ? Map_State->contigIds[++testPixel] : Map_State->contigIds[--testPixel];
-                    // if (testPixel == 0 || testPixel >= (nPixels - 1)) break;
                 }   
                 if (Map_State->contigIds[testPixel] == contig)
                 {
@@ -3342,7 +3295,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             if (Edit_Pixels.selecting) // select the contig
             {
                 Edit_Pixels.selectPixels.x = my_Max(pixel1, my_Max(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y)); // used to select multiple contigs with pressing space and dragging the mouse
-                // Edit_Pixels.selectPixels.x = pixel1;
                 while(  Edit_Pixels.selectPixels.x < (Number_of_Pixels_1D - 1) &&
                         ((Edit_Pixels.scaffSelecting && Map_State->scaffIds[Edit_Pixels.selectPixels.x] && Map_State->scaffIds[Edit_Pixels.selectPixels.x] == Map_State->scaffIds[1 + Edit_Pixels.selectPixels.x] ) || 
                           Map_State->contigIds[Edit_Pixels.selectPixels.x] == Map_State->contigIds[1 + Edit_Pixels.selectPixels.x]))
@@ -3351,7 +3303,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                 }
 
                 Edit_Pixels.selectPixels.y = my_Min(pixel1, my_Min(Edit_Pixels.selectPixels.x, Edit_Pixels.selectPixels.y));
-                // Edit_Pixels.selectPixels.y = pixel1;
                 while(  Edit_Pixels.selectPixels.y > 0 &&
                         ((Edit_Pixels.scaffSelecting && Map_State->scaffIds[Edit_Pixels.selectPixels.y] && Map_State->scaffIds[Edit_Pixels.selectPixels.y] == Map_State->scaffIds[Edit_Pixels.selectPixels.y - 1]) || Map_State->contigIds[Edit_Pixels.selectPixels.y] == Map_State->contigIds[Edit_Pixels.selectPixels.y - 1]))
                 {
@@ -3379,9 +3330,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                 s32 diffy = newY - (s32)Edit_Pixels.pixels.y;
 
                 diff = forward ? my_Min(diffx, diffy) : my_Max(diffx, diffy);
-                
-                //newX = (s32)Edit_Pixels.pixels.x + diff;
-                //newY = (s32)Edit_Pixels.pixels.y + diff;
                 
                 diff = RearrangeMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y, diff, Edit_Pixels.snap);
                 Edit_Session_NetDelta += diff;
@@ -4305,14 +4253,6 @@ global_function
 void
 ColourGenerator(u32 index, f32 *rgb)
 {
-// #define RedFreq 1.666f
-// #define GreenFreq 2.666f
-// #define BlueFreq 3.666f
-
-//     rgb[0] = 0.5f * (sinf((f32)index * RedFreq) + 1.0f);
-//     rgb[1] = 0.5f * (sinf((f32)index * GreenFreq) + 1.0f);
-//     rgb[2] = 0.5f * (sinf((f32)index * BlueFreq) + 1.0f);
-
     f32 RedFreq = meta_dataColors[meta_data_curcolorProfile][0];
     f32 GreenFreq = meta_dataColors[meta_data_curcolorProfile][1];
     f32 BlueFreq = meta_dataColors[meta_data_curcolorProfile][2];
@@ -4358,7 +4298,7 @@ void DrawOutlinedText(
         fonsDrawText(FontStash_Context, x + offset, y + offset, text, 0);
     }
 
-    // // Draw the original text on top
+    // Draw the original text on top
     fonsSetColor(FontStash_Context, textColorU32);
     fonsDrawText(FontStash_Context, x, y, text, 0);
 }
@@ -4411,7 +4351,6 @@ Render() {
     f32 height;
     {
         glClear(GL_COLOR_BUFFER_BIT);
-        // glClearColor(0.2f, 0.6f, 0.4f, 1.0f); // classic background color
         glClearColor(bgcolor[active_bgcolor][0], bgcolor[active_bgcolor][1], bgcolor[active_bgcolor][2], bgcolor[active_bgcolor][3]);
 
         s32 viewport[4];
@@ -4427,22 +4366,6 @@ Render() {
         mat[12] = -2.0f * height * Camera_Position.x * Camera_Position.z / width;
         mat[13] = -2.0f * Camera_Position.y * Camera_Position.z;
         mat[15] = 1.0f;
-
-        /*
-        template<typename T>
-        GLM_FUNC_QUALIFIER mat<4, 4, T, defaultp> orthoRH_NO(T left, T right, T bottom, T top, T zNear, T zFar)
-        {
-            mat<4, 4, T, defaultp> Result(1);
-            Result[0][0] = static_cast<T>(2) / (right - left);  // 0 
-            Result[1][1] = static_cast<T>(2) / (top - bottom);  // 5
-            Result[2][2] = - static_cast<T>(2) / (zFar - zNear);// 10
-            Result[3][0] = - (right + left) / (right - left);   // 12 
-            Result[3][1] = - (top + bottom) / (top - bottom);   // 13
-            Result[3][2] = - (zFar + zNear) / (zFar - zNear);   // 14
-            return Result;
-        }
-        glm::mat4 projection_mat = glm::ortho(-1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f);
-        */
 
         // apply the transformation
         glUseProgram(Contact_Matrix->shaderProgram);
@@ -4611,7 +4534,6 @@ Render() {
     }
 
     // Quad Trees
-    //if (Waypoint_Edit_Mode)
     {
         glUseProgram(Flat_Shader->shaderProgram);
         glUniform4fv(Flat_Shader->colorLocation, 1, (GLfloat *)&QuadTrees->bg);
@@ -5151,6 +5073,7 @@ Render() {
             glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textNormalMat);
 
             glViewport(0, 0, (s32)width, (s32)height);
+
 #define DefaultWaypointSize 18.0f
             glUseProgram(Flat_Shader->shaderProgram);
             glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Waypoint_Mode_Data->base);
@@ -5211,27 +5134,13 @@ Render() {
                 // draw the horizontal line (originally: the left part, not sure why Ed draw them seperately, if problem arises we can returen here)  maybe avoid drawing the cross part twice...
                 vert[0].x = long_horizontal ? screenXRange.x : screen.x - lineHeight;  vert[0].y = screen.y - lineWidth;
                 vert[1].x = long_horizontal ? screenXRange.x : screen.x - lineHeight;  vert[1].y = screen.y + lineWidth;
-                vert[2].x = long_horizontal ? screenXRange.y : screen.x + lineHeight;  vert[2].y = screen.y + lineWidth;// vert[2].x = screen.x - lineWidth; 
-                vert[3].x = long_horizontal ? screenXRange.y : screen.x + lineHeight;  vert[3].y = screen.y - lineWidth;// vert[3].x = screen.x - lineWidth; 
+                vert[2].x = long_horizontal ? screenXRange.y : screen.x + lineHeight;  vert[2].y = screen.y + lineWidth; 
+                vert[3].x = long_horizontal ? screenXRange.y : screen.x + lineHeight;  vert[3].y = screen.y - lineWidth; 
                 glBindBuffer(GL_ARRAY_BUFFER, Waypoint_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Waypoint_Data->vaos[ptr++]);
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
-                // draw the horizontal line (originally: the right part, not sure why Ed draw them seperately, if problem arises we can returen here)
-                // vert[0].x = screen.x + lineWidth;
-                // vert[0].y = screen.y - lineWidth;
-                // vert[1].x = screen.x + lineWidth;
-                // vert[1].y = screen.y + lineWidth;
-                // vert[2].x = screen.x + lineHeight;
-                // vert[2].y = screen.y + lineWidth;
-                // vert[3].x = screen.x + lineHeight;
-                // vert[3].y = screen.y - lineWidth;
-                // glBindBuffer(GL_ARRAY_BUFFER, Waypoint_Data->vbos[ptr]);
-                // glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
-                // glBindVertexArray(Waypoint_Data->vaos[ptr++]);
-                // glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
-               
                 if (node == Selected_Waypoint)
                 {
                     glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Waypoint_Mode_Data->base);
@@ -5277,7 +5186,6 @@ Render() {
                 textBoxHeight += (f32)helpTexts.size() - 1.0f;
                 f32 spacing = 10.0f; // distance from the edge of the text box
 
-                // f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, helpText4, 0, NULL);
                 f32 textWidth = 0;
                 for (auto i : helpTexts){
                     textWidth = my_Max(textWidth, fonsTextBounds(FontStash_Context, 0, 0, i, 0, NULL)) + 0.5f * spacing;
@@ -5324,11 +5232,6 @@ Render() {
             glViewport(0, 0, (s32)width, (s32)height);
 
 #define DefaultExtensionSize 20.0f
-            // glUseProgram(Flat_Shader->shaderProgram);
-            // glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Waypoint_Mode_Data->base);
-
-            // f32 lineWidth = Waypoint_Mode_Data->size / DefaultWaypointSize * 0.7f * Screen_Scale.x;
-            // f32 lineHeight = Waypoint_Mode_Data->size / DefaultWaypointSize * 8.0f * Screen_Scale.x;
 
             fonsSetSize(FontStash_Context, text_box_size.font_size * Screen_Scale.x);
             fonsVertMetrics(FontStash_Context, 0, 0, &lh);
@@ -5691,7 +5594,6 @@ Render() {
 
                     // draw the cover on selected area
                     {   
-                        // f32 mask_color[4] = {0.906f, 0.03921f, 0.949f, 0.5f}; 
                         vert[0].x = ModelXToScreen(start_fraction - 0.5f);     vert[0].y = ModelYToScreen(0.5f - start_fraction);
                         vert[1].x = ModelXToScreen(start_fraction - 0.5f);     vert[1].y = ModelYToScreen(0.5f - end_fraction);
                         vert[2].x = ModelXToScreen(end_fraction - 0.5f);       vert[2].y = ModelYToScreen(0.5f - end_fraction);
@@ -5776,8 +5678,6 @@ Render() {
                         {
                             f32 textWidth = fonsTextBounds(FontStash_Context, 0, 0, (char *)Meta_Data->tags[index2], 0, NULL);
                             ColourGenerator(index2 + 1, colour);
-                            // fonsSetColor(FontStash_Context, FourFloatColorToU32(*((nk_colorf *)colour)));
-                            // fonsDrawText(FontStash_Context, ModelXToScreen(0.5f * (end_contig + start_contig - 1.0f)) - (0.5f * textWidth), ModelYToScreen((0.5f * (1.0f - end_contig - start_contig))) - (lh * (f32)(++tmp)), (char *)Meta_Data->tags[index2], 0);
                             if (meta_outline->on)
                             {
                                 // position of text
@@ -5872,9 +5772,6 @@ Render() {
                                 vert_v1[3].x = ModelXToScreen(end_contig - 0.5f);    vert_v1[3].y = ModelYToScreen(0.5f - end_contig);
                                 paint_func(vert_v1);
                             } 
-                        }
-                        else { // not grey out vertically, horizontally or crossly.
-                            // throw std::runtime_error(fmt::format("This part is unreachable! File: {}, line: {}\n", __FILE__, __LINE__));
                         }
                     }
 
@@ -6777,7 +6674,6 @@ LoadTexture(void *in)
         // // // ...
         ========================
     */
-    // u32 linearIndex =  (buffer->x * (Number_of_Textures_1D - 1)) - ((buffer->x * (buffer->x-1)) >> 1) + buffer->y;  // get the index accoding to index in x and y diretion 
     u32 linearIndex = texture_id_cal((u32)buffer->x, (u32)buffer->y, (u32)Number_of_Textures_1D); 
 
     file_atlas_entry *entry = File_Atlas + linearIndex;  // set a tempory pointer 
@@ -6819,7 +6715,10 @@ PopulateTextureLoadQueue(void *in) // 填充已经初始化过的 所有的queue
     {
         for (u32 index2 = index; index2 < Number_of_Textures_1D; index2++ ) // column number
         {
-            packedTextureIndexes[ptr] = (index << 16) | (index2); // first 16 bits is the raw number and the second 16 bits is the column number, there will be problem if number of texture in one dimension is larger than 2^16, but it is not possible ... just for a reminder
+	    // first 16 bits is the raw number and the second 16 bits is the column number,
+	    // there will be problem if number of texture in one dimension is larger than
+	    // 2^16, but it is not possible ... just for a reminder
+            packedTextureIndexes[ptr] = (index << 16) | (index2);
             ThreadPoolAddTask(Thread_Pool, LoadTexture, (void *)(packedTextureIndexes + ptr++)); // 填充当前的任务队列，输入为对应的texture的行、列编号
         }
     }
@@ -7253,7 +7152,7 @@ TestFile(const char *fileName, u64 *fileSize = 0)
             u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
             if (bytesRead == sizeof(magicTest))
             {
-                ForLoop(sizeof(Magic)) // #define ForLoop(n) for (u32 index=0; index<n; index++)
+                ForLoop(sizeof(Magic))
                 {
                     if (Magic[index] != magicTest[index]) 
                     {
@@ -7434,7 +7333,6 @@ void
 push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1.f)
 {   
     u32 exIndex = 0;
-    // TraverseLinkedList(Extensions.head, extension_node)
 
     extension_node* node = Extensions.head ;
     while (added_index--)
@@ -8033,8 +7931,11 @@ load_file_result
 LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *headerHash)
 {
     u64 fileSize = 0;
+    // Check the data read from the first 4 bytes. If it matches
+    // u08 Magic[] = {'p', 's', 't', 'm'}, the verification passes;
+    // otherwise, set the pointer file to a null pointer.
+    FILE *file = TestFile(filePath, &fileSize);
 
-    FILE *file = TestFile(filePath, &fileSize); //  Check the data read from the first 4 bytes. If it matches u08 Magic[] = {'p', 's', 't', 'm'}, the verification passes; otherwise, set the pointer file to a null pointer.
     if (!file)    // 如果为空指针， 返回读取错误fileErr
     {
         return(fileErr);
@@ -8199,7 +8100,6 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             nBytesHeaderComp,  
             FastHash64(intBuff, sizeof(intBuff), 0xbafd06832de619c2)
             );
-        // fprintf(stdout, "The headerHash is calculated accordig to the compressed head, the hash number is (%llu) and the cache file name is (%s)\n", *headerHash, (u08*) headerHash);
         if (libdeflate_deflate_decompress(
                 Decompressor,                    // Pointer to decompressor.
                 (const void *)compressionBuffer, // Pointer to the data to be
@@ -8401,7 +8301,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         u32 nBytesPerText = 0;
         ForLoop(Number_of_MipMaps)
         {
-            nBytesPerText += Pow2((2 * textureRes--));  // sum([2**(2*i) for i in range(10, 10-Number_of_MipMaps, -1)])/2
+            nBytesPerText += Pow2((2 * textureRes--));
         }
         nBytesPerText >>= 1; // Divide by 2 because the data is compressed.
         Bytes_Per_Texture = nBytesPerText;  // Number of bytes corresponding to a texture
@@ -8507,7 +8407,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 #pragma clang diagnostic pop                                       
                                         extensionSize += (compSize + sizeof(u32));
                                         u08 *compBuffer = PushArrayP(arena, u08, compSize);
-                                        fread(compBuffer, 1, compSize, file);    // read the extension data from the file pointer
+                                        fread(compBuffer, 1, compSize, file);  // read the extension data from the file pointer
                                         // Decompress compBuffer to dataPlusName
                                         if (libdeflate_deflate_decompress(
                                                 Decompressor,
@@ -8571,7 +8471,6 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         InitialiseTextureBufferQueue(arena, Texture_Buffer_Queue, Bytes_Per_Texture, filePath); // initialize all the queue texture_buffer_queue, there are 8 queues, each queue has 8 buffers
 
         u32 nTextures = (Number_of_Textures_1D + 1) * (Number_of_Textures_1D >> 1);     // number of textures (528)
-
         glActiveTexture(GL_TEXTURE0);   // all the sub-textures are loaded on texture 0 
         glGenTextures(1, &Contact_Matrix->textures);   // get a texture and store it in Contact_Matrix->textures
         glBindTexture(GL_TEXTURE_2D_ARRAY, Contact_Matrix->textures); // bind the texture to the current texture
@@ -8606,7 +8505,6 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                     #ifndef _WIN32 // unix
                     __atomic_load(&Current_Loaded_Texture, &loadedTexture, __ATOMIC_SEQ_CST); 
                     #else // windows 
-                    // loadedTexture = InterlockedCompareExchangePointer(&Current_Loaded_Texture, nullptr, nullptr);
                     loadedTexture = (texture_buffer*)InterlockedCompareExchangePointer(
                          (PVOID volatile*)&Current_Loaded_Texture, 
                          NULL, 
@@ -8660,8 +8558,8 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         // Contact_Matrix->vaos = PushArrayP(arena, GLuint, Number_of_Textures_1D * Number_of_Textures_1D);  //
         // Contact_Matrix->vbos = PushArrayP(arena, GLuint, Number_of_Textures_1D * Number_of_Textures_1D);  //
-        Contact_Matrix->vaos =  new GLuint[ Number_of_Textures_1D * Number_of_Textures_1D]; //  (GLuint*) malloc(sizeof(GLuint) * Number_of_Textures_1D * Number_of_Textures_1D );  // TODO make sure the memory is freed before the re-allocation
-        Contact_Matrix->vbos = new GLuint[ Number_of_Textures_1D * Number_of_Textures_1D]; // (GLuint*) malloc(sizeof(GLuint) * Number_of_Textures_1D * Number_of_Textures_1D );
+        Contact_Matrix->vaos =  new GLuint[ Number_of_Textures_1D * Number_of_Textures_1D]; // TODO make sure the memory is freed before the re-allocation
+        Contact_Matrix->vbos = new GLuint[ Number_of_Textures_1D * Number_of_Textures_1D];
 
         setContactMatrixVertexArray(Contact_Matrix, false, false);  // set the vertex data of the contact matrix
 
@@ -9742,12 +9640,6 @@ RearrangeMap(       // NOTE: VERY IMPORTANT
         delete[] tmpBuffer3;
         delete[] tmpBuffer4;
         delete[] tmpBuffer5;
-        // FreeLastPush(Working_Set); // tmpBuffer
-        // FreeLastPush(Working_Set); // tmpBuffer2
-        // FreeLastPush(Working_Set); // tmpBuffer3
-        // FreeLastPush(Working_Set); // tmpBuffer4
-        // FreeLastPush(Working_Set); // tmpBuffer5
-
 
         if (update_contigs_flag) UpdateContigsFromMapState();
         
@@ -10536,7 +10428,7 @@ auto_sort_func(char* currFileName)
         if (auto_curation_state.num_clusters == 1)
         {
             fmt::print(stdout, "[Pixel Sort] sort without clustering.\n");
-        } else  // (selected_area.selected_frag_ids.size() <= std::max(auto_curation_state.min_frag_num_for_cluster, (s32)auto_curation_state.num_clusters) ) 
+        } else 
         {
             fmt::print(
                 stdout, 
@@ -11331,32 +11223,6 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                 glfwSetWindowShouldClose(window, GLFW_TRUE);
             }
 #endif
-            /*nk_input_key(NK_Context, NK_KEY_DEL, glfwGetKey(window, GLFW_KEY_DELETE) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_ENTER, glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_TAB, glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_BACKSPACE, glfwGetKey(window, GLFW_KEY_BACKSPACE) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_LEFT, glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_RIGHT, glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_UP, glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS);
-            nk_input_key(NK_Context, NK_KEY_DOWN, glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS);
-
-            if (glfwGetKey(window, GLFW_KEY_LEFT_CONTROL) == GLFW_PRESS || glfwGetKey(window, GLFW_KEY_RIGHT_CONTROL) == GLFW_PRESS)
-            {
-                nk_input_key(NK_Context, NK_KEY_COPY, glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS);
-                nk_input_key(NK_Context, NK_KEY_PASTE, glfwGetKey(window, GLFW_KEY_P) == GLFW_PRESS);
-                nk_input_key(NK_Context, NK_KEY_CUT, glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS);
-                nk_input_key(NK_Context, NK_KEY_CUT, glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS);
-                nk_input_key(NK_Context, NK_KEY_SHIFT, 1);
-            } 
-            else
-            {
-                nk_input_key(NK_Context, NK_KEY_COPY, 0);
-                nk_input_key(NK_Context, NK_KEY_PASTE, 0);
-                nk_input_key(NK_Context, NK_KEY_CUT, 0);
-                nk_input_key(NK_Context, NK_KEY_SHIFT, 0);
-            }*/
-
-
             else if (key == GLFW_KEY_ESCAPE)
             {
                 Deferred_Close_UI = 1;
@@ -12314,7 +12180,6 @@ UserProfileEditorRun(const char *name, struct file_browser *browser, struct nk_c
             }
             nk_tree_pop(NK_Context);
         }
-        // nk_tree_pop(NK_Context); // used to have this here, but it was causing a crash
 
         nk_style_set_font(ctx, &NK_Font->handle);
     }
@@ -12368,33 +12233,6 @@ MessageCallback( GLenum source,
            ( type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "" ),
             type, severity, message );
 }
-
-// #ifdef DEBUG
-// global_function
-// void GLAPIENTRY
-// MessageCallback( 
-//     GLenum source,
-//     GLenum type,
-//     GLuint id,
-//     GLenum severity,
-//     GLsizei length,
-//     const GLchar* message,
-//     const void* userParam )
-// {
-//     fprintf( stderr, "GL CALLBACK: %s type = 0x%x, severity = 0x%x, message = %s\n",
-//             ( type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "" ),
-//             type, severity, message );
-    
-//     // u32 BreakHere = 0;
-//     // (void)BreakHere;
-// }
-// #endif
-
-#ifndef _WIN32
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#endif
 
 global_variable
 u08 *
@@ -12827,12 +12665,6 @@ SaveState(
                 fileContents[--ptr] = ((u08 *)&x)[2];
                 fileContents[--ptr] = ((u08 *)&x)[1];
                 fileContents[--ptr] = ((u08 *)&x)[0];
-
-                // if (bytes_per_waypoint == 15){  // better not to change the datasaved
-                //     u16 long_waypoint_mode = (u16) node->long_waypoint_mode;
-                //     fileContents[--ptr] = ((u08 *)&long_waypoint_mode)[1];
-                //     fileContents[--ptr] = ((u08 *)&long_waypoint_mode)[0];
-                // }
             }
 
             fileWriter += (bytes_per_waypoint * nWayp);
@@ -12986,9 +12818,6 @@ SaveState(
 
         if (!path) // save the name SaveState_Name to file named as ptlsn 
         {
-            // u08 nameCache[17];
-            // CopyNullTerminatedString((u08 *)SaveState_Name, (u08 *)nameCache);
-
             std::string nameCache_string = std::string((char *)SaveState_Name);
 
             *(SaveState_Name + 0) = 'p';
@@ -12999,7 +12828,6 @@ SaveState(
             *(SaveState_Name + 5) = '\0';
 
             file = fopen((const char *)SaveState_Path, "wb");
-            // fwrite((u08 *)nameCache, 1, sizeof(nameCache), file);
             fwrite((u08 *)nameCache_string.c_str(), 1, nameCache_string.size(), file);
             fclose(file);
         }
@@ -13188,7 +13016,6 @@ LoadState(u64 headerHash, char *path)
                 Grid->on = settings & (1 << 3);
                 Contig_Ids->on = settings & (1 << 4);
                 Tool_Tip->on = settings & (1 << 5);
-                // user_profile_settings_ptr->invert_mouse = settings & (1 << 6); // this is moved to the user settings, then this setting will not be influnced by clearcache
                 Scaffs_Always_Visible = settings & (1 << 7);
 
                 nBytesRead += 2;
@@ -13431,13 +13258,6 @@ LoadState(u64 headerHash, char *path)
                         f32 x;
                         f32 y;
                         f32 z;
-                        
-                        // it is better not change the saved data structure
-                        // u16 long_waypoint_mode;
-                        // if (bytes_per_waypoint == 15){
-                        //     ((u08 *)&long_waypoint_mode)[0] = *fileContents++;
-                        //     ((u08 *)&long_waypoint_mode)[1] = *fileContents++;
-                        // }
 
                         ((u08 *)&x)[0] = *fileContents++;
                         ((u08 *)&x)[1] = *fileContents++;
@@ -13456,9 +13276,6 @@ LoadState(u64 headerHash, char *path)
                         AddWayPoint({x, y});
                         Waypoint_Editor->activeWaypoints.next->z = z;
                         Waypoint_Editor->activeWaypoints.next->index = (u32)id;
-                        // if (bytes_per_waypoint == 15) { // better not change the data structure
-                        //     Waypoint_Editor->activeWaypoints.next->long_waypoint_mode = (u16)long_waypoint_mode;
-                        // }
                     }
 
                     nBytesRead += (bytes_per_waypoint * nWayp);
@@ -14110,7 +13927,6 @@ restore_initial_state()
         Grid->on                 = 1;
         Contig_Ids->on           = 1;
         Tool_Tip->on             = 1;
-        // user_profile_settings_ptr   = 0;
         Scaffs_Always_Visible    = 1;
         MetaData_Always_Visible  = 1;
 
@@ -14592,8 +14408,6 @@ global_function
         break;
         }
     }
-    // u08 waypointsVisible;
-    // u08 contigLabels;
 
     u16 ngphextensions;
     fread(&ngphextensions, sizeof(ngphextensions), 1, file);
@@ -14740,7 +14554,6 @@ TextInput(GLFWwindow* window, u32 codepoint)
         Global_Text_Buffer[Global_Text_Buffer_Ptr++] = codepoint;
         
         if (Global_Text_Buffer_Ptr == ArrayCount(Global_Text_Buffer)) Global_Text_Buffer_Ptr = 0;
-        //nk_input_unicode(NK_Context, codepoint); 
     }
 }
 
@@ -15083,40 +14896,6 @@ GenerateAGP(char *path, u08 overwrite, u08 preserveOrder)
 }
 
 
-// global_function
-// void
-// SortMapByMetaTags()
-// {
-//     u32 nPixelToConsider = Number_of_Pixels_1D;
-//     for (;;)
-//     {
-//         u64 maxFlag = 0;
-//         ForLoop(nPixelToConsider) maxFlag = my_Max(maxFlag, Map_State->metaDataFlags[index]);
-//         if (!maxFlag) break;
-
-//         ForLoop(nPixelToConsider)
-//         {
-//             u32 pixelEnd = nPixelToConsider - index - 1;
-//             s32 delta = (s32)(Number_of_Pixels_1D - pixelEnd - 1);
-//             if (Map_State->metaDataFlags[pixelEnd] == maxFlag)
-//             {
-//                 u32 pixelStart = pixelEnd;
-//                 while (pixelStart && Map_State->metaDataFlags[pixelStart - 1] == maxFlag) --pixelStart;
-                
-//                 if (delta)
-//                 {
-//                     RearrangeMap(pixelStart, pixelEnd, delta);
-//                     AddMapEdit(delta, {(u32)((s32)pixelStart + delta), (u32)((s32)pixelEnd + delta)}, 0);
-//                 }
-
-//                 nPixelToConsider -= (pixelEnd - pixelStart + 1);
-//                 break;
-//             }
-//         }
-//     }
-// }
-
-
 void SortMapByMetaTags(u64 tagMask)
 {
     u32 nPixelToConsider = Number_of_Pixels_1D;
@@ -15307,20 +15086,7 @@ MainArgs
         UI_On = 1;
     }
 
-    // if (1)
-    // {   
-    //     bool show_flag = true;
-    //     auto tmp = new TexturesArray4AI(32, 1024, (char*)"123", Contigs);
-    //     tmp->copy_buffer_to_textures(Contact_Matrix, show_flag);
-    //     delete tmp;
-    //     if (show_flag)
-    //     {
-    //         glfwSetWindowShouldClose(window, false);
-    //     }
-    // }
-
-    Stuck_Problem_Check_Debug
-    
+    Stuck_Problem_Check_Debug 
 
     u32 showClearCacheScreen = 0;
 
@@ -15679,48 +15445,6 @@ MainArgs
                     push_nk_style(NK_Context, sort_button_normal, sort_button_hover, sort_button_active);
                     nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 3);
 
-                    // AI sort button
-                    /*
-                    {
-                        if (ai_sort_button && currFileName)
-                        {   
-                            printf("AISort button clicked\n");
-                            // check if the ai model is loaded
-                            if (!frag_sort_method) 
-                            {
-                                printf("Loading AI Model...\n");
-                                frag_sort_method = std::make_unique<FragSortTool>();
-                            }
-
-                            // prepare the graph data 
-                            auto texture_array_4_ai = TexturesArray4AI(Number_of_Textures_1D, Texture_Resolution, (char*)currFileName, Contigs);
-                            texture_array_4_ai.copy_buffer_to_textures(Contact_Matrix);
-                            texture_array_4_ai.cal_compressed_hic(Contigs, Extensions);
-                            FragsOrder frags_order(texture_array_4_ai.get_num_frags()); // intilize the frags_order with the number of fragments including the filtered out ones
-                            bool ai_flag = false;
-                            if (ai_flag)
-                            {
-                                GraphData* graph_data;
-                                texture_array_4_ai.cal_graphData(graph_data);
-                                frag_sort_method->cal_curated_fragments_order( graph_data, frags_order);
-                                delete graph_data;
-                            }
-                            else 
-                            {
-                                std::vector<std::string> exclude_tags = {"haplotig", "unloc"};
-                                std::vector<s32> exclude_frag_idx = get_exclude_metaData_idx(exclude_tags);
-                                LikelihoodTable likelihood_table(
-                                    texture_array_4_ai.get_frags(), 
-                                    texture_array_4_ai.get_compressed_hic(), 
-                                    (f32)auto_curation_state.smallest_frag_size_in_pixel / ((f32)Number_of_Pixels_1D + 1.f), 
-                                    exclude_frag_idx);
-                                // use the compressed_hic to calculate the frags_order directly
-                                frag_sort_method->sort_according_likelihood_dfs( likelihood_table, frags_order, 0.4, texture_array_4_ai.get_frags());
-                            }
-                            std::cout << std::endl;
-                        }
-                    }
-                    */
                     // Pixel Cut
                     {
                         bounds = nk_widget_bounds(NK_Context);
@@ -15770,8 +15494,6 @@ MainArgs
                                     fmt::print("[Pixel Cut] pixel mean window size:      {}\n", auto_curation_state.auto_cut_diag_window_for_pixel_mean);
                                     fmt::print("[Pixel Cut] smallest_frag_size_in_pixel: {}\n", auto_curation_state.auto_cut_smallest_frag_size_in_pixel);
 
-                                    // auto_cut_button = 0;
-                                    // nk_popup_close(NK_Context);
                                 }
                                 /* run cut 按钮 */
                                 if (nk_button_label(NK_Context, "Run") && currFileName) {
@@ -15855,8 +15577,6 @@ MainArgs
                                 fmt::print("[Pixel Sort] smallest_frag_size_in_pixel: {}\n", auto_curation_state.smallest_frag_size_in_pixel);
                                 fmt::print("[Pixel Sort] link_score_threshold:        {:.3f}\n", auto_curation_state.link_score_threshold);
                                 fmt::print("[Pixel Sort] Sort mode:                   {}\n", auto_curation_state.get_sort_mode_name());
-                                // auto_sort_button = 0;
-                                // nk_popup_close(NK_Context);
                             }
                             /* run sort 按钮 */
                             if (nk_button_label(NK_Context, "Run") && currFileName) {
@@ -15879,56 +15599,6 @@ MainArgs
                                 auto_curation_state.set_buf();
                                 nk_popup_close(NK_Context);
                             }
-                            /*
-                            // redo all the changes
-                            if (!auto_curation_state.show_autoSort_redo_confirm_popup)
-                            {
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                                if (nk_button_label(NK_Context, "Redo All (Careful!)")) 
-                                {   
-                                    auto_curation_state.show_autoSort_redo_confirm_popup=true;
-                                }
-                            } else
-                            {
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                                nk_label(NK_Context, "Are you sure to redo all edits?", NK_TEXT_LEFT);
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
-                                if (nk_button_label(NK_Context, "Yes")) 
-                                {
-                                    auto_curation_state.show_autoSort_redo_confirm_popup=false;
-                                    printf("[Pixel Sort] Redo all edits.\n");
-                                    RedoAllEdits(Map_Editor);
-                                }
-                                if (nk_button_label(NK_Context, "No")) 
-                                {
-                                    auto_curation_state.show_autoSort_redo_confirm_popup=false;
-                                }
-                            }
-                            // reject all the edits
-                            if (!auto_curation_state.show_autoSort_erase_confirm_popup)
-                            {   
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                                if (nk_button_label(NK_Context, "Erase All (Careful!)")) 
-                                {   
-                                    auto_curation_state.show_autoSort_erase_confirm_popup=true;
-                                }
-                            } else
-                            {
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
-                                nk_label(NK_Context, "Are you sure to erase all edits?", NK_TEXT_LEFT);
-                                nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
-                                if (nk_button_label(NK_Context, "Yes")) 
-                                {
-                                    auto_curation_state.show_autoSort_erase_confirm_popup=false;
-                                    printf("[Pixel Sort] Erase all edits.\n");
-                                    EraseAllEdits(Map_Editor);
-                                }
-                                if (nk_button_label(NK_Context, "No")) 
-                                {
-                                    auto_curation_state.show_autoSort_erase_confirm_popup=false;
-                                }
-                            }
-                            */
                                 
                             nk_popup_end(NK_Context);
 
@@ -16357,8 +16027,6 @@ MainArgs
                     
                     if (File_Loaded)
                     {
-                        // nk_layout_row_static(NK_Context, Screen_Scale.y * 30.0f, (s32)(Screen_Scale.x * 300), 1);
-                        // if (nk_button_label(NK_Context, "Sort Map by Meta Data Tags")) SortMapByMetaTags();
 
                         nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 1);
                         nk_label(NK_Context, "Sort Map by Meta Data Tags:", NK_TEXT_ALIGN_LEFT);
@@ -16626,10 +16294,6 @@ MainArgs
                                             stbsp_snprintf((char *)buff, sizeof(buff), "%u", index2 + 1);
                                             if (nk_button_label(NK_Context, (char *)buff))
                                             {
-                                                // f32 pos = (f32)((f64)cont->contigMapPixels[index2] / (f64)Number_of_Pixels_1D) - 0.5f;
-                                                // Camera_Position.x = pos;
-                                                // Camera_Position.y = -pos;
-
                                                 f32 pos = (f32)((f64)cont->contigMapPixels[index2] / (f64)Number_of_Pixels_1D) - 0.5f;
                                                 Camera_Position.x = pos;
                                                 Camera_Position.y = -pos;
@@ -16638,7 +16302,6 @@ MainArgs
                                                 f32 contigSizeInPixels = (f32)cont->contigMapPixels[index2];
                                                 f32 screenWidth = (f32)width;
 
-                                                // f32 zoomLevel =(f32)(contigSizeInPixels / (screenWidth * index2));
                                                 f32 zoomLevel = (f32)(contigSizeInPixels / (screenWidth));
                                                 ZoomCamera(zoomLevel);
 
@@ -16883,12 +16546,10 @@ MainArgs
                             if (nk_button_label(NK_Context, "Yes"))
                             {
                                 restore_initial_state();
-                                // nk_popup_close(NK_Context);
                                 showClearCacheScreen = 0;
                             }
                             if (nk_button_label(NK_Context, "No")) 
                             {
-                                // nk_popup_close(NK_Context);
                                 showClearCacheScreen = 0;
                             }
 
