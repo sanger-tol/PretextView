@@ -26,12 +26,12 @@ class Frags:
     def ini_size(self, n:int):
         self.n = n
         self.frags_infos = np.zeros((self.n, 4))
-        self.adj_matrix = np.zeros((self.n, self.n, 5)) # 邻接矩阵
+        self.adj_matrix = np.zeros((self.n, self.n, 5)) # adjacency matrix
     
     def read_frags_adj_matrix(self, frags_file):
         """
-            读取基因组片段数据
-            :param frags_file: 基因组片段文件
+            Read genome fragment data.
+            :param frags_file: genome fragment file
             :return: None
         """
         with open(frags_file, 'r') as f:
@@ -63,25 +63,25 @@ class Frags:
     
     def kmeans_cluster(self, k, matrix:np.ndarray = None):
         """
-            计算特征值和特征向量
+            Compute eigenvalues/eigenvectors and run spectral clustering.
             :return: None
         """
         if matrix is None: 
             raise ValueError("Matrix is None, please provide a matrix")
         processed_adj_matrix = np.max(matrix[..., :4], axis=-1)
         print(f"[KMeans]: original matrix shape = {matrix.shape} processed matrix shape = {processed_adj_matrix.shape}")
-        # 谱聚类
+        # Spectral clustering
         model = SpectralClustering(
             n_clusters=k,
-            affinity='precomputed',  # 相似度计算方式（高斯核或K近邻）
-            assign_labels='kmeans'         # 低维空间用K-Means聚类
+            affinity='precomputed',  # similarity mode (Gaussian kernel or k-NN)
+            assign_labels='kmeans'         # cluster in the low-dimensional space with K-Means
         )
         clusters = model.fit_predict(processed_adj_matrix)
         return  clusters
     
     def auto_kmeans_cluster(self, k_range=range(2, 20), matrix: np.ndarray = None):
         """
-            自动选择最佳聚类数并聚类（基于轮廓系数）
+            Choose the best cluster count automatically and cluster (silhouette score).
         """
         if matrix is None:
             matrix = self.adj_matrix
@@ -113,7 +113,7 @@ class Frags:
 
 def run_kmeans(k = 6, matrix:np.ndarray = None):
     """
-        运行kmeans聚类
+        Run k-means / spectral clustering.
         :return: None
     """
     frags = Frags()

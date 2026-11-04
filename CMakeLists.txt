@@ -290,12 +290,12 @@ endif()
 if (PYTHON_SCOPED_INTERPRETER AND Python_FOUND)
     message(STATUS "PYTHON_SCOPED_INTERPRETER defined, build with PYTHON_SCOPED_INTERPRETER")
     add_subdirectory(subprojects/pybind11)
-    # 拷贝python lib文件到编译目录下
+    # Copy Python shared library into the build directory
     get_filename_component(Python_LIBRARIES "${Python_LIBRARIES}" REALPATH)
     get_filename_component(Python_lib_name "${Python_LIBRARIES}" NAME)
     file(COPY ${Python_LIBRARIES} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
     message(STATUS "Python lib realpath: ${Python_LIBRARIES}, name: ${Python_lib_name}")
-    # 获取拷贝后文件的路径
+    # Path to the copied library in the build tree
     # find_library(PYTHON_LIB_PATH 
     #     NAMES ${Python_lib_name}  
     #     PATHS ${CMAKE_CURRENT_BINARY_DIR} 
@@ -306,13 +306,13 @@ if (PYTHON_SCOPED_INTERPRETER AND Python_FOUND)
         COMMENT "Fix install_name of python lib")    
     message(STATUS "Build with PYTHON_SCOPED_INTERPRETER. Python search path: ${CMAKE_CURRENT_BINARY_DIR}, Python version: ${Python_VERSION}, Python_lib: ${PYTHON_LIB_PATH}")
 
-    # 将 Python 脚本复制到构建目录
+    # Copy Python helper script into the build directory
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/python/frag_cluster/kmeans_utils.py
         ${CMAKE_CURRENT_BINARY_DIR}/kmeans_utils.py
         COPYONLY )
 
-    # 链接 pybind11 和 Python 库
+    # Link pybind11 embed and Python
     target_link_libraries(${target_name} PRIVATE 
         ${PYTHON_LIB_PATH}
         pybind11::embed 

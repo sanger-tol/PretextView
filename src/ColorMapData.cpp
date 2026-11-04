@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#ifndef HEADER_H  // 防止重定义错误
+#ifndef HEADER_H  // guard against duplicate inclusion when Header.h is pulled in twice
 #include "Header.h"
 #endif
 

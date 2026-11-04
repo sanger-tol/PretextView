@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # THIS SHOULD BE RUN AFTER 
-# arch -x86_64 zsh  # 首先进入 x86_64的编译环境
+# arch -x86_64 zsh  # optional: enter x86_64 Rosetta shell first
 # conda activate pretext
 
 buildtype="debug"  # release debug, 
@@ -12,8 +12,8 @@ export PATH="/opt/homebrew/bin:$PATH"
 # -----------------------------
 
 
-[ -d "app" ] && rm -rf "app"  # 如果已经存在app文件夹则删除该文件夹
-[ -d "builddir" ] && rm -rf "builddir"  # 如果已经存在builddir文件夹则删除该文件夹
+[ -d "app" ] && rm -rf "app"  # remove existing app output directory
+[ -d "builddir" ] && rm -rf "builddir"  # remove existing build directory
 mkdir -p app
 mkdir -p builddir
 cat > "app/.gitignore" <<END

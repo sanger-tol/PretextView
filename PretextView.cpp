@@ -26,17 +26,13 @@ SOFTWARE.
 */
 
 
-#define PretextView_Version_Label "1.1.0-beta"
-#define PretextView_Version "PretextViewAI Version " PretextView_Version_Label
-#define PretextView_Title "PretextViewAI " PretextView_Version_Label " - Wellcome Sanger Institute"
-
-
 #include <frag_sort.h>  // place this before add Header.h to avoid macro conflict
 
 #ifdef PYTHON_SCOPED_INTERPRETER
     #include "kmeans_pybind.h" 
 #endif // PYTHON_SCOPED_INTERPRETER
 #include <Header.h>
+#include "PretextViewConstants.h"
 
 #ifdef DEBUG
     #include <errno.h>
@@ -182,10 +178,6 @@ SOFTWARE.
 #include <pwd.h>
 #endif
 
-#define UI_SHADER_LOC_POSITION 0
-#define UI_SHADER_LOC_TEXCOORD 1
-#define UI_SHADER_LOC_COLOR 2
-
 global_variable
 memory_arena
 Working_Set;
@@ -231,17 +223,6 @@ global_variable
                 {0.0f, 0.0f, 0.0f, 1.0f}        // Black
 };
 
-global_variable const char *
-    bg_color[] =
-        {
-            "Classic",
-            "Jasper",
-            "Heather",
-            "Carolina",
-            "White",
-            "Grey",
-            "Black"};
-
 global_variable
     u08
         active_bgcolor = 0;
@@ -275,21 +256,6 @@ global_variable
                 {3.666f, 2.666f, 1.666f},
                 {5.666f, 3.666f, 2.666f}};
 
-global_variable const char *
-    metaColors[] =
-        {
-            "Color set 1",
-            "Color set 2",
-            "Color set 3",
-            "Color set 4"};
-
-global_variable const char *
-    outlineColors[] =
-        {
-            "No-Outline",
-            "Black-Outline",
-            "White-Outline"};
-
 global_variable
     u08
         activeGraphColour = 0;
@@ -304,42 +270,10 @@ global_variable
                 {0.706f, 0.0f, 1.0f, 1.0f}      // Drystorm (purple)
 };
 
-global_variable const char *
-    colour_graph[] =
-        {
-            "Default",
-            "Vermillion",
-            "Blue",
-            "Purple"};
-
-global_variable
-    nk_colorf
-        DefaultGraphColour = graphColors[activeGraphColour];
-
 // 0 shows every alg group. 1..6 show only d1..d6.
 global_variable
 u32
 Linkage_Group_Filter = 0;
-
-// Extension name constants
-global_variable const char *
-    EXT_NAME_3P_TELOMERE = "3p_telomere";
-
-global_variable const char *
-    EXT_NAME_5P_TELOMERE = "5p_telomere";
-
-global_variable const char *
-    EXT_NAME_TELOMERE = "telomere";
-
-global_variable const char *
-    EXT_NAME_COVERAGE = "coverage";
-
-global_variable const char *
-    EXT_NAME_GAP = "gap";
-
-global_variable const char *
-    EXT_NAME_REPEAT_DENSITY = "repeat_density";
-
 
 global_variable
 nk_context *
@@ -443,7 +377,6 @@ s32
 useCustomOrder = 0;
 
 
-#define text_box_font_size_default 20.0f
 struct TextBoxSize
 {
     f32 font_size = text_box_font_size_default;
@@ -593,17 +526,6 @@ FONScontext *
 FontStash_Context;
 
 
-#define Grey_Background {0.569f, 0.549f, 0.451f, 1.0f}
-#define Yellow_Text_Float {0.941176471f, 0.725490196f, 0.058823529f, 1.0f}
-#define Red_Text_Float {0.941176471f, 0.039215686f, 0.019607843f, 1.0f}
-
-#define Green_Float {0.3f, 0.6f, 0.0f, 0.2f}
-#define Red_Float {0.6f, 0.3f, 0.0f, 0.2f}
-#define Blue_Float {0.0f, 0.3f, 0.6f, 0.2f}
-
-#define Red_Full {1.0f, 0.0f, 0.0f, 1.0f}
-#define Blue_Full {0.0f, 0.0f, 1.0f, 1.0f}
-
 global_variable
 ui_colour_element_bg *
 Contig_Name_Labels;
@@ -672,8 +594,8 @@ Extension_Mode_Data;
 
 
 /*
-用于显示在input sequences中点击后选中的片段的名字，
-显示label持续 5 秒钟
+Displays the name of the fragment selected in Input Sequences after a click;
+the label stays visible for 5 seconds.
 */
 struct selected_sequence_cover_countor
 {
@@ -1143,46 +1065,6 @@ u16
 sortMetaEdits;
 
 
-global_variable
-const char *
-Default_Tags[] = 
-{
-    "Haplotig",
-    "Unloc",
-    "X",
-    "Y",
-    "Z",
-    "W",
-    "HAP1",
-    "HAP2",
-    "Target",
-    "Contaminant",
-    "Singleton",
-    "X1",
-    "X2",
-    "Y1",
-    "Y2",
-    "Z1",
-    "Z2",
-    "W1",
-    "W2",
-    "I",
-    "II",
-    "III",
-    "IV",
-    "V",
-    "U",
-    "B1",
-    "B2",
-    "B3", 
-    "FalseDuplicate",
-    "Primary",
-    "vertPaint",   // paint vertically
-    "horzPaint",   // paint horizontally
-    "crossPaint",  // paint with cross
-};
-
-
 char searchbuf[256] = {0};
 s32 caseSensitive_search_sequences = 0;
 
@@ -1285,7 +1167,6 @@ media
     struct file files[FILE_MAX];
 };
 
-#define MAX_PATH_LEN 512
 struct
 file_browser
 {
@@ -1991,9 +1872,6 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
     return(ret);
 }
 
-#define ClipboardEditorBufferSize 32768
-#define ClipboardEditorLastCopiedSize 4096
-
 /* clipboard editor, highlight, copy and paste */
 global_variable char ClipboardEditor_LastCopied[ClipboardEditorLastCopiedSize] = {0};
 global_variable char ClipboardEditor_Buffer[ClipboardEditorBufferSize] = {0};
@@ -2534,9 +2412,6 @@ map_edit
     }
 };
 
-global_variable
-const s32 Break_Edit_Delta = std::numeric_limits<s32>::min();
-
 struct
 waypoint;
 
@@ -2560,9 +2435,6 @@ waypoint
     // u16 long_waypoint_mode;
 };
 
-#define Edits_Stack_Size 32768
-#define Waypoints_Stack_Size 128
-
 struct
 map_editor
 {
@@ -2576,8 +2448,6 @@ map_editor
 global_variable
 map_editor *
 Map_Editor;
-
-#define Waypoints_Quadtree_Levels 5
 
 struct
 waypoint_quadtree_level
@@ -2610,7 +2480,6 @@ Waypoint_Editor;
 
 global_variable u16 Long_Waypoints_Mode = 0;  // mode 0: vertical, mode 1: horizontal, mode 2: both
 
-#define Waypoint_Select_Distance 8.0f
 global_variable
 waypoint *
 Selected_Waypoint = 0;
@@ -2932,7 +2801,6 @@ GetWaypointsWithinRectange(waypoint_quadtree_level *level, point2f lowerBound, p
     if (level->children[0])
     {
         u08 toSearch[4] = {1, 1, 1, 1};
-#define epsilon 0.001f
         ForLoop(4)
         {
             // bottom left
@@ -2940,7 +2808,7 @@ GetWaypointsWithinRectange(waypoint_quadtree_level *level, point2f lowerBound, p
             point2f insertSize = {lowerBound.x - child->lowerBound.x, lowerBound.y - child->lowerBound.y};
             if (insertSize.x >= 0 && insertSize.x < child->size && insertSize.y >= 0 && insertSize.y < child->size)
             {
-                point2f recSize = {my_Min(size.x, child->size - insertSize.x - epsilon), my_Min(size.y, child->size - insertSize.y - epsilon)};
+                point2f recSize = {my_Min(size.x, child->size - insertSize.x - Waypoint_Rect_Epsilon), my_Min(size.y, child->size - insertSize.y - Waypoint_Rect_Epsilon)};
                 GetWaypointsWithinRectange(child, lowerBound, recSize, bufferPtr);
                 toSearch[index] = 0;
                 break;
@@ -2955,7 +2823,7 @@ GetWaypointsWithinRectange(waypoint_quadtree_level *level, point2f lowerBound, p
                 point2f insertSize = {lowerBound.x + size.x - child->lowerBound.x, lowerBound.y - child->lowerBound.y};
                 if (insertSize.x >= 0 && insertSize.x < child->size && insertSize.y >= 0 && insertSize.y < child->size)
                 {
-                    point2f recSize = {my_Min(size.x, insertSize.x), my_Min(size.y, child->size - insertSize.y - epsilon)};
+                    point2f recSize = {my_Min(size.x, insertSize.x), my_Min(size.y, child->size - insertSize.y - Waypoint_Rect_Epsilon)};
                     GetWaypointsWithinRectange(child, {child->lowerBound.x + insertSize.x - recSize.x, lowerBound.y}, recSize, bufferPtr);
                     toSearch[index] = 0;
                     break;
@@ -2971,7 +2839,7 @@ GetWaypointsWithinRectange(waypoint_quadtree_level *level, point2f lowerBound, p
                 point2f insertSize = {lowerBound.x - child->lowerBound.x, lowerBound.y + size.y - child->lowerBound.y};
                 if (insertSize.x >= 0 && insertSize.x < child->size && insertSize.y >= 0 && insertSize.y < child->size)
                 {
-                    point2f recSize = {my_Min(size.x, child->size - insertSize.x - epsilon), my_Min(size.y, insertSize.y)};
+                    point2f recSize = {my_Min(size.x, child->size - insertSize.x - Waypoint_Rect_Epsilon), my_Min(size.y, insertSize.y)};
                     GetWaypointsWithinRectange(child, {lowerBound.x, child->lowerBound.y + insertSize.y - recSize.y}, recSize, bufferPtr);
                     toSearch[index] = 0;
                     break;
@@ -3255,7 +3123,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             u32 pixel1 = (u32)((f64)nPixels * (0.5 + (f64)wx));
             u32 pixel2 = (u32)((f64)nPixels * (0.5 + (f64)wy));
             
-            // 防止在尾部溢出
+            // Clamp to avoid overflow at the ends
             pixel1 = my_Max(0, my_Min(nPixels - 1, pixel1));
             pixel2 = my_Max(0, my_Min(nPixels - 1, pixel2));
 
@@ -4943,7 +4811,6 @@ Render() {
             ChangeSize((s32)width, (s32)height);
         }
 
-        #define MaxTicksPerScaleBar 128
         if (File_Loaded && Scale_Bars->on) // Scale bars
         {
             glUseProgram(Flat_Shader->shaderProgram);
@@ -5073,8 +4940,6 @@ Render() {
             glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textNormalMat);
 
             glViewport(0, 0, (s32)width, (s32)height);
-
-#define DefaultWaypointSize 18.0f
             glUseProgram(Flat_Shader->shaderProgram);
             glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Waypoint_Mode_Data->base);
 
@@ -5231,7 +5096,6 @@ Render() {
 
             glViewport(0, 0, (s32)width, (s32)height);
 
-#define DefaultExtensionSize 20.0f
 
             fonsSetSize(FontStash_Context, text_box_size.font_size * Screen_Scale.x);
             fonsVertMetrics(FontStash_Context, 0, 0, &lh);
@@ -5324,7 +5188,7 @@ Render() {
             }
         }
 
-        // label to show the selected sequence 从 input sequences 里面选中的片段
+        // Label for the fragment selected in Input Sequences
         if (Selected_Sequence_Cover_Countor.end_time > 0.)
         {   
             f64 crt_time = GetTime();
@@ -5375,7 +5239,6 @@ Render() {
 
             f32 lh = 0.0f;   
             fonsClearState(FontStash_Context);
-#define DefaultScaffSize 40.0f
             fonsSetSize(FontStash_Context, Scaff_Mode_Data->size * Screen_Scale.x);
             fonsSetAlign(FontStash_Context, FONS_ALIGN_MIDDLE | FONS_ALIGN_TOP);
             fonsSetFont(FontStash_Context, Font_Bold);
@@ -5657,7 +5520,6 @@ Render() {
 
             f32 lh = 0.0f;   
             fonsClearState(FontStash_Context);
-#define DefaultMetaDataSize 20.0f
             fonsSetSize(FontStash_Context, MetaData_Mode_Data->size * Screen_Scale.x);
             fonsSetAlign(FontStash_Context, FONS_ALIGN_MIDDLE | FONS_ALIGN_TOP);
             fonsSetFont(FontStash_Context, Font_Bold);
@@ -6513,8 +6375,6 @@ Render() {
                 glBindBuffer(GL_ARRAY_BUFFER, NK_Device->vbo);
                 glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, NK_Device->ebo);
 
-#define MAX_VERTEX_MEMORY KiloByte(512)
-#define MAX_ELEMENT_MEMORY KiloByte(128)
                 glBufferData(GL_ARRAY_BUFFER, MAX_VERTEX_MEMORY, NULL, GL_STREAM_DRAW);
                 glBufferData(GL_ELEMENT_ARRAY_BUFFER, MAX_ELEMENT_MEMORY, NULL, GL_STREAM_DRAW);
 
@@ -6691,7 +6551,7 @@ LoadTexture(void *in)
             Bytes_Per_Texture,                        // size after decompressing
             NULL)
         )
-    { // 解压压缩的texture到 buffer->texture
+    { // Decompress the on-disk texture into buffer->texture
         fprintf(stderr, "Could not decompress texture from disk\n");
     }
 
@@ -6707,19 +6567,16 @@ LoadTexture(void *in)
 
 global_function
 void
-PopulateTextureLoadQueue(void *in) // 填充已经初始化过的 所有的queue，填充的任务为所有的528个texture的读取任务
+PopulateTextureLoadQueue(void *in) // Fill all initialized queues with read tasks for all 528 textures
 {
-    u32 *packedTextureIndexes = (u32 *)in;  // 将空指针转化为u32
+    u32 *packedTextureIndexes = (u32 *)in;  // Cast the input pointer to u32*
     u32 ptr = 0;
     ForLoop(Number_of_Textures_1D) // row number
     {
         for (u32 index2 = index; index2 < Number_of_Textures_1D; index2++ ) // column number
         {
-	    // first 16 bits is the raw number and the second 16 bits is the column number,
-	    // there will be problem if number of texture in one dimension is larger than
-	    // 2^16, but it is not possible ... just for a reminder
-            packedTextureIndexes[ptr] = (index << 16) | (index2);
-            ThreadPoolAddTask(Thread_Pool, LoadTexture, (void *)(packedTextureIndexes + ptr++)); // 填充当前的任务队列，输入为对应的texture的行、列编号
+            packedTextureIndexes[ptr] = (index << 16) | (index2); // first 16 bits is the raw number and the second 16 bits is the column number, there will be problem if number of texture in one dimension is larger than 2^16, but it is not possible ... just for a reminder
+            ThreadPoolAddTask(Thread_Pool, LoadTexture, (void *)(packedTextureIndexes + ptr++)); // Enqueue a load task with the packed texture row/column index
         }
     }
 }
@@ -7169,7 +7026,7 @@ TestFile(const char *fileName, u64 *fileSize = 0)
             }
         }
     }
-    return(file); // 仅仅返回正确的file指针，否则返回空指针
+    return(file); // Return the file pointer on success, otherwise null
 }
 
 
@@ -7228,7 +7085,7 @@ UploadAlgGroupColours(graph *gph)
     {
         u32 value = gph->data[index];
         u32 show = (!Linkage_Group_Filter || value == Linkage_Group_Filter) ? value : 0;
-        linkage_colour groupColour = {0.1f, 0.8f, 0.7f, 1.0f};
+        linkage_colour groupColour = DefaultGraphColour;
         if (show)
         {
             LinkageGroupColourByValue(show, &groupColour);
@@ -7337,7 +7194,7 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
     extension_node* node = Extensions.head ;
     while (added_index--)
     {
-        node = node->next; // 移动到最后一个节点
+        node = node->next; // Advance along the list
         exIndex ++ ;
     }
     for ( ; node; node = node->next) {
@@ -7347,12 +7204,6 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
             case extension_graph:
                 {
                     graph *gph = (graph *)node->extension; // get the graph ptr and assigned to gph
-#define DefaultGraphScale 0.2f
-#define DefaultGraphBase 32.0f
-#define DefaultGraphLineSize 1.0f
-#define DefaultGraphColour {0.1f, 0.8f, 0.7f, 1.0f}
-#define Colour_5p_telomere {0.533f, 0.800f, 0.933f, 1.0f}  // #88CCEE - light blue
-#define Colour_3p_telomere {0.867f, 0.800f, 0.467f, 1.0f}  // #DDCC77 - light gold
                     gph->scale = scale>0.f? scale : DefaultGraphScale;
                     gph->base = DefaultGraphBase;
                     gph->lineSize = DefaultGraphLineSize;
@@ -7936,7 +7787,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
     // otherwise, set the pointer file to a null pointer.
     FILE *file = TestFile(filePath, &fileSize);
 
-    if (!file)    // 如果为空指针， 返回读取错误fileErr
+    if (!file)    // Null file pointer: return fileErr
     {
         return(fileErr);
     }
@@ -8051,6 +7902,23 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             delete frag_cut_cal_ptr;
             frag_cut_cal_ptr = nullptr;
         }
+        if (textures_array_ptr)
+        {
+            delete textures_array_ptr;
+            textures_array_ptr = nullptr;
+        }
+        // Contigs arrays may have been moved to the heap by EnsureContigsArrayCapacity.
+        // Free them before ResetMemoryArenaP, then clear the flag so the next LoadFile
+        // does not delete[] arena memory.
+        if (Contigs_arr_GL_heap && Contigs)
+        {
+            delete[] Contigs->contigs_arr;
+            delete[] Contigs->contigInvertFlags;
+            Contigs->contigs_arr = nullptr;
+            Contigs->contigInvertFlags = nullptr;
+            Contigs->contigs_arr_capacity = 0;
+        }
+        Contigs_arr_GL_heap = 0;
         ResetMemoryArenaP(arena); // release all the memory allocated, avoid memory leak
         auto_curation_state.clear();
     }
@@ -8290,6 +8158,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         // Reserve storage for the contig invterted bit flags
         Contigs->contigInvertFlags = PushArrayP(arena, u08, (nContigs + 7) >> 3);
+        Contigs_arr_GL_heap = 0;
 
         // Update the current contigs based on mapstate, and update the number
         // of fragments contained in each contig in original_contigs and the
@@ -8499,7 +8368,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         {
             ForLoop2(Number_of_Textures_1D - index)
             {
-                volatile texture_buffer *loadedTexture = 0; // 使用volatile锁放弃存取优化。如果优化（不使用volatile），该值存取会被优化，可能会存放在寄存器中，而不是每次访问该值都会从内存中读取
+                volatile texture_buffer *loadedTexture = 0; // volatile: force loads from memory each time; without it the compiler may keep the value in a register
                 while (!loadedTexture)
                 {   
                     #ifndef _WIN32 // unix
@@ -8511,7 +8380,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                          NULL);
                     #endif // __WIN32
                 }  
-                u08 *texture = loadedTexture->texture; // 获取loadedtexture的texture的指针
+                u08 *texture = loadedTexture->texture; // Pointer to the loaded texture payload
                 
                 // push the texture data (number_of_mipmaps) to the gl_texture_2d_array
                 resolution = Texture_Resolution;
@@ -8536,12 +8405,12 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                     texture += nBytes; // move the texture pointer to the next texture
                 }
 
-                printf("\r%3d/%3d (%1.2f%%) textures loaded from disk...", Texture_Ptr + 1, nTextures, 100.0 * (f64)((f32)(Texture_Ptr + 1) / (f32)((Number_of_Textures_1D >> 1) * (Number_of_Textures_1D + 1)))); // echo out 读取到了第Texture_Ptr个texture
+                printf("\r%3d/%3d (%1.2f%%) textures loaded from disk...", Texture_Ptr + 1, nTextures, 100.0 * (f64)((f32)(Texture_Ptr + 1) / (f32)((Number_of_Textures_1D >> 1) * (Number_of_Textures_1D + 1)))); // Progress: texture index Texture_Ptr loaded
                 fflush(stdout);
 
-                AddTextureBufferToQueue(Texture_Buffer_Queue, (texture_buffer *)loadedTexture);  // texture_buffer_queue is the queue of all the read tasks, the buffer read after adding it back to the queue, for the next read.解决了从队列中弹出任务后任务队列空了的疑问。读取文件的任务队列在别的地方还会被调用吗？
+                AddTextureBufferToQueue(Texture_Buffer_Queue, (texture_buffer *)loadedTexture);  // Return the buffer to the read queue for reuse (avoids an empty queue after pop). texture_buffer_queue holds all read tasks.
                 FenceIn(Current_Loaded_Texture = 0); // set the temporary variable to empty, and jump out of the loop after reading the current_loaded_texture
-                __atomic_fetch_add(&Texture_Ptr, 1, 0); // 更新全局的 texture_ptr 
+                __atomic_fetch_add(&Texture_Ptr, 1, 0); // Bump global Texture_Ptr
                 ptr ++ ;
             }
         }
@@ -8565,7 +8434,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
     }
 
-    // Texture Pixel Lookups  texture像素查找
+    // Texture pixel lookups
     {   
         GLuint pixStart, pixStartTex, pixRearrage, pixRearrageTex;
        
@@ -8599,7 +8468,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         Contact_Matrix->pixelStartLookupBuffer = pixStart;       // buffer object identifier 
         Contact_Matrix->pixelStartLookupBufferTex = pixStartTex; // texture object identifier
 
-        FreeLastPushP(arena); // pixStartLookup  释放存放像素点开始的空间
+        FreeLastPushP(arena); // pixStartLookup: free arena allocation for pixel start lookup
 
         glActiveTexture(GL_TEXTURE3); // shader samples pixrearrangelookup from texture unit 3
 
@@ -8622,9 +8491,9 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         FreeLastPushP(arena); // free pixRearrageLookup as it has already been copied to the buffer object with index pixRearrage
 
-        glUniform1ui(glGetUniformLocation(Contact_Matrix->shaderProgram, "pixpertex"), Texture_Resolution); // 将1024传递给 pixpertex，每个texture有多少个像素点
-        glUniform1f(glGetUniformLocation(Contact_Matrix->shaderProgram, "oopixpertex"), 1.0f / (f32)Texture_Resolution); // 将 1 / 1024 传递给 oopixpertex 
-        glUniform1ui(glGetUniformLocation(Contact_Matrix->shaderProgram, "ntex1dm1"), Number_of_Textures_1D - 1); // 将31传递给 ntex1dm1 
+        glUniform1ui(glGetUniformLocation(Contact_Matrix->shaderProgram, "pixpertex"), Texture_Resolution); // pixpertex: pixels per texture edge (e.g. 1024)
+        glUniform1f(glGetUniformLocation(Contact_Matrix->shaderProgram, "oopixpertex"), 1.0f / (f32)Texture_Resolution); // oopixpertex: reciprocal of pixels per texture
+        glUniform1ui(glGetUniformLocation(Contact_Matrix->shaderProgram, "ntex1dm1"), Number_of_Textures_1D - 1); // ntex1dm1: Number_of_Textures_1D - 1 (e.g. 31)
 
         glActiveTexture(GL_TEXTURE0); //  unbind the previously bound texture 3
     }
@@ -8733,12 +8602,12 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         }
     }
 
-    // 为添加的功能初始化指针
+    // Initialize pointers for the added features
     {
-        // 给pixel_density_extension分配内存
+        // Allocate pixel_density_extension (commented out)
         // pixel_density_extension = new Extension_Graph_Data(Number_of_Pixels_1D);
         
-        // 为 copy textures to cpu 分配内存
+        // Allocate copy-textures-to-CPU storage
         if (textures_array_ptr) delete textures_array_ptr;
         textures_array_ptr = new TexturesArray4AI(
             Number_of_Textures_1D, 
@@ -8755,7 +8624,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         ); 
         restore_settings_after_copy(original_color_control_points);
 
-        // 为 Pixel Cut 存储的数据分配空间，初始化，并且将数据push到extension中
+        // Allocate and initialize Pixel Cut data, then register with extensions
         if (frag_cut_cal_ptr) delete frag_cut_cal_ptr;
         frag_cut_cal_ptr = new FragCutCal(
             textures_array_ptr,
@@ -8765,7 +8634,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         // clear mem for textures
         textures_array_ptr->clear_textures();
         
-        // 添加数据到extensions
+        // Push graph data into extensions
         std::string graph_name = "pixel_discontinuity";
         bool is_pix_density_added = Extensions.is_graph_name_exist(graph_name);
         if (!is_pix_density_added) // pixel density not added
@@ -9001,7 +8870,6 @@ Setup()
         Contig_Name_Labels->on = 0;
         Contig_Name_Labels->fg = Yellow_Text_Float;
         Contig_Name_Labels->bg = Grey_Background;
-#define DefaultNameLabelTextSize 32.0f
         Contig_Name_Labels->size = DefaultNameLabelTextSize;
     }
     
@@ -9011,7 +8879,6 @@ Setup()
         Scale_Bars->on = 0;
         Scale_Bars->fg = Red_Text_Float;
         Scale_Bars->bg = Grey_Background;
-#define DefaultScaleBarSize 20.0f
         Scale_Bars->size = DefaultScaleBarSize;
     }
    
@@ -9020,7 +8887,6 @@ Setup()
         Grid = PushStruct(Working_Set, ui_colour_element);
         Grid->on = 1;
         Grid->bg = Grey_Background;
-#define DefaultGridSize 0.00025f
         Grid->size = DefaultGridSize;
     }
 
@@ -9028,7 +8894,6 @@ Setup()
     {
         Contig_Ids = PushStruct(Working_Set, ui_colour_element);
         Contig_Ids->on = 1;
-#define DefaultContigIdSize (DefaultGridSize * 3.0f)
         Contig_Ids->size = DefaultContigIdSize;
     }
 
@@ -9038,7 +8903,6 @@ Setup()
         Tool_Tip->on = 1;
         Tool_Tip->fg = Yellow_Text_Float;
         Tool_Tip->bg = Grey_Background;
-#define DefaultToolTipTextSize 20.0f
         Tool_Tip->size = DefaultToolTipTextSize;
     }
 
@@ -9280,7 +9144,6 @@ Setup()
 
     // Nuklear Setup
     {
-#define NK_Memory_Size MegaByte(32)
         NK_Device = PushStruct(Working_Set, device);
         u08 *nkCmdMemory = PushArray(Working_Set, u08, NK_Memory_Size);
         nk_buffer_init_fixed(&NK_Device->cmds, (void *)nkCmdMemory, NK_Memory_Size);
@@ -9844,7 +9707,7 @@ void run_ai_detection()
     std::cout << "Running AI detection..." << std::endl;
     int status = std::system("/Users/sg35/miniconda3/envs/auto_cut/bin/python /Users/sg35/PretextView/python/autoCut/auto_cut.py");  
 
-    // 检查命令执行状态
+    // Check subprocess exit status
     if (status == 0) {
         std::cout << "Command successful!" << std::endl;
     } else {
@@ -10493,7 +10356,7 @@ void setContactMatrixVertexArray(
     GLuint texAttrib = (GLuint)glGetAttribLocation(Contact_Matrix_->shaderProgram, "texcoord");
     
     /*
-    从左上到右下开始遍历，见上述编号
+    Traverse from top-left to bottom-right; see symmetric indexing below.
     */
     f32 x = -0.5f;
     f32 y = 0.5f;
@@ -10513,17 +10376,17 @@ void setContactMatrixVertexArray(
         {
             tex_vertex textureVertices[4];
 
-            glGenVertexArrays( // 生成对象的名称， 
-                1,                            // 生成的个数
-                Contact_Matrix_->vaos + ptr);  // 存储位置的指针
-            glBindVertexArray(Contact_Matrix_->vaos[ptr]);  // 绑定顶点名称
+            glGenVertexArrays( // Generate vertex array object name(s)
+                1,                            // Count
+                Contact_Matrix_->vaos + ptr);  // Storage for generated name(s)
+            glBindVertexArray(Contact_Matrix_->vaos[ptr]);  // Bind VAO
 
-            f32 *cornerCoords = allCornerCoords[index2 >= index ? 0 : 1]; // 包含对角线的上三角的时候取第一行{0, 1}，否则取第二行{1, 0}  为了解决关于对角线对称
+            f32 *cornerCoords = allCornerCoords[index2 >= index ? 0 : 1]; // Upper triangle (incl. diagonal): row {0,1}; else {1,0} for diagonal symmetry
             
             u32 min = my_Min(index, index2);
             u32 max = my_Max(index, index2);
             /*
-                对称性编号
+                Symmetric linear index (example n=10)
                 [[ 0  1  2  3  4  5  6  7  8  9]
                     [ 1 10 11 12 13 14 15 16 17 18]
                     [ 2 11 19 20 21 22 23 24 25 26]
@@ -10546,8 +10409,8 @@ void setContactMatrixVertexArray(
             f32 half_len = 1.0f;
             textureVertices[0].x = !copy_flag? x               : -half_len;   // x -> [-0.5, 0.5]
             textureVertices[0].y = !copy_flag? y - quadSize    : -half_len;   // y -> [-0.5, 0.5]
-            textureVertices[0].s = !copy_flag? cornerCoords[0] :  0.f; // s表示texture的水平分量
-            textureVertices[0].t = !copy_flag? cornerCoords[1] :  0.f; // t表示texture的垂直分量
+            textureVertices[0].s = !copy_flag? cornerCoords[0] :  0.f; // s: horizontal texture coordinate
+            textureVertices[0].t = !copy_flag? cornerCoords[1] :  0.f; // t: vertical texture coordinate
             textureVertices[0].u = texture_index_symmetric;
 
             textureVertices[1].x = !copy_flag? x + quadSize    :  half_len;   
@@ -10568,35 +10431,35 @@ void setContactMatrixVertexArray(
             textureVertices[3].t = !copy_flag? 0.0f            :  1.f;
             textureVertices[3].u = texture_index_symmetric;
 
-            glGenBuffers(                    // 生成buffer的名字 存储在contact_matrix->vbos+ptr 对应的地址上
-                1,                           // 个数
-                Contact_Matrix_->vbos + ptr); // 指针，存储生成的名字  
-            glBindBuffer(                    // 绑定到一个已经命名的buffer对象上
-                GL_ARRAY_BUFFER,             // 绑定的对象，gl_array_buffer 一般是绑定顶点的信息
-                Contact_Matrix_->vbos[ptr]);  // 通过输入buffer的名字将其绑定到gl_array_buffer
-            glBufferData(                    // 创建、初始化存储数据的buffer
-                GL_ARRAY_BUFFER,             // 绑定的对象，gl_array_buffer 一般是绑定顶点的信息
-                4 * sizeof(tex_vertex),      // 对象的大小（bytes）
-                textureVertices,             // 即将绑定到gl_array_buffer的数据的指针
-                GL_STATIC_DRAW);             // 绑定后的数据是用于干什么的
+            glGenBuffers(                    // Generate buffer name; store at Contact_Matrix_->vbos + ptr
+                1,                           // Count
+                Contact_Matrix_->vbos + ptr); // Output: generated buffer name
+            glBindBuffer(                    // Bind named buffer object
+                GL_ARRAY_BUFFER,             // Target: vertex attribute data
+                Contact_Matrix_->vbos[ptr]);  // Buffer to bind to GL_ARRAY_BUFFER
+            glBufferData(                    // Create and fill buffer storage
+                GL_ARRAY_BUFFER,             // Target: vertex attribute data
+                4 * sizeof(tex_vertex),      // Size in bytes
+                textureVertices,             // Source data
+                GL_STATIC_DRAW);             // Usage hint: static draw
             
             // tell GL how to interpret the data in the GL_ARRAY_BUFFER
             glEnableVertexAttribArray(posAttrib); 
-            glVertexAttribPointer(           // 定义一个数组存储所有的通用顶点属性
-                posAttrib,                   // 即将修改属性的索引
-                2,                           // 定义每个属性的参数的个数， 只能为1 2 3 4中的一个，初始值为4
-                GL_FLOAT,                    // 定义该属性的数据类型，则数据为4个字节， 占用两个的话，则一共为8字节
-                GL_FALSE,                    // normalized， 是否要在取用的时候规范化这些数
-                sizeof(tex_vertex),          // stride  定义从一个信息的指针下一个信息指针的bytes的间隔， 一个信息包到下一个信息包的长度
-                0);                          // const void* 指定当前与 GL_ARRAY_BUFFER 绑定的缓冲区数据头指针偏移多少个到 第一个通用顶点属性的第一个特征开始的位置。 初始值为 0。因为此处想要读取的信息为 x 和 y
+            glVertexAttribPointer(           // Describe generic vertex attribute layout
+                posAttrib,                   // Attribute index to configure
+                2,                           // Components per attribute (1–4)
+                GL_FLOAT,                    // Component type
+                GL_FALSE,                    // Normalized (GL_FALSE = no)
+                sizeof(tex_vertex),          // Stride between consecutive vertices
+                0);                          // Offset to first x,y (0: read position from start of tex_vertex)
             glEnableVertexAttribArray(texAttrib); // 
             glVertexAttribPointer(
                 texAttrib, 
                 3, 
-                GL_FLOAT,   // 定义每个属性的数据类型
+                GL_FLOAT,   // Component type
                 GL_FALSE,   // GL_FALSE, GL_TRUE
                 sizeof(tex_vertex), 
-                (void *)(3 * sizeof(GLfloat))); // 偏移量为3，因为前三个为x, y and pad, 想要读取的数据为 s, t and u
+                (void *)(3 * sizeof(GLfloat))); // Offset 3 floats: after x, y, pad; read s, t, u
 
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, Quad_EBO);
 
@@ -10617,7 +10480,7 @@ prepare_before_copy(f32 *original_color_control_points)
     // prepare before reading textures
     glActiveTexture(GL_TEXTURE1);
 
-    glBindTexture(GL_TEXTURE_BUFFER, Color_Maps->maps[Color_Maps->nMaps-1]); // 绑定到颜色映射的最后一个颜色
+    glBindTexture(GL_TEXTURE_BUFFER, Color_Maps->maps[Color_Maps->nMaps-1]); // Bind the last color-map texture
     glActiveTexture(GL_TEXTURE0);
     for (u32 i = 0; i < 3 ; i ++ ) 
         original_color_control_points[i] = Color_Maps->controlPoints[i];
@@ -11927,14 +11790,14 @@ UserProfileEditorRun(const char *name, struct file_browser *browser, struct nk_c
     struct nk_window *window = nk_window_find(ctx, name);
     u32 doesExist = window != 0;
 
-    if (!show && !doesExist) // 不显示 且 不存在
+    if (!show && !doesExist) // Not shown and window does not exist
     {
         return (0);
     }
 
-    if (show && doesExist && (window->flags & NK_WINDOW_HIDDEN))  // 显示 且 存在 且 隐藏
+    if (show && doesExist && (window->flags & NK_WINDOW_HIDDEN))  // Shown, exists, but hidden
     {
-        window->flags &= ~(nk_flags)NK_WINDOW_HIDDEN;  // 取消隐藏
+        window->flags &= ~(nk_flags)NK_WINDOW_HIDDEN;  // Clear hidden flag
         FileBrowserReloadDirectoryContent(browser, browser->directory);
     }
 
@@ -12343,11 +12206,6 @@ SetSaveStatePaths()
 global_variable
 u08
 SaveState_Magic[5] = {'p', 't', 's', 'x', 3};
-
-#define SaveState_Format_Version_Min 2
-#define SaveState_Format_Version_Current 3
-#define SaveState_Scaff_Entry_Bytes_V2 8
-#define SaveState_Scaff_Entry_Bytes_V3 12
 
 global_variable
 u08
@@ -14780,7 +14638,7 @@ GenerateAGP(char *path, u08 overwrite, u08 preserveOrder)
     // Fragment orientation (+/-) always follows the map (IsContigInverted); the
     // old "Format Singletons" option that forced many rows to + has been removed.
 
-    // 这里粘贴所有的original contigs
+    // Restore all original contigs before export
     u32* tmp_orignal_contig_ids = new u32[Number_of_Pixels_1D];
     for (u32 i = 0 ; i< Number_of_Pixels_1D; i++ )tmp_orignal_contig_ids[i] = Map_State->originalContigIds[i];
     Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
@@ -14888,7 +14746,7 @@ GenerateAGP(char *path, u08 overwrite, u08 preserveOrder)
         fclose(file);
     }
 
-    // 把临时切开的再粘贴上
+    // Re-apply temporary cuts (restore originalContigIds from backup)
     for (u32 i = 0; i < Number_of_Pixels_1D; i++) Map_State->originalContigIds[i] = tmp_orignal_contig_ids[i]; 
     UpdateContigsFromMapState();
     delete[] tmp_orignal_contig_ids;
@@ -15444,7 +15302,6 @@ MainArgs
                     struct nk_color sort_button_active = nk_rgb(128, 0, 128);  
                     push_nk_style(NK_Context, sort_button_normal, sort_button_hover, sort_button_active);
                     nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 3);
-
                     // Pixel Cut
                     {
                         bounds = nk_widget_bounds(NK_Context);
@@ -15467,7 +15324,7 @@ MainArgs
                                     sizeof(auto_curation_state.auto_cut_threshold_buf), 
                                     nk_filter_float);
                                 
-                                nk_label(NK_Context, "Pixel_mean window size (default: 8)", NK_TEXT_LEFT); //  见鬼了，见鬼了，这个地方，如果我使用 "Pixel_mean windows (default: 8)" 点击弹出的窗口外面程序就会卡死，但是使用"Pixel_mean window size (default: 8)" 就不会卡死
+                                nk_label(NK_Context, "Pixel_mean window size (default: 8)", NK_TEXT_LEFT); // 'Pixel_mean windows (default: 8)' freezes on outside click, whereas 'Pixel_mean window size (default: 8)' doesn't
                                 nk_edit_string_zero_terminated(
                                     NK_Context, 
                                     NK_EDIT_FIELD, 
@@ -15488,18 +15345,18 @@ MainArgs
                                 {
                                     // Apply changes
                                     // Convert text to integer and float
-                                    auto_curation_state.update_value_from_buf(); // todo 这里还有问题，因为设置了pixel_mean之后 并没有重新计算 pixel_density...
+                                    auto_curation_state.update_value_from_buf(); // TODO: changing pixel_mean does not recompute pixel_density yet
                                     auto_curation_state.set_buf();
                                     fmt::print("[Pixel Cut] cut_threshold:               {:.3f}\n", auto_curation_state.auto_cut_threshold);
                                     fmt::print("[Pixel Cut] pixel mean window size:      {}\n", auto_curation_state.auto_cut_diag_window_for_pixel_mean);
                                     fmt::print("[Pixel Cut] smallest_frag_size_in_pixel: {}\n", auto_curation_state.auto_cut_smallest_frag_size_in_pixel);
 
                                 }
-                                /* run cut 按钮 */
+                                /* Run cut button */
                                 if (nk_button_label(NK_Context, "Run") && currFileName) {
 
                                     // Convert text to integer and float
-                                    auto_curation_state.update_value_from_buf(); // todo 这里还有问题，因为设置了pixel_mean之后 并没有重新计算 pixel_density...
+                                    auto_curation_state.update_value_from_buf(); // TODO: changing pixel_mean does not recompute pixel_density yet
                                     auto_curation_state.set_buf();
                                     fmt::print("[Pixel Cut] cut_threshold:               {:.3f}\n", auto_curation_state.auto_cut_threshold);
                                     fmt::print("[Pixel Cut] pixel mean window size:      {}\n", auto_curation_state.auto_cut_diag_window_for_pixel_mean);
@@ -15511,7 +15368,7 @@ MainArgs
                                     nk_popup_close(NK_Context);
                                 }
                                 
-                                /* 关闭按钮 */
+                                /* Close button */
                                 if (nk_button_label(NK_Context, "Close")) {
                                     auto_cut_button = 0;
                                     auto_curation_state.set_buf();
@@ -15521,7 +15378,7 @@ MainArgs
                                 
                                 nk_popup_end(NK_Context);
                             } else {
-                                /* 如果用户点击了窗口外的区域，也关闭弹出窗口 */
+                                /* Close popup when user clicks outside the window */
                                 auto_cut_button = 0;
                                 #ifdef DEBUG 
                                     fmt::println("Outside of the popup window is clicked.");
@@ -15578,7 +15435,7 @@ MainArgs
                                 fmt::print("[Pixel Sort] link_score_threshold:        {:.3f}\n", auto_curation_state.link_score_threshold);
                                 fmt::print("[Pixel Sort] Sort mode:                   {}\n", auto_curation_state.get_sort_mode_name());
                             }
-                            /* run sort 按钮 */
+                            /* Run sort button */
                             if (nk_button_label(NK_Context, "Run") && currFileName) {
                                 
                                 // Convert text to integer and float
@@ -15593,7 +15450,7 @@ MainArgs
                                 auto_curation_state.clear(); // click the button will run sort globally
                                 nk_popup_close(NK_Context);
                             }
-                            // 关闭按钮 
+                            // Close button
                             if (nk_button_label(NK_Context, "Close")) {
                                 auto_sort_button = 0;
                                 auto_curation_state.set_buf();
@@ -15603,7 +15460,7 @@ MainArgs
                             nk_popup_end(NK_Context);
 
                         } else {
-                            /* 如果用户点击了窗口外的区域，也关闭弹出窗口 */
+                            /* if user clicks outside of the popup window, close the popup window */
                             auto_sort_button = 0;
                             #ifdef DEBUG 
                                 fmt::println("Outside of the popup window is clicked.");
