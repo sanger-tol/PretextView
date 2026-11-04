@@ -67,7 +67,11 @@ SOFTWARE.
 #if defined(_WIN32) || defined(_WIN64)
     // Windows-specific includes
     #include <intrin.h>
-    #define ARCH_X86 1
+    #if defined(_M_ARM64) || defined(_M_ARM)
+        #define ARCH_ARM 1
+    #else
+        #define ARCH_X86 1
+    #endif
 #elif defined(__x86_64__) || defined(__i386__)
     // Non-Windows x86 architectures
     #include <x86intrin.h>
@@ -98,14 +102,15 @@ SOFTWARE.
 
 #ifndef _WIN32
 #define ThreadFence __asm__ volatile("" ::: "memory")
+#elif defined(_M_ARM64) || defined(_M_ARM)
+#define ThreadFence MemoryBarrier()
 #else
 #define ThreadFence _mm_mfence()
 #endif // _WIN32
 
 /*
-定义了一个名为 FenceIn 的宏，它的作用是在一个代码块中插入线程屏障（Thread Fence），
-会先执行第一个线程屏障 ThreadFence，然后执行你的代码，最后再执行第二个线程屏障 ThreadFence，
-确保插入的代码执行顺序正确。
+FenceIn macro: run ThreadFence, then the statement, then ThreadFence again
+to enforce memory ordering around the enclosed code.
 */
 #define FenceIn(x) ThreadFence; \
 	x; \
@@ -113,7 +118,7 @@ SOFTWARE.
 
 typedef volatile u32 threadSig;
 
-/* 定义用于 color map 的变量 */
+/* Color map lookup tables */
 extern f32 Color_Map_Data[][768];
 extern const char * Color_Map_Names[];
 
@@ -122,7 +127,7 @@ typedef pthread_t thread;
 typedef pthread_mutex_t mutex;
 typedef pthread_cond_t cond;
 
-// 错误消息表明编译器认为 PTHREAD_MUTEX_INITIALIZER 不是一个有效的表达式。通常情况下，PTHREAD_MUTEX_INITIALIZER 是一个宏，它会被展开为一个结构体初始化器，而不是一个单独的表达式。
+// PTHREAD_MUTEX_INITIALIZER is a struct initializer, not valid in all C++ contexts; use pthread_mutex_init via InitialiseMutex.
 // #define InitialiseMutex(x) x = PTHREAD_MUTEX_INITIALIZER
 // #define InitialiseCond(x) x = PTHREAD_COND_INITIALIZER
 #define InitialiseMutex(x) pthread_mutex_init(&(x), NULL)
@@ -237,15 +242,15 @@ thread_context
 #define MegaByte(x) 1024*KiloByte(x)
 #define GigaByte(x) 1024*MegaByte(x)
 
-#define Default_Memory_Alignment_Pow2 4  // 对齐的字节数为4
+#define Default_Memory_Alignment_Pow2 4  // 16-byte alignment (2^4)
 
 struct memory_arena
 {
-   memory_arena *next;     // 指向下一个内存池的指针，用于支持内存池链表结构
-   u08 *base;              // 内存池的基地址，指向分配给该内存池的内存块的起始位置
-   u64 currentSize;        // 当前内存池已使用的字节数，用于跟踪内存使用情况
-   u64 maxSize;            // 内存池的最大容量，指示内存池可以容纳的最大字节数
-   u64 active;             // 标记内存池是否处于活动状态，通常用于判断内存池是否可用
+   memory_arena *next;     // next arena in the chain
+   u08 *base;              // start of this arena's allocation
+   u64 currentSize;        // bytes used in this arena
+   u64 maxSize;            // capacity of this arena (excluding header)
+   u64 active;             // nonzero if this arena is the current bump allocator
 };
 
 
@@ -272,8 +277,8 @@ RestoreMemoryArenaFromSnapshot(memory_arena *arena, memory_arena_snapshot *snaps
 global_function
 u64
 GetAlignmentPadding(u64 base, u32 alignment_pow2)
-{ // 通常内存是由一个个字节组成的，cpu在存取数据时，并不是以字节为单位存储，而是以块为单位存取。块的大小为内存存取力度，频繁存取未对齐的数据会极大降低cpu的性能
-  // 如果一个int型（假设为32位系统）如果存放在偶地址开始的地方，那么一个读周期就可以读出这32bit，而如果存放在奇地址开始的地方，就需要2个读周期，并对两次读出的结果的高低字节进行拼凑才能得到该32bit数据
+{ // Return padding bytes so (base + padding) is aligned to 2^alignment_pow2 (avoids unaligned loads).
+  // Example: a 32-bit int at an odd address may require two bus cycles on some CPUs.
 	u64 alignment = (u64)Pow2(alignment_pow2); 
 	u64 result = ((base + alignment - 1) & ~(alignment - 1)) - base;
 
@@ -283,7 +288,7 @@ GetAlignmentPadding(u64 base, u32 alignment_pow2)
 global_function
 u32
 AlignUp(u32 x, u32 alignment_pow2)
-{ // 向上对齐
+{ // Round x up to alignment boundary
 	u32 alignment_m1 = Pow2(alignment_pow2) - 1;
 	u32 result = (x + alignment_m1) & ~alignment_m1;
 
@@ -293,16 +298,16 @@ AlignUp(u32 x, u32 alignment_pow2)
 global_function
 void
 CreateMemoryArena_(memory_arena *arena, u64 size, u32 alignment_pow2 = Default_Memory_Alignment_Pow2)
-{ // 初始化当前的arena （调用时候输入是arena->next）
+{ // Initialize arena (often called with arena->next from parent arena)
    u64 linkSize = sizeof(memory_arena);
-   linkSize += GetAlignmentPadding(linkSize, alignment_pow2); // 对齐
+   linkSize += GetAlignmentPadding(linkSize, alignment_pow2); // align header size
    u64 realSize = size + linkSize;
-   arena->currentSize = 0; // 定义当前arena的特征
-   arena->active = 1;      // 激活当前arena
-   arena->maxSize = size;  // 设置当前arena能存储的最大值，note：这三个的空间在初始化上一个arena的时候已经分配了
+   arena->currentSize = 0;
+   arena->active = 1;
+   arena->maxSize = size;  // user payload limit; header lives in linkSize prefix
 
 #ifndef _WIN32 
-   posix_memalign((void **)&arena->base, Pow2(alignment_pow2), realSize); //如果不是在win32则使用该方法初始化，将内存块的地址给到arena->base， arena->next, arena->currentSize, arena->maxSize, arena->active的地址已经初始化上一个arena的时候分配了
+   posix_memalign((void **)&arena->base, Pow2(alignment_pow2), realSize); // allocate aligned block; header fields live in parent when chaining
 #else
 #include <memoryapi.h>
    (void)alignment_pow2;
@@ -310,10 +315,10 @@ CreateMemoryArena_(memory_arena *arena, u64 size, u32 alignment_pow2 = Default_M
 #endif  // _WIN32
 #pragma clang diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-align"	
-   arena->next = (memory_arena *)arena->base; // 初始化出来的空间的前48个字节存储下一个arena的信息
+   arena->next = (memory_arena *)arena->base; // embedded next-arena header at start of block
 #pragma clang diagnostic pop
-   arena->base += linkSize;  // 当前开始的地址, 实际开始存储信息的地址要排除arena自己所需的5个存储指针的内存（40 + 补齐值 8）
-   arena->next->base = 0; // 应该指向下一个arena的base，但是下一个还没有被分配，因此为0. 
+   arena->base += linkSize;  // bump pointer starts after aligned memory_arena header
+   arena->next->base = 0; // next arena not allocated yet
 }
 
 #define CreateMemoryArena(arena, size, ...) CreateMemoryArena_(&arena, size, ##__VA_ARGS__)
@@ -359,33 +364,33 @@ PushSize_(memory_arena *arena, u64 size, u32 alignment_pow2 = Default_Memory_Ali
 {
    if (!arena->active && arena->next && arena->next->base && !arena->next->currentSize)
    {
-      arena->active = 1; // 如果当前区域没有被激活，存在下一个分配区域，已经初始化但是并未使用，则将当前区域设置为激活
+      arena->active = 1; // reactivate if next arena exists but is empty
    }
    
-   u64 padding = GetAlignmentPadding((u64)(arena->base + arena->currentSize), alignment_pow2); // 向上取4字节对齐，得到需要补充的字节数padding
+   u64 padding = GetAlignmentPadding((u64)(arena->base + arena->currentSize), alignment_pow2);
 
    void *result;
-   if (!arena->active || ((size + arena->currentSize + padding + sizeof(u64)) > arena->maxSize)) // 如果当前没有被激活或者是当前申请的空间大于最大的容许值, 则激活下一个
+   if (!arena->active || ((size + arena->currentSize + padding + sizeof(u64)) > arena->maxSize)) // overflow or inactive: chain to next arena
    {
-      arena->active = 0; // 设置当前为未激活 
-      if (arena->next)  // 如果存在下一个arena空间
+      arena->active = 0;
+      if (arena->next)
       {
-        if (arena->next->base)  // 下一个arena已经被初始化
+        if (arena->next->base)
         {
-            result = PushSize_(arena->next, size, alignment_pow2);  // 从下一个arena 申请size 
+            result = PushSize_(arena->next, size, alignment_pow2);
         }
         else
         {
-            u64 linkSize = sizeof(memory_arena);  // 获取该struct的大小, 40
-            linkSize += GetAlignmentPadding(linkSize, alignment_pow2);  // padding  = 8 
+            u64 linkSize = sizeof(memory_arena);
+            linkSize += GetAlignmentPadding(linkSize, alignment_pow2);
             u64 realSize = size + padding + sizeof(u64) + linkSize;
             realSize = my_Max(realSize, arena->maxSize);
             
-            CreateMemoryArenaP(arena->next, realSize, alignment_pow2);  // 初始化下一个arena，主要是初始化下一个arena的base的值，arena->next指向下一个arena，arena->next->base = arena->next + 48 即开始存储数据的位置，因为前40个存储了3个u64和两个指针，以及8个补全
-            result = PushSize_(arena->next, size, alignment_pow2);  // 初始化空间之后返回当前result的地址
+            CreateMemoryArenaP(arena->next, realSize, alignment_pow2);  // lazily grow chained arena
+            result = PushSize_(arena->next, size, alignment_pow2);
         }
       }
-      else // 如果不存在arena->next，这是不可能的，因为在初始化的时候arena->next指向了arena->base，因此不可能为空，如果确实发生则会报错
+      else // should not happen: next header is embedded at arena->base
       {
 	    result = 0;
 #if defined(__APPLE__) || defined(_WIN32)
@@ -405,12 +410,12 @@ PushSize_(memory_arena *arena, u64 size, u32 alignment_pow2 = Default_Memory_Ali
       }
    }
    else
-   {  // 此处为递归函数的出口
-      result = arena->base + arena->currentSize + padding;  // 存储在同一个arena中
-      arena->currentSize += (size + padding + sizeof(u64)); // 更新大小
+   {  // allocate from current arena (base case)
+      result = arena->base + arena->currentSize + padding;
+      arena->currentSize += (size + padding + sizeof(u64));
 #pragma clang diagnostic push
 #pragma GCC diagnostic ignored "-Wcast-align"		
-      *((u64 *)(arena->base + arena->currentSize - sizeof(u64))) = (size + padding); // 多申请的8个字节表示
+      *((u64 *)(arena->base + arena->currentSize - sizeof(u64))) = (size + padding); // trailing size tag for FreeLastPush_
 #pragma clang diagnostic pop
    }
 
@@ -476,7 +481,7 @@ global_function
 void
 BinarySemaphoreInit(binary_semaphore *bsem, u32 value)
 {
-    InitialiseMutex(bsem->mut); // 错误消息表明编译器认为 PTHREAD_MUTEX_INITIALIZER 不是一个有效的表达式。通常情况下，PTHREAD_MUTEX_INITIALIZER 是一个宏，它会被展开为一个结构体初始化器，而不是一个单独的表达式。
+    InitialiseMutex(bsem->mut); // see InitialiseMutex note above (pthread_mutex_init)
     InitialiseCond(bsem->con);
     bsem->v = value;
 }
@@ -678,7 +683,7 @@ JobQueueInit(memory_arena *arena, job_queue *jobQueue)
     jobQueue->hasJobs = PushStructP(arena, binary_semaphore);
     jobQueue->hasFree = PushStructP(arena, binary_semaphore);
 
-    InitialiseMutex(jobQueue->rwMutex); // 错误消息表明编译器认为 PTHREAD_MUTEX_INITIALIZER 不是一个有效的表达式。通常情况下，PTHREAD_MUTEX_INITIALIZER 是一个宏，它会被展开为一个结构体初始化器，而不是一个单独的表达式。
+    InitialiseMutex(jobQueue->rwMutex);
 
     BinarySemaphoreInit(jobQueue->hasJobs, 0);
     BinarySemaphoreInit(jobQueue->hasFree, 0);
@@ -751,7 +756,7 @@ ThreadPoolInit(memory_arena *arena, u32 nThreads)
 
     threadPool->threads = PushArrayP(arena, thread_context*, nThreads);
 	
-    InitialiseMutex(threadPool->threadCountLock); //错误消息表明编译器认为 PTHREAD_MUTEX_INITIALIZER 不是一个有效的表达式。通常情况下，PTHREAD_MUTEX_INITIALIZER 是一个宏，它会被展开为一个结构体初始化器，而不是一个单独的表达式。
+    InitialiseMutex(threadPool->threadCountLock);
     InitialiseCond(threadPool->threadsAllIdle);
 	
     for (   u32 index = 0;
@@ -1060,14 +1065,14 @@ PushStringIntoIntArray(u32 *intArray, u32 arrayLength, u08 *string, u08 stringTe
     u08 *stringToInt = (u08 *)intArray;
     u32 stringLength = 0;
 
-    // 将 string 转移到 stringToInt
+    // Copy string bytes into intArray backing storage
     while (*string != stringTerminator && stringLength < (arrayLength << 2))
     {
         *(stringToInt++) = *(string++);
         ++stringLength;
     }
 
-    while (stringLength & 3)  // 按位与操作, 确保stringLength的二进制的后两位都是0
+    while (stringLength & 3)  // pad length to multiple of 4 bytes
     {
         *(stringToInt++) = 0;
         ++stringLength;
@@ -1122,8 +1127,8 @@ FastHash64(void *buf, u64 len, u64 seed)
     switch (len & 7)
     {
         /*
-        错误发生在 [[clang::fallthrough]] 上，它似乎被识别为一个表达式，但实际上它是一个注释，用于指示编译器有意执行 switch 语句中的“fall through”。然而，该注释只有在编译器支持 C++11 或以上版本，并且启用了相应的警告时才有效。对于C语言，通常不会使用这种语法。
-        要解决此错误，您可以将 [[clang::fallthrough]] 注释替换为标准的  fallthrough  注释，或者删除这个注释，因为在 switch 语句中，如果您没有明确指定 break，则默认会执行“fall through”行为。
+        [[clang::fallthrough]] in comments documents intentional switch fall-through.
+        Some toolchains mis-parse it; fall-through here is intentional (no break between cases).
         */
 	case 7: v ^= (u64)pos2[6] << 48; /*[[clang::fallthrough]];*/
 	case 6: v ^= (u64)pos2[5] << 40; /*[[clang::fallthrough]];*/

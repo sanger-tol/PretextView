@@ -1,17 +1,24 @@
 
-
 #ifndef parse_agp_h
 #define parse_agp_h
 
 #include <fmt/core.h>
 #include <string>
 #include <vector>
-#include <regex>
 #include <fstream>
-#include <filesystem>
 #include <algorithm>
+#include <unordered_map>
+#include <cstdint>
+#include <cmath>
+#include <cstring>
+#include <cctype>
+#include <limits>
+#include <stdexcept>
+#include <cassert>
+#include <string_view>
+#include <charconv>
+#include <system_error>
 #include "genomeData.h"
-
 
 
 struct Date
@@ -52,21 +59,23 @@ struct Date
 
 struct Original_Contig_agp
 {
-    int len;              // len in bp
+    int64_t len;              // len in bp
     int num_frags;
-    std::vector<int> starts; // record the start position of each fragment
+    std::vector<int64_t> starts; // record the start position of each fragment
 
     Original_Contig_agp()
         : len(0), num_frags(0) {}
-    Original_Contig_agp(int l, int n) : len(l), num_frags(n) {}
+    Original_Contig_agp(int64_t l, int n) : len(l), num_frags(n) {}
         
 };
 
 struct Scaff_agp
 {
-    int len;            // len in bp
+    int64_t len;            // len in bp
     bool is_painted;
-    Scaff_agp( bool p)
+    Scaff_agp()
+        : len(0), is_painted(false) {}
+    Scaff_agp(bool p)
         : len(0), is_painted(p) {}
 };
 
@@ -75,26 +84,116 @@ struct Frag
 {
     const int orig_contig_id;   // start from 0
     const int scaff_id;         // start from 0
-    const int start;            // start position (bp) in the original contig
-    const int len;              // len in bp
+    const int64_t start;        // start position (bp) in the original contig
+    const int64_t len;          // len in bp
     int local_index = -1;       // index within orignal contig
     const bool is_reverse;
     const bool is_painted ;
     const uint64_t meta_data_flag = 0;
-    Frag(const int oci, const int si, int s, int l, bool r, bool p, const uint64_t& m)
+    Frag(const int oci, const int si, int64_t s, int64_t l, bool r, bool p, const uint64_t& m)
         : orig_contig_id(oci), scaff_id(si), start(s), len(l), is_reverse(r), is_painted(p), meta_data_flag(m) {}
 };
 
 
-int get_scaff_id(const std::string& scaff_name)
-{   
-    std::smatch match;
-    if (!std::regex_search(scaff_name, match, std::regex("^\\w+_(\\d+)$")))
+inline std::string agp_trim(const std::string& s)
+{
+    size_t a = 0, b = s.size();
+    while (a < b && std::isspace((unsigned char)s[a])) ++a;
+    while (b > a && std::isspace((unsigned char)s[b - 1])) --b;
+    return s.substr(a, b - a);
+}
+
+
+inline std::string_view agp_trim_view(std::string_view s)
+{
+    size_t a = 0;
+    while (a < s.size() && std::isspace(static_cast<unsigned char>(s[a]))) ++a;
+    size_t b = s.size();
+    while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) --b;
+    return s.substr(a, b - a);
+}
+
+
+// Fills `fields` with views into `line` (no per-field allocation). Returns the
+// field count, dropping trailing empty fields. Fields past `max_fields` are ignored.
+inline int agp_split_tabs_view(const std::string& line, std::string_view* fields, int max_fields)
+{
+    const char* p = line.data();
+    const char* end = p + line.size();
+    if (p < end && end[-1] == '\r') --end;
+
+    int n = 0;
+    const char* start = p;
+    for (; p < end; ++p)
     {
-        fmt::print(stderr, "Error: scaff name {} not match ^\\w+_(\\d+)$ \n", scaff_name);
-        assert(0);
-    } 
-    return std::stoi(match[1].str()) - 1; 
+        if (*p != '\t') continue;
+        if (n < max_fields) fields[n++] = std::string_view(start, static_cast<size_t>(p - start));
+        start = p + 1;
+    }
+    if (n < max_fields) fields[n++] = std::string_view(start, static_cast<size_t>(end - start));
+    while (n > 0 && agp_trim_view(fields[n - 1]).empty()) --n;
+    return n;
+}
+
+
+inline bool agp_parse_i64(std::string_view s, int64_t& out)
+{
+    s = agp_trim_view(s);
+    if (s.empty()) return false;
+    if (s.front() == '+')
+    {
+        s.remove_prefix(1);
+        if (s.empty()) return false;
+    }
+    const char* begin = s.data();
+    const char* end = begin + s.size();
+    int64_t v = 0;
+    const std::from_chars_result res = std::from_chars(begin, end, v, 10);
+    if (res.ec != std::errc() || res.ptr != end) return false;
+    out = v;
+    return true;
+}
+
+
+inline bool agp_is_gap_component(std::string_view type)
+{
+    return type == "U" || type == "N";
+}
+
+
+inline bool agp_is_sequence_component(std::string_view type)
+{
+    return type == "W" || type == "D" || type == "F" || type == "A" || type == "P" || type == "O" || type == "G";
+}
+
+
+// Scaffold_12 / H1.scaffold_1 -> 0-based id from the trailing _number.
+inline int get_scaff_id(std::string_view scaff_name)
+{
+    const auto pos = scaff_name.find_last_of('_');
+    const std::string_view token = (pos != std::string_view::npos && pos + 1 < scaff_name.size())
+        ? scaff_name.substr(pos + 1)
+        : scaff_name;
+
+    size_t i = 0;
+    while (i < token.size() && std::isdigit(static_cast<unsigned char>(token[i]))) ++i;
+    if (i == 0)
+    {
+        fmt::print(stderr, "[Load AGP::warning]: scaffold name '{}' has no trailing number; using id 0.\n", scaff_name);
+        return 0;
+    }
+
+    int64_t v = 0;
+    if (!agp_parse_i64(token.substr(0, i), v) || v <= 0)
+    {
+        fmt::print(stderr, "[Load AGP::warning]: scaffold name '{}' has invalid trailing number; using id 0.\n", scaff_name);
+        return 0;
+    }
+    if (v > (int64_t)std::numeric_limits<int>::max())
+    {
+        throw std::runtime_error(fmt::format("[Load AGP::error]: scaffold id in '{}' exceeds 32-bit index range.\n", scaff_name));
+    }
+    return (int)(v - 1);
 }
 
 
@@ -105,12 +204,15 @@ public:
     std::string agp_version;
     std::string description;
     Date date;
-    double bp_per_pixel;
+    double bp_per_pixel = 0.0;
 
     std::vector<Frag> frags;
     std::unordered_map<std::string, Original_Contig_agp> original_contigs;
+    std::unordered_map<std::string, int> contig_name_to_id;
     std::vector<Scaff_agp> scaffs;
-    int total_bp = 0;
+    int64_t total_bp = 0;
+    int skipped_line_count = 0;
+    int skipped_unknown_contig_count = 0;
 
 
     int get_num_painted_scaff() const
@@ -127,30 +229,137 @@ public:
         const original_contig* Original_Contigs, const int& num_original_contigs,
         const std::string& scaff_name, 
         const std::string& original_contig_name,
-        const int& start_local, const int& end_local, 
+        const int64_t& start_local, const int64_t& end_local, 
         bool is_reverse,
         bool is_painted,
         const uint64_t& meta_tags )
     {   
         int original_contig_id = this->get_original_contig_id(Original_Contigs, num_original_contigs, original_contig_name);
         if (original_contig_id < 0)
-            throw std::runtime_error(fmt::format("Error: original contig name {} not found in Original_Contigs. file: {}, line: {}\n", original_contig_name, __FILE__, __LINE__));
-        int scaff_id = get_scaff_id(scaff_name); // start from 0
-        
-        if (this->original_contigs.find(original_contig_name) == this->original_contigs.end())
-            this->original_contigs[original_contig_name] = Original_Contig_agp(end_local, 1);
-        else {
-            this->original_contigs[original_contig_name].num_frags++;
-            this->original_contigs[original_contig_name].len = std::max(this->original_contigs[original_contig_name].len, end_local);
+        {
+            ++this->skipped_unknown_contig_count;
+            fmt::print(stderr, "[Load AGP::warning]: original contig name '{}' not found in the map; AGP fragment skipped.\n", original_contig_name);
+            return;
         }
-        this->original_contigs[original_contig_name].starts.push_back(start_local);
-        this->frags.emplace_back(original_contig_id, scaff_id, start_local, std::abs(end_local- start_local) + 1, is_reverse, is_painted, meta_tags);
+        int scaff_id = get_scaff_id(scaff_name); // start from 0
 
-        if (this->scaffs.size() <= frags.back().scaff_id)
-            this->scaffs.emplace_back(is_painted);
+        auto contig_it = this->original_contigs.find(original_contig_name);
+        if (contig_it == this->original_contigs.end())
+        {
+            Original_Contig_agp created(end_local, 1);
+            created.starts.push_back(start_local);
+            this->original_contigs.emplace(original_contig_name, std::move(created));
+        }
+        else
+        {
+            contig_it->second.num_frags++;
+            contig_it->second.len = std::max(contig_it->second.len, end_local);
+            contig_it->second.starts.push_back(start_local);
+        }
+        const int64_t frag_len = (end_local >= start_local)
+            ? (end_local - start_local + 1)
+            : (start_local - end_local + 1);
+        this->frags.emplace_back(original_contig_id, scaff_id, start_local, frag_len, is_reverse, is_painted, meta_tags);
 
+        if ((int)this->scaffs.size() <= scaff_id)
+            this->scaffs.resize((size_t)scaff_id + 1);
+        this->scaffs[scaff_id].is_painted = this->scaffs[scaff_id].is_painted || is_painted;
         this->scaffs[this->frags.back().scaff_id].len += this->frags.back().len;
         this->total_bp += this->frags.back().len;
+    }
+
+    bool parse_comment_line(const std::string& line)
+    {
+        if (line.compare(0, 13, "##agp-version") == 0)
+        {
+            this->agp_version = agp_trim(line.substr(13));
+            return true;
+        }
+        if (line.compare(0, 14, "# DESCRIPTION:") == 0)
+        {
+            this->description = agp_trim(line.substr(14));
+            return true;
+        }
+        const std::string res_prefix = "# HiC MAP RESOLUTION:";
+        if (line.compare(0, res_prefix.size(), res_prefix) == 0)
+        {
+            std::string rest = agp_trim(line.substr(res_prefix.size()));
+            const auto bp_pos = rest.find("bp/texel");
+            if (bp_pos != std::string::npos) rest = agp_trim(rest.substr(0, bp_pos));
+            try { this->bp_per_pixel = std::stod(rest); }
+            catch (...) { this->bp_per_pixel = 0.0; }
+            return true;
+        }
+        return line.empty() || line[0] == '#';
+    }
+
+    bool parse_data_line(
+        const std::string& line,
+        int line_no,
+        const original_contig* Original_Contigs,
+        const int& num_original_contigs,
+        meta_data* Meta_Data)
+    {
+        std::string_view fields[64];
+        const int nfields = agp_split_tabs_view(line, fields, 64);
+        if (nfields < 5)
+        {
+            fmt::print(stderr, "[Load AGP::warning]: skipped unparsed AGP line {}: {}\n", line_no, line);
+            ++this->skipped_line_count;
+            return false;
+        }
+
+        const std::string_view component_type = fields[4];
+        if (agp_is_gap_component(component_type))
+            return true;
+
+        if (!agp_is_sequence_component(component_type))
+        {
+            fmt::print(stderr, "[Load AGP::warning]: skipped AGP line {} with component type '{}': {}\n", line_no, component_type, line);
+            ++this->skipped_line_count;
+            return false;
+        }
+
+        if (nfields < 9)
+        {
+            fmt::print(stderr, "[Load AGP::warning]: skipped short sequence AGP line {}: {}\n", line_no, line);
+            ++this->skipped_line_count;
+            return false;
+        }
+
+        int64_t start_local = 0, end_local = 0;
+        if (!agp_parse_i64(fields[6], start_local) || !agp_parse_i64(fields[7], end_local))
+        {
+            fmt::print(stderr, "[Load AGP::warning]: skipped AGP line {} with non-integer coordinates: {}\n", line_no, line);
+            ++this->skipped_line_count;
+            return false;
+        }
+
+        const std::string scaff_name(fields[0]);
+        const std::string original_contig_name(fields[5]);
+        const bool is_reverse = fields[8] == "-";
+        bool is_painted = false;
+        std::string tags_str;
+        for (int i = 9; i < nfields; ++i)
+        {
+            const std::string_view field = agp_trim_view(fields[i]);
+            if (field.empty()) continue;
+            if (!is_painted && field == "Painted")
+            {
+                is_painted = true;
+                continue;
+            }
+            if (!tags_str.empty()) tags_str.push_back(' ');
+            tags_str.append(field.data(), field.size());
+        }
+
+        this->add_frag(
+            Original_Contigs, num_original_contigs,
+            scaff_name, original_contig_name,
+            start_local, end_local,
+            is_reverse, is_painted, parse_tags(tags_str, Meta_Data)
+        );
+        return true;
     }
 
     /* 
@@ -167,81 +376,57 @@ public:
         std::ifstream file(agp_file);
         if (!file.is_open())
         {
-            fmt::print(stderr, "Failed to open AGP file: {}\n", agp_file);
-            return;
+            throw std::runtime_error(fmt::format("Failed to open AGP file: {}\n", agp_file));
         }
 
         sample_name = agp_file.substr(agp_file.find_last_of("/\\") + 1);
         sample_name = sample_name.substr(0, sample_name.find('.'));
+        this->index_original_contig_names(Original_Contigs, num_original_contigs);
+        if (num_original_contigs > 0) this->original_contigs.reserve((size_t)num_original_contigs);
 
         std::string line;
+        int line_no = 0;
         while (std::getline(file, line))
         {   
-            std::smatch match;
-            if (line.empty() ) continue; // Skip empty lines and comments
-            else if (std::regex_search(line, match, std::regex("^##agp-version\\s*(\\d+.\\d+)\\s*$"))) // version
+            ++line_no;
+            if (line.empty()) continue;
+            if (line[0] == '#')
             {
-                this->agp_version = match[1].str();
-            } 
-            else if (std::regex_search(line, match, std::regex("^# DESCRIPTION:\\s*(.*)$"))) // descirption
-            {
-                this->description = match[1].str();
-            } else if (std::regex_search(line, match, std::regex("^# HiC MAP RESOLUTION:\\s*(\\d+.\\d*)\\s+bp/texel\\s*$")))
-            {
-                this->bp_per_pixel = std::stod(match[1].str());            
-            } else if (std::regex_search(line, match, std::regex("^([\\w_]+)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+(\\w+)\\s+([\\w_]+)\\s+(\\d+)\\s+(\\d+)\\s+([+-])\\s*([Painted]*)\\s*(.*)$"))) // genome line
-            {
-                std::string scaff_name = match[1].str();
-                int scaff_start = std::stoi(match[2].str());
-                int scaff_end = std::stoi(match[3].str());
-                int scaff_frag_id = std::stoi(match[4].str());
-                bool is_gap = match[5].str() == "U";
-                std::string original_contig_name = match[6].str();
-                int start_local = std::stoi(match[7].str());
-                int end_local = std::stoi(match[8].str());
-                bool is_reverse = match[9].str() == "-";
-                bool is_painted = match[10].str() == "Painted";
-                uint64_t meta_tags = parse_tags(match[11].str(), Meta_Data);
-
-                this->add_frag(
-                    Original_Contigs, num_original_contigs,
-                    scaff_name, original_contig_name,
-                    start_local, end_local, 
-                    is_reverse, is_painted, meta_tags
-                );
-            } else if (std::regex_search(line, match, std::regex("^([\\w_]+)\\s+(\\d+)\\s+(\\d+)\\s+(\\d+)\\s+(\\w+)\\s+(\\d+)\\s+([\\w_]+)\\s+(\\w+)\\s+([\\w_]+)(.+)$"))) // gap line
-            {
-                std::string scaff_name = match[1].str();
-                int scaff_start = std::stoi(match[2].str());
-                int scaff_end = std::stoi(match[3].str());
-                int scaff_frag_id = std::stoi(match[4].str());
-                bool is_gap = match[5].str() == "U";
-                int gap_length = std::stoi(match[6].str());
+                this->parse_comment_line(line);
+                continue;
             }
+            this->parse_data_line(line, line_no, Original_Contigs, num_original_contigs, Meta_Data);
         }
         file.close();
         this->sort_frags_local_index(Original_Contigs);
     }
 
-    uint64_t parse_tags(const std::string tags_str, meta_data* Meta_Data)
+    uint64_t parse_tags(const std::string& tags_str, meta_data* Meta_Data)
     {   
-        if (tags_str.empty()) return 0;
+        if (tags_str.empty() || Meta_Data == nullptr) return 0;
         uint64_t tags_u64 = 0;
-        std::istringstream iss(tags_str);
-        std::string tag;
-        
-        // 使用流操作符按空格分割字符串
-        while (iss >> tag) 
+        const char* p = tags_str.c_str();
+        while (*p)
         {
-            for (int i = 0 ; i<64 ; i ++ )
-            {   
-                if (std::string((char*)Meta_Data->tags[i]).empty()) 
-                {   
-                    memcpy(Meta_Data->tags[i], tag.data(), tag.size() + 1);
+            while (*p == ' ') ++p;
+            if (!*p) break;
+            const char* start = p;
+            while (*p && *p != ' ') ++p;
+            const size_t len = (size_t)(p - start);
+
+            for (int i = 0; i < 64; ++i)
+            {
+                const char* existing = (const char*)Meta_Data->tags[i];
+                if (existing[0] == 0)
+                {
+                    const size_t n = std::min(len, sizeof(Meta_Data->tags[i]) - 1);
+                    memcpy(Meta_Data->tags[i], start, n);
+                    ((char*)Meta_Data->tags[i])[n] = 0;
                     tags_u64 |= (1ULL << i);
                     break;
                 }
-                else if (tag == std::string((char*)(Meta_Data->tags[i])))
+                const size_t existing_len = strlen(existing);
+                if (existing_len == len && memcmp(existing, start, len) == 0)
                 {
                     tags_u64 |= (1ULL << i);
                     break;
@@ -252,15 +437,15 @@ public:
     }
 
     /* validate the number of base pairs */
-    int cal_total_bp()
+    int64_t cal_total_bp()
     {
-        int total = 0;
+        int64_t total = 0;
         for (const auto& frag : frags)
         {
             total += frag.len;
         }
 
-        int total_bp_scaff = 0;
+        int64_t total_bp_scaff = 0;
         for (const auto& scaff : scaffs) 
             total_bp_scaff += scaff.len; 
         if (total != total_bp_scaff)
@@ -284,27 +469,34 @@ public:
         const int& num_original_contigs
     )
     {   
+        (void)Original_Contigs;
+        (void)num_original_contigs;
+        if (!(this->bp_per_pixel > 0.0))
+        {
+            fmt::print(stderr, "[Load AGP::error]: bp/texel is missing or invalid.\n");
+            return -1;
+        }
         int pixel_index;
         double start_pixel_global = 0, len_pixel = 0, local_start_pixel;
-        for ( int i  = 0 ; i < this->frags.size() ;  i++ )
+        for ( size_t i  = 0 ; i < this->frags.size() ;  i++ )
         {   
             const Frag& frag = frags[i];
             local_start_pixel = (double) frag.start / this->bp_per_pixel;
             len_pixel = (double) frag.len / this->bp_per_pixel;
             for (int j = 0; j < std::round(len_pixel); j ++ )
             {   
-                pixel_index = std::round(start_pixel_global) + j;
+                pixel_index = (int)std::round(start_pixel_global) + j;
                 if ( pixel_index >= num_pix_1d )
                 {
                     fmt::print(stderr, "Warning: pixel index ({:.2f}) out of range [0, {}).\n", pixel_index, num_pix_1d);
                     assert(0);
                     return -1;
                 }
-                Map_State->contigIds[pixel_index] = i;
+                Map_State->contigIds[pixel_index] = (u32)i;
                 Map_State->originalContigIds[pixel_index] = frag.orig_contig_id;
                 Map_State->contigRelCoords[pixel_index] = frag.is_reverse ? 
-                    std::round(local_start_pixel + len_pixel) - j - 1: 
-                    std::round(local_start_pixel) + j;
+                    (u32)(std::round(local_start_pixel + len_pixel) - j - 1): 
+                    (u32)(std::round(local_start_pixel) + j);
                 Map_State->scaffIds[pixel_index] = frag.scaff_id;
                 pixel_index++;
             }
@@ -326,17 +518,23 @@ public:
         return 0;
     }
 
+    void index_original_contig_names(const original_contig* Original_Contigs, int num_original_contigs)
+    {
+        contig_name_to_id.clear();
+        if (Original_Contigs == nullptr || num_original_contigs <= 0) return;
+        contig_name_to_id.reserve((size_t)num_original_contigs);
+        for (int i = 0; i < num_original_contigs; ++i)
+            contig_name_to_id.emplace((const char*)Original_Contigs[i].name, i);
+    }
+
     int get_original_contig_id(
         const original_contig* Original_Contigs, const int& num_original_contigs, const std::string& name)
     {
-        for (int i = 0; i < num_original_contigs; i++)
-        {
-            if (strcmp((char*)(Original_Contigs+i)->name, name.c_str()) == 0)
-            {
-                return i;
-            }
-        }
-        return -1;
+        (void)Original_Contigs;
+        (void)num_original_contigs;
+        const auto it = contig_name_to_id.find(name);
+        if (it == contig_name_to_id.end()) return -1;
+        return it->second;
     }
 
     std::string __str__() const
@@ -354,22 +552,23 @@ public:
     void sort_frags_local_index(const original_contig* Original_Contigs)
     {   
         for (auto& it:this->original_contigs) std::sort(it.second.starts.begin(), it.second.starts.end());
-        int tmp_index = 0 ;
-        for (int i = 0 ; i < frags.size(); i++)
+        for (size_t i = 0 ; i < frags.size(); i++)
         {
-            std::string original_contig_name = std::string((char*)Original_Contigs[frags[i].orig_contig_id].name);
-            while (tmp_index < this->original_contigs[original_contig_name].starts.size() && 
-                this->frags[i].start != this->original_contigs[original_contig_name].starts[tmp_index]) tmp_index++;
-            if (tmp_index >= this->original_contigs[original_contig_name].starts.size())
+            const std::string original_contig_name((char*)Original_Contigs[frags[i].orig_contig_id].name);
+            const auto contig_it = this->original_contigs.find(original_contig_name);
+            if (contig_it == this->original_contigs.end())
             {
                 throw std::runtime_error(fmt::format("Error: original contig name {} not found in Original_Contigs. file: {}, line: {}\n", original_contig_name, __FILE__, __LINE__));
             }
-            this->frags[i].local_index = tmp_index;
-            tmp_index = 0;
+            const std::vector<int64_t>& starts = contig_it->second.starts;
+            const auto start_it = std::lower_bound(starts.begin(), starts.end(), this->frags[i].start);
+            if (start_it == starts.end() || *start_it != this->frags[i].start)
+            {
+                throw std::runtime_error(fmt::format("Error: original contig name {} not found in Original_Contigs. file: {}, line: {}\n", original_contig_name, __FILE__, __LINE__));
+            }
+            this->frags[i].local_index = (int)(start_it - starts.begin());
         }
     }
 };
 
 #endif // parse_agp_h
-
-

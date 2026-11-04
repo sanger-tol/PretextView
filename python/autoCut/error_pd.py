@@ -36,10 +36,10 @@ class ERRORS:
         self.out_path = out_path
         self.img_size = img_size
 
-        # 创建一个空的DataFrame
+        # Create an empty DataFrame
         self.df = pd.DataFrame()
 
-        # 创建一个记录每次过滤的字典
+        # Dictionary that records each filtering pass
         self.filter_dict = dict()
 
     # generate error structure
@@ -53,8 +53,8 @@ class ERRORS:
         Returns:
 
         """
-        for category, classes in zip(detection_result, self.classes): # 遍历种类
-            for index, error in enumerate(category): # 遍历预测的个数
+        for category, classes in zip(detection_result, self.classes): # iterate categories
+            for index, error in enumerate(category): # iterate predictions
                 error = error.tolist()
                 temp_dict = dict()
                 temp_dict["image_id"] = list(img_info.keys())[0]
@@ -66,7 +66,7 @@ class ERRORS:
                     "hic_loci_4"] = self.bbox2hic(error[0:4], img_info)
                 
                 logger.info(f"Error score: {error[4]}")
-                # 将字典数据添加到DataFrame中
+                # Append the dict row to the DataFrame
                 if error[4] > ERROR_SCORE_MIN:
                     df_new_row = pd.DataFrame(temp_dict, index=[0])
                     self.df = pd.concat([self.df, df_new_row])
@@ -76,7 +76,7 @@ class ERRORS:
     def zoom_error2excel(self, zoom_error_json_file, output_excel_file="error_summary.xlsx"):
 
         """
-        保存结果到excel
+        Save results to Excel.
         """
         with open(zoom_error_json_file) as f:
             json_data = json.load(f)

@@ -26,17 +26,13 @@ SOFTWARE.
 */
 
 
-#define PretextView_Version_Label "1.0.7"
-#define PretextView_Version "PretextViewAI Version " PretextView_Version_Label
-#define PretextView_Title "PretextViewAI " PretextView_Version_Label " - Wellcome Sanger Institute"
-
-
 #include <frag_sort.h>  // place this before add Header.h to avoid macro conflict
 
 #ifdef PYTHON_SCOPED_INTERPRETER
     #include "kmeans_pybind.h" 
 #endif // PYTHON_SCOPED_INTERPRETER
 #include <Header.h>
+#include "PretextViewConstants.h"
 
 #ifdef DEBUG
     #include <errno.h>
@@ -45,6 +41,7 @@ SOFTWARE.
 
 #include "utilsPretextView.h"
 #include "auto_curation_state.h"
+#include "linkage.h"
 
 #include "TextureLoadQueue.cpp"  // 
 #include "ColorMapData.cpp"      // add color maps 
@@ -156,6 +153,10 @@ SOFTWARE.
 #include "grey_out_settings.h"
 #include "user_profile_settings.h"
 #include "parse_agp.h"
+#include <cmath>
+#include <limits>
+#include <utility>
+#include <iterator>
 
 #include "shaderSource.h"
 
@@ -176,10 +177,6 @@ SOFTWARE.
 #ifndef _WIN32
 #include <pwd.h>
 #endif
-
-#define UI_SHADER_LOC_POSITION 0
-#define UI_SHADER_LOC_TEXCOORD 1
-#define UI_SHADER_LOC_COLOR 2
 
 global_variable
 memory_arena
@@ -226,17 +223,6 @@ global_variable
                 {0.0f, 0.0f, 0.0f, 1.0f}        // Black
 };
 
-global_variable const char *
-    bg_color[] =
-        {
-            "Classic",
-            "Jasper",
-            "Heather",
-            "Carolina",
-            "White",
-            "Grey",
-            "Black"};
-
 global_variable
     u08
         active_bgcolor = 0;
@@ -270,21 +256,6 @@ global_variable
                 {3.666f, 2.666f, 1.666f},
                 {5.666f, 3.666f, 2.666f}};
 
-global_variable const char *
-    metaColors[] =
-        {
-            "Color set 1",
-            "Color set 2",
-            "Color set 3",
-            "Color set 4"};
-
-global_variable const char *
-    outlineColors[] =
-        {
-            "No-Outline",
-            "Black-Outline",
-            "White-Outline"};
-
 global_variable
     u08
         activeGraphColour = 0;
@@ -299,37 +270,10 @@ global_variable
                 {0.706f, 0.0f, 1.0f, 1.0f}      // Drystorm (purple)
 };
 
-global_variable const char *
-    colour_graph[] =
-        {
-            "Default",
-            "Vermillion",
-            "Blue",
-            "Purple"};
-
+// 0 shows every alg group. 1..6 show only d1..d6.
 global_variable
-    nk_colorf
-        DefaultGraphColour = graphColors[activeGraphColour];
-
-// Extension name constants
-global_variable const char *
-    EXT_NAME_3P_TELOMERE = "3p_telomere";
-
-global_variable const char *
-    EXT_NAME_5P_TELOMERE = "5p_telomere";
-
-global_variable const char *
-    EXT_NAME_TELOMERE = "telomere";
-
-global_variable const char *
-    EXT_NAME_COVERAGE = "coverage";
-
-global_variable const char *
-    EXT_NAME_GAP = "gap";
-
-global_variable const char *
-    EXT_NAME_REPEAT_DENSITY = "repeat_density";
-
+u32
+Linkage_Group_Filter = 0;
 
 global_variable
 nk_context *
@@ -433,7 +377,6 @@ s32
 useCustomOrder = 0;
 
 
-#define text_box_font_size_default 20.0f
 struct TextBoxSize
 {
     f32 font_size = text_box_font_size_default;
@@ -583,17 +526,6 @@ FONScontext *
 FontStash_Context;
 
 
-#define Grey_Background {0.569f, 0.549f, 0.451f, 1.0f}
-#define Yellow_Text_Float {0.941176471f, 0.725490196f, 0.058823529f, 1.0f}
-#define Red_Text_Float {0.941176471f, 0.039215686f, 0.019607843f, 1.0f}
-
-#define Green_Float {0.3f, 0.6f, 0.0f, 0.2f}
-#define Red_Float {0.6f, 0.3f, 0.0f, 0.2f}
-#define Blue_Float {0.0f, 0.3f, 0.6f, 0.2f}
-
-#define Red_Full {1.0f, 0.0f, 0.0f, 1.0f}
-#define Blue_Full {0.0f, 0.0f, 1.0f, 1.0f}
-
 global_variable
 ui_colour_element_bg *
 Contig_Name_Labels;
@@ -662,8 +594,8 @@ Extension_Mode_Data;
 
 
 /*
-用于显示在input sequences中点击后选中的片段的名字，
-显示label持续 5 秒钟
+Displays the name of the fragment selected in Input Sequences after a click;
+the label stays visible for 5 seconds.
 */
 struct selected_sequence_cover_countor
 {
@@ -834,6 +766,10 @@ InvertMap(u32 pixelFrom, u32 pixelTo, bool update_contigs_flag=true);
 global_variable
 u32
 Global_Edit_Invert_Flag = 0;
+
+global_variable
+s32
+Edit_Session_NetDelta = 0;
 
 global_variable
 u08
@@ -1129,46 +1065,6 @@ u16
 sortMetaEdits;
 
 
-global_variable
-const char *
-Default_Tags[] = 
-{
-    "Haplotig",
-    "Unloc",
-    "X",
-    "Y",
-    "Z",
-    "W",
-    "HAP1",
-    "HAP2",
-    "Target",
-    "Contaminant",
-    "Singleton",
-    "X1",
-    "X2",
-    "Y1",
-    "Y2",
-    "Z1",
-    "Z2",
-    "W1",
-    "W2",
-    "I",
-    "II",
-    "III",
-    "IV",
-    "V",
-    "U",
-    "B1",
-    "B2",
-    "B3", 
-    "FalseDuplicate",
-    "Primary",
-    "vertPaint",   // paint vertically
-    "horzPaint",   // paint horizontally
-    "crossPaint",  // paint with cross
-};
-
-
 char searchbuf[256] = {0};
 s32 caseSensitive_search_sequences = 0;
 
@@ -1271,7 +1167,6 @@ media
     struct file files[FILE_MAX];
 };
 
-#define MAX_PATH_LEN 512
 struct
 file_browser
 {
@@ -1623,6 +1518,10 @@ AGP_Name_Buffer[1024] = {0};
 
 global_variable
 char
+Both_Export_Name_Buffer[1024] = {0};
+
+global_variable
+char
 Edits_Name_Buffer[1024] = {0};
 
 global_variable
@@ -1643,10 +1542,13 @@ SetSaveStateNameBuffer(char *name)
         AGP_Name_Buffer[ptr] = *name;
         Edits_Name_Buffer[ptr] = *name;
         Save_State_Name_Buffer[ptr] = *name;
+        Both_Export_Name_Buffer[ptr] = *name;
         ptr++;
         name++;
     }
     
+    Both_Export_Name_Buffer[ptr] = 0;
+
     u32 ptr1 = ptr;
     name = (char *)".savestate_1";
     while (*name) Save_State_Name_Buffer[ptr++] = *name++;
@@ -1681,6 +1583,8 @@ GetSaveNameBufferForMode(u08 save)
     {
         case 2:
             return AGP_Name_Buffer;
+        case 6:
+            return Both_Export_Name_Buffer;
         case 3:
             return Edits_Name_Buffer;
         case 4:
@@ -1701,6 +1605,7 @@ GetSaveNameBufferForMode(u08 save)
             3 edits save
             4 clipboard save
             5 debug report save
+            6 savestate and agp together
 */
 global_function
 u08
@@ -1927,8 +1832,9 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                 else
                 {
                     f32 fileRatio[] = {0.8f, 0.1f, NK_UNDEFINED};
-                    f32 fileRatio2[] = {0.45f, 0.1f, 0.18f, 0.17f, NK_UNDEFINED};
-                    nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 35.0f, save == 2 ? 5 : 3, save == 2 ? fileRatio2 : fileRatio);
+                    f32 fileRatio2[] = {0.55f, 0.15f, 0.15f, 0.15f, NK_UNDEFINED};
+                    u08 agpOptions = (save == 2 || save == 6) ? 1 : 0;
+                    nk_layout_row(ctx, NK_DYNAMIC, Screen_Scale.y * 35.0f, agpOptions ? 4 : 3, agpOptions ? fileRatio2 : fileRatio);
 
                     char *nameBuffer = GetSaveNameBufferForMode(save);
                     u08 saveViaEnter =
@@ -1938,13 +1844,9 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
 
                     overwrite = (u08)nk_check_label(ctx, "Override", overwrite);
 
-                    static u08 singletons = 0;
-                    if (save == 2)
-                    {
-                        singletons = (u08)nk_check_label(ctx, "Format Singletons", singletons);
-                    }
+                    // AGP export always uses map orientation; only Preserve Order remains optional.
                     static u08 preserveOrder = 0;
-                    if (save == 2)
+                    if (agpOptions)
                     {
                         preserveOrder = (u08)nk_check_label(ctx, "Preserve Order", preserveOrder);
                     }
@@ -1955,7 +1857,7 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
                         size_t n = strlen(browser->file);
                         nameBuffer = GetSaveNameBufferForMode(save);
                         strncpy(browser->file + n, nameBuffer, MAX_PATH_LEN - n);
-                        ret = 1 | (overwrite ? 2 : 0) | (singletons ? 4 : 0) | (preserveOrder ? 8 : 0);
+                        ret = 1 | (overwrite ? 2 : 0) | (preserveOrder ? 4 : 0);
                     }
                 }
 
@@ -1969,9 +1871,6 @@ FileBrowserRun(const char *name, struct file_browser *browser, struct nk_context
     
     return(ret);
 }
-
-#define ClipboardEditorBufferSize 32768
-#define ClipboardEditorLastCopiedSize 4096
 
 /* clipboard editor, highlight, copy and paste */
 global_variable char ClipboardEditor_LastCopied[ClipboardEditorLastCopiedSize] = {0};
@@ -2513,9 +2412,6 @@ map_edit
     }
 };
 
-global_variable
-const s32 Break_Edit_Delta = std::numeric_limits<s32>::min();
-
 struct
 waypoint;
 
@@ -2539,9 +2435,6 @@ waypoint
     // u16 long_waypoint_mode;
 };
 
-#define Edits_Stack_Size 32768
-#define Waypoints_Stack_Size 128
-
 struct
 map_editor
 {
@@ -2555,8 +2448,6 @@ map_editor
 global_variable
 map_editor *
 Map_Editor;
-
-#define Waypoints_Quadtree_Levels 5
 
 struct
 waypoint_quadtree_level
@@ -2589,7 +2480,6 @@ Waypoint_Editor;
 
 global_variable u16 Long_Waypoints_Mode = 0;  // mode 0: vertical, mode 1: horizontal, mode 2: both
 
-#define Waypoint_Select_Distance 8.0f
 global_variable
 waypoint *
 Selected_Waypoint = 0;
@@ -2639,7 +2529,7 @@ MoveWayPoints(map_edit *edit, u32 undo = 0);
 
 global_function
 u08
-BreakMap(const int& loc, const u32& ignore_len);
+BreakMap(const int& loc, const u32& ignore_len, bool verbose = true);
 
 global_function
 void
@@ -2649,6 +2539,14 @@ global_function
 void
 AddMapEdit(s32 delta, pointui finalPixels, u32 invert)
 {
+    u32 pix1 = (u32)(invert ? my_Max(finalPixels.x, finalPixels.y) : my_Min(finalPixels.x, finalPixels.y));
+    u32 pix2 = (u32)(invert ? my_Min(finalPixels.x, finalPixels.y) : my_Max(finalPixels.x, finalPixels.y));
+
+    // A single pixel with no move cannot be replayed (a 1-pixel invert does not
+    // fit in finalPix1 > finalPix2). Recording it only fills the fixed stack.
+    if (delta == 0 && pix1 == pix2)
+        return;
+
     ++Map_Editor->nEdits;
     Map_Editor->nUndone = 0;
 
@@ -2658,9 +2556,6 @@ AddMapEdit(s32 delta, pointui finalPixels, u32 invert)
     {
         Map_Editor->editStackPtr = 0;
     }
-
-    u32 pix1 = (u32)(invert ? my_Max(finalPixels.x, finalPixels.y) : my_Min(finalPixels.x, finalPixels.y));
-    u32 pix2 = (u32)(invert ? my_Min(finalPixels.x, finalPixels.y) : my_Max(finalPixels.x, finalPixels.y));
 
     edit->delta = (s32)delta;
     edit->finalPix1 = pix1;
@@ -2704,7 +2599,7 @@ UndoMapEdit()
 
         if (!Map_Editor->editStackPtr)
         {
-            Map_Editor->editStackPtr = Edits_Stack_Size + 1;
+            Map_Editor->editStackPtr = Edits_Stack_Size;
         }
 
         map_edit *edit = Map_Editor->edits + (--Map_Editor->editStackPtr);
@@ -2906,7 +2801,6 @@ GetWaypointsWithinRectange(waypoint_quadtree_level *level, point2f lowerBound, p
     if (level->children[0])
     {
         u08 toSearch[4] = {1, 1, 1, 1};
-#define epsilon 0.001f
         ForLoop(4)
         {
             // bottom left
@@ -2914,7 +2808,7 @@ GetWaypointsWithinRectange(waypoint_quadtree_level *level, point2f lowerBound, p
             point2f insertSize = {lowerBound.x - child->lowerBound.x, lowerBound.y - child->lowerBound.y};
             if (insertSize.x >= 0 && insertSize.x < child->size && insertSize.y >= 0 && insertSize.y < child->size)
             {
-                point2f recSize = {my_Min(size.x, child->size - insertSize.x - epsilon), my_Min(size.y, child->size - insertSize.y - epsilon)};
+                point2f recSize = {my_Min(size.x, child->size - insertSize.x - Waypoint_Rect_Epsilon), my_Min(size.y, child->size - insertSize.y - Waypoint_Rect_Epsilon)};
                 GetWaypointsWithinRectange(child, lowerBound, recSize, bufferPtr);
                 toSearch[index] = 0;
                 break;
@@ -2929,7 +2823,7 @@ GetWaypointsWithinRectange(waypoint_quadtree_level *level, point2f lowerBound, p
                 point2f insertSize = {lowerBound.x + size.x - child->lowerBound.x, lowerBound.y - child->lowerBound.y};
                 if (insertSize.x >= 0 && insertSize.x < child->size && insertSize.y >= 0 && insertSize.y < child->size)
                 {
-                    point2f recSize = {my_Min(size.x, insertSize.x), my_Min(size.y, child->size - insertSize.y - epsilon)};
+                    point2f recSize = {my_Min(size.x, insertSize.x), my_Min(size.y, child->size - insertSize.y - Waypoint_Rect_Epsilon)};
                     GetWaypointsWithinRectange(child, {child->lowerBound.x + insertSize.x - recSize.x, lowerBound.y}, recSize, bufferPtr);
                     toSearch[index] = 0;
                     break;
@@ -2945,7 +2839,7 @@ GetWaypointsWithinRectange(waypoint_quadtree_level *level, point2f lowerBound, p
                 point2f insertSize = {lowerBound.x - child->lowerBound.x, lowerBound.y + size.y - child->lowerBound.y};
                 if (insertSize.x >= 0 && insertSize.x < child->size && insertSize.y >= 0 && insertSize.y < child->size)
                 {
-                    point2f recSize = {my_Min(size.x, child->size - insertSize.x - epsilon), my_Min(size.y, insertSize.y)};
+                    point2f recSize = {my_Min(size.x, child->size - insertSize.x - Waypoint_Rect_Epsilon), my_Min(size.y, insertSize.y)};
                     GetWaypointsWithinRectange(child, {lowerBound.x, child->lowerBound.y + insertSize.y - recSize.y}, recSize, bufferPtr);
                     toSearch[index] = 0;
                     break;
@@ -3208,7 +3102,6 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
     {
         if (Edit_Mode)
         {
-            static s32 netDelta = 0;
 
             s32 w, h;
             glfwGetWindowSize(window, &w, &h);
@@ -3230,7 +3123,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             u32 pixel1 = (u32)((f64)nPixels * (0.5 + (f64)wx));
             u32 pixel2 = (u32)((f64)nPixels * (0.5 + (f64)wy));
             
-            // 防止在尾部溢出
+            // Clamp to avoid overflow at the ends
             pixel1 = my_Max(0, my_Min(nPixels - 1, pixel1));
             pixel2 = my_Max(0, my_Min(nPixels - 1, pixel2));
 
@@ -3307,7 +3200,7 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
                 diff = forward ? my_Min(diffx, diffy) : my_Max(diffx, diffy);
                 
                 diff = RearrangeMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y, diff, Edit_Pixels.snap);
-                netDelta += diff;
+                Edit_Session_NetDelta += diff;
 
                 newX = (s32)Edit_Pixels.pixels.x + diff;
                 newY = (s32)Edit_Pixels.pixels.y + diff;
@@ -3320,10 +3213,10 @@ MouseMove(GLFWwindow* window, f64 x, f64 y)
             }
             else  // edit_pixels.editing == 0
             {
-                if (netDelta || Global_Edit_Invert_Flag)
+                if (Edit_Session_NetDelta || Global_Edit_Invert_Flag)
                 {
-                    AddMapEdit(netDelta, Edit_Pixels.pixels, Global_Edit_Invert_Flag);
-                    netDelta = 0;
+                    AddMapEdit(Edit_Session_NetDelta, Edit_Pixels.pixels, Global_Edit_Invert_Flag);
+                    Edit_Session_NetDelta = 0;
                 }
                 
                 wx = (f32)(((f64)((2 * pixel1) + 1)) / ((f64)(2 * nPixels))) - 0.5f;
@@ -3521,6 +3414,30 @@ ConsolidateTabSelections(GLFWwindow* window);
 
 global_function
 void
+BeginEditSession(void);
+
+global_function
+void
+ToggleEditSelectionInvert(void);
+
+global_function
+void
+CancelActiveEditSession(GLFWwindow *window);
+
+global_function
+u08
+FindPaintedScaffoldRangeAtPixel(u32 pixel, u32 *rangeStart, u32 *rangeEnd);
+
+global_function
+u08
+PickupPaintedScaffoldBlock(GLFWwindow *window);
+
+global_function
+u32
+GetHoverMapPixel(GLFWwindow *window);
+
+global_function
+void
 Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
 {
     s32 primaryMouse = user_profile_settings_ptr->invert_mouse ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
@@ -3561,7 +3478,11 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_RELEASE && !Edit_Pixels.editing)
         {
             Edit_Pixels.selecting = 0;
-            if (!Edit_Pixels.editing) Edit_Pixels.editing = 1;
+            if (!Edit_Pixels.editing)
+            {
+                BeginEditSession();
+                Edit_Pixels.editing = 1;
+            }
             MouseMove(window, x, y);
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && action == GLFW_PRESS && !Edit_Pixels.editing)
@@ -3572,11 +3493,7 @@ Mouse(GLFWwindow* window, s32 button, s32 action, s32 mods)
         }
         else if (button == GLFW_MOUSE_BUTTON_MIDDLE && Edit_Mode && Edit_Pixels.editing && action == GLFW_PRESS)
         {
-            InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
-            Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
-            // UpdateContigsFromMapState() already invoked from InvertMap()
-
-            Redisplay = 1;
+            ToggleEditSelectionInvert();
         }
         else if (button == primaryMouse && Waypoint_Edit_Mode && action == GLFW_PRESS)
         {
@@ -4343,7 +4260,17 @@ Render() {
     if (File_Loaded)
     {
         glUseProgram(Contact_Matrix->shaderProgram);
+        // NVIDIA Linux does not keep leftover sampler bindings the way macOS
+        // does. Re-bind the four units the contact-matrix shader samples.
+        glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D_ARRAY, Contact_Matrix->textures);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_BUFFER, Color_Maps->maps[Color_Maps->currMap]);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_BUFFER, Contact_Matrix->pixelStartLookupBufferTex);
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBufferTex);
+        glActiveTexture(GL_TEXTURE0);
         u32 ptr = 0;
         while (ptr < Number_of_Textures_1D * Number_of_Textures_1D)
         {
@@ -4536,6 +4463,7 @@ Render() {
         vertex vert[4];
 
         f32 lineWidth = Grid->size / sqrtf(Camera_Position.z);
+        f32 onePixel = 1.0f / (height * Camera_Position.z);
         f32 position = 0.0f;
 
         // left border
@@ -4549,28 +4477,37 @@ Render() {
         glBindVertexArray(Grid_Data->vaos[ptr++]);
         glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
-        f32 x = -0.5f;
+        f32 previousBoundary = -0.5f;
         ForLoop(Contigs->numberOfContigs - 1)
         {
             contig *cont = Contigs->contigs_arr + index;
 
             position += ((f32)cont->length / (f32)Number_of_Pixels_1D);
-            f32 px = x + lineWidth;
-            x = position - (0.5f * (lineWidth + 1.0f));
+            f32 boundary = position - 0.5f;
+            f32 room = boundary - previousBoundary;
+            // A full stroke is lineWidth. A microchromosome on a hires map is
+            // narrower than that, so use a one-pixel stroke that still fits in the gap.
+            f32 stroke = lineWidth;
+            if (room < lineWidth)
+            {
+                stroke = room > onePixel ? onePixel : room;
+            }
 
-            if (x > px)
+            if (stroke > 0.0f)
             {   
+                f32 left = boundary - (0.5f * stroke);
                 // contig vertical line
-                vert[0].x = x;             vert[0].y = -0.5f;
-                vert[1].x = x + lineWidth; vert[1].y = -0.5f;
-                vert[2].x = x + lineWidth; vert[2].y = 0.5f;
-                vert[3].x = x;             vert[3].y = 0.5f;
+                vert[0].x = left;             vert[0].y = -0.5f;
+                vert[1].x = left + stroke;    vert[1].y = -0.5f;
+                vert[2].x = left + stroke;    vert[2].y = 0.5f;
+                vert[3].x = left;             vert[3].y = 0.5f;
 
                 glBindBuffer(GL_ARRAY_BUFFER, Grid_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Grid_Data->vaos[ptr++]);
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
             }
+            previousBoundary = boundary;
         }
         // right border
         vert[0].x = 0.5f - lineWidth; vert[0].y = -0.5f;
@@ -4595,28 +4532,35 @@ Render() {
         glBindVertexArray(Grid_Data->vaos[ptr++]);
         glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
 
-        f32 y = 0.5f;
+        f32 yBoundary = 0.5f;
         ForLoop(Contigs->numberOfContigs - 1)
         {
             contig *cont = Contigs->contigs_arr + index;
 
             position += ((f32)cont->length / (f32)Number_of_Pixels_1D);
-            f32 py = y - lineWidth;
-            y = 1.0f - position + (0.5f * (lineWidth - 1.0f));
+            f32 boundary = 0.5f - position;
+            f32 room = yBoundary - boundary;
+            f32 stroke = lineWidth;
+            if (room < lineWidth)
+            {
+                stroke = room > onePixel ? onePixel : room;
+            }
 
-            if (y < py)
+            if (stroke > 0.0f)
             {   
+                f32 top = boundary + (0.5f * stroke);
                 // contig horizontal line
-                vert[0].x = -0.5f; vert[0].y = y - lineWidth;
-                vert[1].x = 0.5f;  vert[1].y = y - lineWidth;
-                vert[2].x = 0.5f;  vert[2].y = y;
-                vert[3].x = -0.5f; vert[3].y = y;
+                vert[0].x = -0.5f; vert[0].y = top - stroke;
+                vert[1].x = 0.5f;  vert[1].y = top - stroke;
+                vert[2].x = 0.5f;  vert[2].y = top;
+                vert[3].x = -0.5f; vert[3].y = top;
 
                 glBindBuffer(GL_ARRAY_BUFFER, Grid_Data->vbos[ptr]);
                 glBufferSubData(GL_ARRAY_BUFFER, 0, 4 * sizeof(vertex), vert);
                 glBindVertexArray(Grid_Data->vaos[ptr++]);
                 glDrawRangeElements(GL_TRIANGLES, 0, 3, 6, GL_UNSIGNED_SHORT, NULL);
             }
+            yBoundary = boundary;
         }
         // bottom border
         vert[0].x = -0.5f; vert[0].y = -0.5f;
@@ -4867,7 +4811,6 @@ Render() {
             ChangeSize((s32)width, (s32)height);
         }
 
-        #define MaxTicksPerScaleBar 128
         if (File_Loaded && Scale_Bars->on) // Scale bars
         {
             glUseProgram(Flat_Shader->shaderProgram);
@@ -4997,8 +4940,6 @@ Render() {
             glUniformMatrix4fv(UI_Shader->matLocation, 1, GL_FALSE, textNormalMat);
 
             glViewport(0, 0, (s32)width, (s32)height);
-
-#define DefaultWaypointSize 18.0f
             glUseProgram(Flat_Shader->shaderProgram);
             glUniform4fv(Flat_Shader->colorLocation, 1, (f32 *)&Waypoint_Mode_Data->base);
 
@@ -5155,15 +5096,11 @@ Render() {
 
             glViewport(0, 0, (s32)width, (s32)height);
 
-#define DefaultExtensionSize 20.0f
 
             fonsSetSize(FontStash_Context, text_box_size.font_size * Screen_Scale.x);
             fonsVertMetrics(FontStash_Context, 0, 0, &lh);
             fonsSetColor(FontStash_Context, FourFloatColorToU32(Extension_Mode_Data->text));
 
-            f32 textBoxHeight = lh;
-            textBoxHeight *= 7.0f;
-            textBoxHeight += 6.0f;
             f32 spacing = 10.0f;
 
             // 6 lines in total
@@ -5205,11 +5142,19 @@ Render() {
                                 {
                                     helpTexts.push_back("T: Graph: telomere");
                                 }
+                                else if (strcmp((char*)gph->name, "alg") == 0)
+                                {
+                                    static const char *labels[] = {"all", "d1", "d2", "d3", "d4", "d5", "d6"};
+                                    helpTexts.push_back(gph->on ? "U: hide alg" : "U: load alg");
+                                    helpTexts.push_back(std::string("Y: alg ") + labels[Linkage_Group_Filter]);
+                                }
                             }
                             break;
                     }
                 }
             }
+
+            f32 textBoxHeight = lh * (f32)helpTexts.size() + 6.0f;
 
             f32 textWidth = 0.; 
             for (auto i : helpTexts)
@@ -5243,7 +5188,7 @@ Render() {
             }
         }
 
-        // label to show the selected sequence 从 input sequences 里面选中的片段
+        // Label for the fragment selected in Input Sequences
         if (Selected_Sequence_Cover_Countor.end_time > 0.)
         {   
             f64 crt_time = GetTime();
@@ -5294,7 +5239,6 @@ Render() {
 
             f32 lh = 0.0f;   
             fonsClearState(FontStash_Context);
-#define DefaultScaffSize 40.0f
             fonsSetSize(FontStash_Context, Scaff_Mode_Data->size * Screen_Scale.x);
             fonsSetAlign(FontStash_Context, FONS_ALIGN_MIDDLE | FONS_ALIGN_TOP);
             fonsSetFont(FontStash_Context, Font_Bold);
@@ -5576,7 +5520,6 @@ Render() {
 
             f32 lh = 0.0f;   
             fonsClearState(FontStash_Context);
-#define DefaultMetaDataSize 20.0f
             fonsSetSize(FontStash_Context, MetaData_Mode_Data->size * Screen_Scale.x);
             fonsSetAlign(FontStash_Context, FONS_ALIGN_MIDDLE | FONS_ALIGN_TOP);
             fonsSetFont(FontStash_Context, Font_Bold);
@@ -6374,7 +6317,8 @@ Render() {
                         (char *)"Middle Click / Spacebar (while editing): invert sequence",
                         (char *)"P: copy highlight to clipboard",
                         (char *)"V: break at selection start",
-                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate"
+                        (char *)"Tab: mark sequences for multi-select, Space/Middle Click: consolidate, Space/Middle Click again: invert, Q: undo",
+                        (char *)"Tab on painted scaffold: pickup block, Space: invert block"
                     };
 
                     textBoxHeight = (f32)helpTexts.size() * (lh + 1.0f) - 1.0f;
@@ -6431,8 +6375,6 @@ Render() {
                 glBindBuffer(GL_ARRAY_BUFFER, NK_Device->vbo);
                 glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, NK_Device->ebo);
 
-#define MAX_VERTEX_MEMORY KiloByte(512)
-#define MAX_ELEMENT_MEMORY KiloByte(128)
                 glBufferData(GL_ARRAY_BUFFER, MAX_VERTEX_MEMORY, NULL, GL_STREAM_DRAW);
                 glBufferData(GL_ELEMENT_ARRAY_BUFFER, MAX_ELEMENT_MEMORY, NULL, GL_STREAM_DRAW);
 
@@ -6609,7 +6551,7 @@ LoadTexture(void *in)
             Bytes_Per_Texture,                        // size after decompressing
             NULL)
         )
-    { // 解压压缩的texture到 buffer->texture
+    { // Decompress the on-disk texture into buffer->texture
         fprintf(stderr, "Could not decompress texture from disk\n");
     }
 
@@ -6625,19 +6567,16 @@ LoadTexture(void *in)
 
 global_function
 void
-PopulateTextureLoadQueue(void *in) // 填充已经初始化过的 所有的queue，填充的任务为所有的528个texture的读取任务
+PopulateTextureLoadQueue(void *in) // Fill all initialized queues with read tasks for all 528 textures
 {
-    u32 *packedTextureIndexes = (u32 *)in;  // 将空指针转化为u32
+    u32 *packedTextureIndexes = (u32 *)in;  // Cast the input pointer to u32*
     u32 ptr = 0;
     ForLoop(Number_of_Textures_1D) // row number
     {
         for (u32 index2 = index; index2 < Number_of_Textures_1D; index2++ ) // column number
         {
-	    // first 16 bits is the raw number and the second 16 bits is the column number,
-	    // there will be problem if number of texture in one dimension is larger than
-	    // 2^16, but it is not possible ... just for a reminder
-            packedTextureIndexes[ptr] = (index << 16) | (index2);
-            ThreadPoolAddTask(Thread_Pool, LoadTexture, (void *)(packedTextureIndexes + ptr++)); // 填充当前的任务队列，输入为对应的texture的行、列编号
+            packedTextureIndexes[ptr] = (index << 16) | (index2); // first 16 bits is the raw number and the second 16 bits is the column number, there will be problem if number of texture in one dimension is larger than 2^16, but it is not possible ... just for a reminder
+            ThreadPoolAddTask(Thread_Pool, LoadTexture, (void *)(packedTextureIndexes + ptr++)); // Enqueue a load task with the packed texture row/column index
         }
     }
 }
@@ -6730,6 +6669,7 @@ Quad_EBO;
 
 static u08 Grid_Data_GL_heap;
 static u08 Contig_ColourBar_Data_GL_heap;
+static u08 Scaff_Bar_Data_GL_heap;
 
 global_function
 void
@@ -6877,13 +6817,158 @@ EnsureContigColourBarBuffersForContigCount(u32 nContigs)
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
+global_function
+void
+EnsureScaffBarBuffersForContigCount(u32 nContigs)
+{
+    if (!File_Loaded || !Scaff_Bar_Data || !Flat_Shader)
+    {
+        return;
+    }
+    u32 need = nContigs + 4;
+    if (need < 4)
+    {
+        need = 4;
+    }
+    if (Scaff_Bar_Data->nBuffers >= need)
+    {
+        return;
+    }
+
+    GLuint posAttrib = (GLuint)glGetAttribLocation(Flat_Shader->shaderProgram, "position");
+    glUseProgram(Flat_Shader->shaderProgram);
+
+    if (Scaff_Bar_Data->nBuffers > 0 && Scaff_Bar_Data->vaos && Scaff_Bar_Data->vbos)
+    {
+        glDeleteVertexArrays((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vaos);
+        glDeleteBuffers((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vbos);
+        if (Scaff_Bar_Data_GL_heap)
+        {
+            free(Scaff_Bar_Data->vaos);
+            free(Scaff_Bar_Data->vbos);
+            Scaff_Bar_Data_GL_heap = 0;
+        }
+    }
+
+    Scaff_Bar_Data->vaos = (GLuint *)malloc((size_t)need * sizeof(GLuint));
+    Scaff_Bar_Data->vbos = (GLuint *)malloc((size_t)need * sizeof(GLuint));
+    if (!Scaff_Bar_Data->vaos || !Scaff_Bar_Data->vbos)
+    {
+        if (Scaff_Bar_Data->vaos)
+        {
+            free(Scaff_Bar_Data->vaos);
+        }
+        if (Scaff_Bar_Data->vbos)
+        {
+            free(Scaff_Bar_Data->vbos);
+        }
+        Scaff_Bar_Data->vaos = NULL;
+        Scaff_Bar_Data->vbos = NULL;
+        Scaff_Bar_Data->nBuffers = 0;
+        return;
+    }
+    Scaff_Bar_Data_GL_heap = 1;
+
+    ForLoop(need)
+    {
+        glGenVertexArrays(1, Scaff_Bar_Data->vaos + index);
+        glBindVertexArray(Scaff_Bar_Data->vaos[index]);
+
+        glGenBuffers(1, Scaff_Bar_Data->vbos + index);
+        glBindBuffer(GL_ARRAY_BUFFER, Scaff_Bar_Data->vbos[index]);
+        glBufferData(GL_ARRAY_BUFFER, 4 * sizeof(vertex), NULL, GL_DYNAMIC_DRAW);
+
+        glEnableVertexAttribArray(posAttrib);
+        glVertexAttribPointer(posAttrib, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), 0);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, Quad_EBO);
+    }
+
+    Scaff_Bar_Data->nBuffers = need;
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
 enum
 load_file_result
 {
     ok,
     fileErr,
     decompErr,
+    glErr,
 };
+
+static u64
+Rgtc1TextureArrayBytes(u32 resolution, u32 nTextures)
+{
+    return (u64)(resolution >> 1) * (u64)resolution * (u64)nTextures;
+}
+
+// Allocate the contact-map GL_TEXTURE_2D_ARRAY. Ultra maps (4096^2 x 528 layers)
+// overflow 32-bit imageSize in glCompressedTexImage3D and NVIDIA then SIGSEGVs
+// around layer 16 (issue #79). Prefer glTexStorage3D, which sizes from dimensions.
+static u08
+AllocateContactMatrixTextureArray(u32 nTextures)
+{
+    while (glGetError() != GL_NO_ERROR) {}
+
+    const u64 mip0Bytes = Rgtc1TextureArrayBytes(Texture_Resolution, nTextures);
+    fmt::print(
+        "Allocating contact texture array: {}x{} x {} layers, {} mip(s), mip0 {} bytes\n",
+        Texture_Resolution, Texture_Resolution, nTextures, Number_of_MipMaps, mip0Bytes);
+
+    const u08 useTexStorage = (glad_glTexStorage3D != nullptr);
+    if (useTexStorage)
+    {
+        glTexStorage3D(
+            GL_TEXTURE_2D_ARRAY,
+            (GLsizei)Number_of_MipMaps,
+            GL_COMPRESSED_RED_RGTC1,
+            (GLsizei)Texture_Resolution,
+            (GLsizei)Texture_Resolution,
+            (GLsizei)nTextures);
+    }
+    else
+    {
+        u32 resolution = Texture_Resolution;
+        ForLoop(Number_of_MipMaps)
+        {
+            const u64 bytes = Rgtc1TextureArrayBytes(resolution, nTextures);
+            if (bytes > (u64)std::numeric_limits<GLsizei>::max())
+            {
+                fmt::print(
+                    stderr,
+                    "[LoadFile::error]: compressed texture array is too large ({} bytes) for glCompressedTexImage3D. Ultra maps need glTexStorage3D (OpenGL 4.2 / ARB_texture_storage).\n",
+                    bytes);
+                return 0;
+            }
+            glCompressedTexImage3D(
+                GL_TEXTURE_2D_ARRAY,
+                (GLint)index,
+                GL_COMPRESSED_RED_RGTC1,
+                (GLsizei)resolution,
+                (GLsizei)resolution,
+                (GLsizei)nTextures,
+                0,
+                (GLsizei)bytes,
+                0);
+            resolution >>= 1;
+        }
+    }
+
+    const GLenum err = glGetError();
+    if (err != GL_NO_ERROR)
+    {
+        fmt::print(
+            stderr,
+            "[LoadFile::error]: failed to allocate GPU texture array (OpenGL error 0x{:x}). Ultra maps need several GB of VRAM (mip0 {} bytes).\n",
+            (u32)err,
+            mip0Bytes);
+        return 0;
+    }
+    return 1;
+}
 
 global_variable
 libdeflate_decompressor *
@@ -6941,7 +7026,7 @@ TestFile(const char *fileName, u64 *fileSize = 0)
             }
         }
     }
-    return(file); // 仅仅返回正确的file指针，否则返回空指针
+    return(file); // Return the file pointer on success, otherwise null
 }
 
 
@@ -6986,6 +7071,121 @@ add_graph_to_extensions(
 
 
 global_function
+void
+UploadAlgGroupColours(graph *gph)
+{
+    if (!gph || !gph->data || !gph->shader || !gph->shader->yValuesBuffer || !Number_of_Pixels_1D)
+    {
+        return;
+    }
+
+    u32 nValues = Number_of_Pixels_1D;
+    f32 *packed = new f32[nValues * 4];
+    ForLoop(nValues)
+    {
+        u32 value = gph->data[index];
+        u32 show = (!Linkage_Group_Filter || value == Linkage_Group_Filter) ? value : 0;
+        linkage_colour groupColour = DefaultGraphColour;
+        if (show)
+        {
+            LinkageGroupColourByValue(show, &groupColour);
+        }
+        packed[index * 4 + 0] = show ? 1.0f : 0.0f;
+        packed[index * 4 + 1] = groupColour.r;
+        packed[index * 4 + 2] = groupColour.g;
+        packed[index * 4 + 3] = groupColour.b;
+    }
+    glBindBuffer(GL_TEXTURE_BUFFER, gph->shader->yValuesBuffer);
+    glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues * 4, packed, GL_DYNAMIC_DRAW);
+    delete[] packed;
+}
+
+global_function
+void
+CycleLinkageGroup()
+{
+    static const char *labels[] = {"all groups", "d1", "d2", "d3", "d4", "d5", "d6"};
+    Linkage_Group_Filter = (Linkage_Group_Filter + 1) % 7;
+
+    u08 found = 0;
+    if (Extensions.head)
+    {
+        TraverseLinkedList(Extensions.head, extension_node)
+        {
+            if (node->type != extension_graph)
+            {
+                continue;
+            }
+            graph *gph = (graph *)node->extension;
+            if (strcmp((char *)gph->name, "alg") == 0)
+            {
+                gph->on = 1;
+                UploadAlgGroupColours(gph);
+                found = 1;
+            }
+        }
+    }
+
+    if (found)
+    {
+        fmt::println("[alg] showing {}", labels[Linkage_Group_Filter]);
+    }
+    else
+    {
+        fmt::println("[alg] no alg track in this map");
+    }
+    Redisplay = 1;
+}
+
+global_function
+void
+ToggleAlgTrack()
+{
+    u08 found = 0;
+    u08 showing = 0;
+    if (Extensions.head)
+    {
+        TraverseLinkedList(Extensions.head, extension_node)
+        {
+            if (node->type != extension_graph)
+            {
+                continue;
+            }
+            graph *gph = (graph *)node->extension;
+            if (strcmp((char *)gph->name, "alg") == 0)
+            {
+                found = 1;
+                if (gph->on)
+                {
+                    gph->on = 0;
+                }
+                else
+                {
+                    Linkage_Group_Filter = 0;
+                    gph->on = 1;
+                    UploadAlgGroupColours(gph);
+                    showing = 1;
+                }
+            }
+        }
+    }
+
+    if (!found)
+    {
+        fmt::println("[alg] no alg track in this map");
+    }
+    else if (showing)
+    {
+        fmt::println("[alg] showing all groups");
+    }
+    else
+    {
+        fmt::println("[alg] hidden");
+    }
+    Redisplay = 1;
+}
+
+global_function
 void 
 push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1.f)
 {   
@@ -6994,7 +7194,7 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
     extension_node* node = Extensions.head ;
     while (added_index--)
     {
-        node = node->next; // 移动到最后一个节点
+        node = node->next; // Advance along the list
         exIndex ++ ;
     }
     for ( ; node; node = node->next) {
@@ -7004,12 +7204,6 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
             case extension_graph:
                 {
                     graph *gph = (graph *)node->extension; // get the graph ptr and assigned to gph
-#define DefaultGraphScale 0.2f
-#define DefaultGraphBase 32.0f
-#define DefaultGraphLineSize 1.0f
-#define DefaultGraphColour {0.1f, 0.8f, 0.7f, 1.0f}
-#define Colour_5p_telomere {0.533f, 0.800f, 0.933f, 1.0f}  // #88CCEE - light blue
-#define Colour_3p_telomere {0.867f, 0.800f, 0.467f, 1.0f}  // #DDCC77 - light gold
                     gph->scale = scale>0.f? scale : DefaultGraphScale;
                     gph->base = DefaultGraphBase;
                     gph->lineSize = DefaultGraphLineSize;
@@ -7020,7 +7214,12 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
                     } else if (strcmp((char*)gph->name, EXT_NAME_3P_TELOMERE) == 0) {
                         gph->colour = Colour_3p_telomere;
                     } else {
-                        gph->colour = DefaultGraphColour;
+                        linkage_colour groupColour;
+                        if (LinkageGroupColour((const char *)gph->name, &groupColour)) {
+                            gph->colour = {groupColour.r, groupColour.g, groupColour.b, groupColour.a};
+                        } else {
+                            gph->colour = DefaultGraphColour;
+                        }
                     }
                     
                     // Show labels for all extensions by default
@@ -7045,19 +7244,10 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
 
                     u32 nValues = Number_of_Pixels_1D;
                     auto* xValues = new f32[nValues]; // allocate memory for xValues, actually, x is the coordinate of the pixel
-                    auto* yValues = new f32[nValues];
-                    
-                    u32 max = 0;
-                    ForLoop(Number_of_Pixels_1D)
-                    {
-                        max = my_Max(max, gph->data[index]);
-                    }
-
-                    ForLoop(Number_of_Pixels_1D)
-                    {
-                        xValues[index] = (f32)index;
-                        yValues[index] = (f32)gph->data[index] / (f32)max ;   // normalise the data
-                    }
+                    // An "alg" track stores PretextGraph group ids, not a height. Paint each pixel
+                    // from that id and keep the bar flat.
+                    int linkageTrack = strcmp((const char *)gph->name, "alg") == 0;
+                    glUniform1i(glGetUniformLocation(gph->shader->shaderProgram, "useGroupColour"), linkageTrack ? 1 : 0);
 
                     glActiveTexture(GL_TEXTURE4 + exIndex++);
 
@@ -7066,15 +7256,45 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
                     // generate a buffer object named yVal and save data to yVal
                     glGenBuffers(1, &yVal);
                     glBindBuffer(GL_TEXTURE_BUFFER, yVal);
-                    glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues, yValues, GL_STATIC_DRAW);
 
                     // add texture and link to the buffer object
                     glGenTextures(1, &yValTex);
                     glBindTexture(GL_TEXTURE_BUFFER, yValTex);
-                    glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, yVal);
+
+                    if (linkageTrack)
+                    {
+                        ForLoop(nValues)
+                        {
+                            xValues[index] = (f32)index;
+                        }
+                        glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues * 4, 0, GL_DYNAMIC_DRAW);
+                        glTexBuffer(GL_TEXTURE_BUFFER, GL_RGBA32F, yVal);
+                    }
+                    else
+                    {
+                        auto* yValues = new f32[nValues];
+                        u32 max = 0;
+                        ForLoop(Number_of_Pixels_1D)
+                        {
+                            max = my_Max(max, gph->data[index]);
+                        }
+
+                        ForLoop(Number_of_Pixels_1D)
+                        {
+                            xValues[index] = (f32)index;
+                            yValues[index] = (f32)gph->data[index] / (f32)max ;   // normalise the data
+                        }
+                        glBufferData(GL_TEXTURE_BUFFER, sizeof(f32) * nValues, yValues, GL_STATIC_DRAW);
+                        glTexBuffer(GL_TEXTURE_BUFFER, GL_R32F, yVal);
+                        delete[] yValues;
+                    }
 
                     gph->shader->yValuesBuffer = yVal;
                     gph->shader->yValuesBufferTex = yValTex;
+                    if (linkageTrack)
+                    {
+                        UploadAlgGroupColours(gph);
+                    }
                     
                     // add the vertext data into buffer
                     glGenBuffers(1, &gph->vbo);
@@ -7090,7 +7310,6 @@ push_extensions_to_opengl(memory_arena *arena, u32 added_index = 0, f32 scale=-1
                     glVertexAttribPointer(posAttrib, 1, GL_FLOAT, GL_FALSE, 0, 0);
 
                     delete[] xValues;
-                    delete[] yValues;
 
                     glActiveTexture(GL_TEXTURE0);
                 }
@@ -7107,6 +7326,457 @@ global_function
 u08
 LoadState(u64 headerHash, char *path = 0);
 
+global_variable
+u08
+Map_File_Path[512] = {0};
+
+static u08 Contigs_arr_GL_heap;
+
+global_function
+void
+AssignInitialMapPixelsFromContigFractions(f32 *contigFracs, u32 numberOfOriginalContigs)
+{
+    f32 total = 0.0f;
+    u32 lastPixel = 0;
+    u32 relCoord = 0;
+
+    ForLoop(numberOfOriginalContigs)
+    {
+        total += contigFracs[index];
+        u32 pixel = (u32)((f64)Number_of_Pixels_1D * (f64)total);
+
+        for (relCoord = 0; lastPixel < pixel; lastPixel++, relCoord++)
+        {
+            Map_State->originalContigIds[lastPixel] = index;
+            Map_State->contigRelCoords[lastPixel] = relCoord;
+        }
+    }
+
+    for (; lastPixel < Number_of_Pixels_1D; lastPixel++)
+    {
+        u32 lastContig = numberOfOriginalContigs - 1;
+        Map_State->originalContigIds[lastPixel] = lastContig;
+        if (lastPixel && Map_State->originalContigIds[lastPixel - 1] != lastContig)
+        {
+            relCoord = 0;
+        }
+        Map_State->contigRelCoords[lastPixel] = relCoord++;
+    }
+}
+
+global_function
+u08
+RebuildInitialMapPixelsFromFile(void)
+{
+    if (!Map_File_Path[0] || !Map_State || !Number_of_Original_Contigs || !Decompressor)
+    {
+        return(0);
+    }
+
+    u08 magic[] = {'p', 's', 't', 'm'};
+    FILE *file = fopen((const char *)Map_File_Path, "rb");
+    if (!file)
+    {
+        return(0);
+    }
+
+    u08 magicTest[4];
+    if (fread(magicTest, 1, sizeof(magicTest), file) != sizeof(magicTest))
+    {
+        fclose(file);
+        return(0);
+    }
+
+    ForLoop(sizeof(magic))
+    {
+        if (magic[index] != magicTest[index])
+        {
+            fclose(file);
+            return(0);
+        }
+    }
+
+    u32 nBytesHeaderComp = 0;
+    u32 nBytesHeader = 0;
+    if (fread(&nBytesHeaderComp, 1, 4, file) != 4 ||
+        fread(&nBytesHeader, 1, 4, file) != 4 ||
+        !nBytesHeaderComp ||
+        !nBytesHeader)
+    {
+        fclose(file);
+        return(0);
+    }
+
+    u08 *compressionBuffer = new u08[nBytesHeaderComp];
+    u08 *header = new u08[nBytesHeader];
+    if (!compressionBuffer || !header)
+    {
+        delete[] compressionBuffer;
+        delete[] header;
+        fclose(file);
+        return(0);
+    }
+
+    u08 decompress_ok = 1;
+    if (fread(compressionBuffer, 1, nBytesHeaderComp, file) != nBytesHeaderComp ||
+        libdeflate_deflate_decompress(
+            Decompressor,
+            (const void *)compressionBuffer,
+            nBytesHeaderComp,
+            (void *)header,
+            nBytesHeader,
+            NULL))
+    {
+        decompress_ok = 0;
+    }
+    delete[] compressionBuffer;
+
+    if (!decompress_ok)
+    {
+        delete[] header;
+        fclose(file);
+        return(0);
+    }
+
+    u08 *header_cursor = header;
+    header_cursor += 8;
+    u32 n_contigs = 0;
+    ForLoop(4) { ((u08 *)&n_contigs)[index] = *header_cursor++; }
+
+    if (n_contigs != Number_of_Original_Contigs)
+    {
+        delete[] header;
+        fclose(file);
+        fprintf(stderr, "[PretextView] Rebuild map: header contig count (%u) != loaded map (%u)\n",
+                n_contigs, Number_of_Original_Contigs);
+        return(0);
+    }
+
+    f32 *contigFracs = new f32[Number_of_Original_Contigs];
+    ForLoop(Number_of_Original_Contigs)
+    {
+        ForLoop2(4) { ((u08 *)(contigFracs + index))[index2] = *header_cursor++; }
+        header_cursor += 64;
+    }
+
+    delete[] header;
+    fclose(file);
+
+    AssignInitialMapPixelsFromContigFractions(contigFracs, Number_of_Original_Contigs);
+    delete[] contigFracs;
+    return(1);
+}
+
+global_function
+void
+EnsureContigsArrayCapacity(u32 min_capacity)
+{
+    if (!Contigs || Contigs->contigs_arr_capacity >= min_capacity)
+    {
+        return;
+    }
+
+    contig *new_arr = new contig[min_capacity]();
+    u08 *new_flags = new u08[(min_capacity + 7) >> 3]();
+    if (!new_arr || !new_flags)
+    {
+        delete[] new_arr;
+        delete[] new_flags;
+        fprintf(stderr, "[PretextView] EnsureContigsArrayCapacity: allocation failed\n");
+        return;
+    }
+
+    if (Contigs_arr_GL_heap)
+    {
+        delete[] Contigs->contigs_arr;
+        delete[] Contigs->contigInvertFlags;
+    }
+
+    Contigs->contigs_arr = new_arr;
+    Contigs->contigInvertFlags = new_flags;
+    Contigs->contigs_arr_capacity = min_capacity;
+    Contigs_arr_GL_heap = 1;
+}
+
+global_function
+void
+ResetPixelRearrangementLookupBuffer(void)
+{
+    if (!Contact_Matrix || !Contact_Matrix->pixelRearrangmentLookupBuffer || !Number_of_Pixels_1D)
+    {
+        return;
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+    u32 *buffer = (u32 *)glMapBufferRange(
+        GL_TEXTURE_BUFFER,
+        0,
+        Number_of_Pixels_1D * sizeof(u32),
+        GL_MAP_WRITE_BIT);
+
+    if (buffer)
+    {
+        ForLoop(Number_of_Pixels_1D)
+        {
+            buffer[index] = index;
+        }
+        glUnmapBuffer(GL_TEXTURE_BUFFER);
+    }
+    else
+    {
+        fprintf(stderr, "[PretextView] ResetPixelRearrangementLookupBuffer: glMapBufferRange failed\n");
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+}
+
+global_function
+u08
+ValidatePixelRearrangementLookupBuffer(void)
+{
+    if (!Contact_Matrix || !Contact_Matrix->pixelRearrangmentLookupBuffer || !Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 nPixels = Number_of_Pixels_1D;
+    u32 *counts = (u32 *)calloc(nPixels, sizeof(u32));
+    if (!counts)
+    {
+        return(0);
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+    const u32 *buffer = (const u32 *)glMapBufferRange(
+        GL_TEXTURE_BUFFER,
+        0,
+        nPixels * sizeof(u32),
+        GL_MAP_READ_BIT);
+
+    u08 ok = 0;
+    if (buffer)
+    {
+        ok = 1;
+        ForLoop(nPixels)
+        {
+            u32 v = buffer[index];
+            if (v >= nPixels)
+            {
+                ok = 0;
+                break;
+            }
+            ++counts[v];
+        }
+
+        if (ok)
+        {
+            ForLoop(nPixels)
+            {
+                if (counts[index] != 1)
+                {
+                    ok = 0;
+                    break;
+                }
+            }
+        }
+
+        glUnmapBuffer(GL_TEXTURE_BUFFER);
+    }
+
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+    free(counts);
+    return(ok);
+}
+
+global_function
+u08
+GetContigPixelRange(u32 contigIdx, u32 *rangeStart, u32 *rangeEnd)
+{
+    if (!Map_State || !Contigs || !rangeStart || !rangeEnd || contigIdx >= Contigs->numberOfContigs)
+    {
+        return(0);
+    }
+
+    u32 start = Number_of_Pixels_1D;
+    u32 end = 0;
+    u08 found = 0;
+
+    ForLoop(Number_of_Pixels_1D)
+    {
+        if (Map_State->contigIds[index] == contigIdx)
+        {
+            found = 1;
+            start = my_Min(start, index);
+            end = my_Max(end, index);
+        }
+    }
+
+    if (!found || start > end)
+    {
+        return(0);
+    }
+
+    *rangeStart = start;
+    *rangeEnd = end;
+    return(1);
+}
+
+global_function
+void
+ApplyScaffoldPaintToMapPixels(u32 startPixel, u32 endPixel, u32 scaffId)
+{
+    if (!Map_State || !scaffId || startPixel >= Number_of_Pixels_1D)
+    {
+        return;
+    }
+
+    endPixel = my_Min(endPixel, Number_of_Pixels_1D - 1);
+    if (startPixel > endPixel)
+    {
+        return;
+    }
+
+    for (u32 pixel = startPixel; pixel <= endPixel; ++pixel)
+    {
+        Map_State->scaffIds[pixel] = scaffId;
+    }
+}
+
+global_function
+u32
+CountScaffoldPaintRunsOnMap(void)
+{
+    if (!Map_State || !Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 nRuns = 0;
+    u32 pixel = 0;
+
+    while (pixel < Number_of_Pixels_1D)
+    {
+        u32 scaffId = Map_State->scaffIds[pixel];
+        if (!scaffId)
+        {
+            ++pixel;
+            continue;
+        }
+
+        ++nRuns;
+        while (pixel < Number_of_Pixels_1D && Map_State->scaffIds[pixel] == scaffId)
+        {
+            ++pixel;
+        }
+    }
+
+    return(nRuns);
+}
+
+global_function
+void
+ApplyLoadedScaffoldPaintingByPixelRange(u32 nEntries, u32 *rangeStarts, u32 *rangeEnds, u32 *scaffIds)
+{
+    if (!nEntries || !rangeStarts || !rangeEnds || !scaffIds || !Map_State)
+    {
+        return;
+    }
+
+    memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
+
+    ForLoop(nEntries)
+    {
+        ApplyScaffoldPaintToMapPixels(rangeStarts[index], rangeEnds[index], scaffIds[index]);
+    }
+
+    if (Contigs)
+    {
+        UpdateContigsFromMapState();
+        EnsureScaffBarBuffersForContigCount(Contigs->numberOfContigs);
+    }
+}
+
+global_function
+void
+ApplyLoadedScaffoldPaintingLegacy(u32 nEntries, u32 *contigIds, u32 *scaffIds)
+{
+    if (!nEntries || !contigIds || !scaffIds || !Contigs || !Map_State)
+    {
+        return;
+    }
+
+    memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
+
+    ForLoop(nEntries)
+    {
+        u32 cId = contigIds[index];
+        u32 sId = scaffIds[index];
+        u32 rangeStart = 0;
+        u32 rangeEnd = 0;
+
+        if (!sId)
+        {
+            continue;
+        }
+
+        if (GetContigPixelRange(cId, &rangeStart, &rangeEnd))
+        {
+            ApplyScaffoldPaintToMapPixels(rangeStart, rangeEnd, sId);
+        }
+    }
+
+    UpdateContigsFromMapState();
+    EnsureScaffBarBuffersForContigCount(Contigs->numberOfContigs);
+}
+
+global_function
+u08
+PrepareMapForSaveStateEditReplay(void)
+{
+    if (Map_Editor)
+    {
+        Map_Editor->nEdits = 0;
+        Map_Editor->nUndone = 0;
+        Map_Editor->editStackPtr = 0;
+    }
+
+    if (!Map_State || !Contigs)
+    {
+        return(0);
+    }
+
+    if (!Map_File_Path[0])
+    {
+        fprintf(stderr,
+            "[LoadState::error]: No .pretext path — open the map file first, then load the savestate.\n");
+        return(0);
+    }
+
+    if (!RebuildInitialMapPixelsFromFile())
+    {
+        fprintf(stderr,
+            "[LoadState::error]: Could not rebuild initial map layout from \"%s\". "
+            "Use Clear Cache (or reopen the same .pretext), then load the savestate again.\n",
+            (const char *)Map_File_Path);
+        return(0);
+    }
+
+    memset(Map_State->scaffIds, 0, Number_of_Pixels_1D * sizeof(u32));
+    memset(Map_State->metaDataFlags, 0, Number_of_Pixels_1D * sizeof(u64));
+
+    ResetPixelRearrangementLookupBuffer();
+
+    EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+    UpdateContigsFromMapState();
+
+    fmt::print(
+        "[LoadState]: Map reset for edit replay ({} frags, {} pixels).\n",
+        Contigs->numberOfContigs,
+        Number_of_Pixels_1D);
+
+    return(1);
+}
+
 global_function
 load_file_result
 LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *headerHash)
@@ -7117,10 +7787,11 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
     // otherwise, set the pointer file to a null pointer.
     FILE *file = TestFile(filePath, &fileSize);
 
-    if (!file)    // 如果为空指针， 返回读取错误fileErr
+    if (!file)    // Null file pointer: return fileErr
     {
         return(fileErr);
     }
+    CopyNullTerminatedString((u08 *)filePath, Map_File_Path);
     
     FenceIn(File_Loaded = 0); 
 
@@ -7169,6 +7840,12 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         glDeleteVertexArrays((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vaos);
         glDeleteBuffers((GLsizei)Scaff_Bar_Data->nBuffers, Scaff_Bar_Data->vbos);
+        if (Scaff_Bar_Data_GL_heap)
+        {
+            free(Scaff_Bar_Data->vaos);
+            free(Scaff_Bar_Data->vbos);
+            Scaff_Bar_Data_GL_heap = 0;
+        }
 
         TraverseLinkedList(Extensions.head, extension_node)
         {
@@ -7225,6 +7902,23 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
             delete frag_cut_cal_ptr;
             frag_cut_cal_ptr = nullptr;
         }
+        if (textures_array_ptr)
+        {
+            delete textures_array_ptr;
+            textures_array_ptr = nullptr;
+        }
+        // Contigs arrays may have been moved to the heap by EnsureContigsArrayCapacity.
+        // Free them before ResetMemoryArenaP, then clear the flag so the next LoadFile
+        // does not delete[] arena memory.
+        if (Contigs_arr_GL_heap && Contigs)
+        {
+            delete[] Contigs->contigs_arr;
+            delete[] Contigs->contigInvertFlags;
+            Contigs->contigs_arr = nullptr;
+            Contigs->contigInvertFlags = nullptr;
+            Contigs->contigs_arr_capacity = 0;
+        }
+        Contigs_arr_GL_heap = 0;
         ResetMemoryArenaP(arena); // release all the memory allocated, avoid memory leak
         auto_curation_state.clear();
     }
@@ -7464,6 +8158,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
         // Reserve storage for the contig invterted bit flags
         Contigs->contigInvertFlags = PushArrayP(arena, u08, (nContigs + 7) >> 3);
+        Contigs_arr_GL_heap = 0;
 
         // Update the current contigs based on mapstate, and update the number
         // of fragments contained in each contig in original_contigs and the
@@ -7642,15 +8337,12 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
     // Load Textures: reading from file and pushing into glTexture with index Contact_Matrix->textures
     {
-        InitialiseTextureBufferQueue(arena, Texture_Buffer_Queue, Bytes_Per_Texture, filePath); // 初始化所有的queue texture_buffer_queue, 一共有8个queue，每个queue有8个buffer
+        InitialiseTextureBufferQueue(arena, Texture_Buffer_Queue, Bytes_Per_Texture, filePath); // initialize all the queue texture_buffer_queue, there are 8 queues, each queue has 8 buffers
 
         u32 nTextures = (Number_of_Textures_1D + 1) * (Number_of_Textures_1D >> 1);     // number of textures (528)
-        u32* packedTextureIndexes = new u32[nTextures];
-        ThreadPoolAddTask(Thread_Pool, PopulateTextureLoadQueue, packedTextureIndexes); // multi-thread for loading the texture entries
-
-        glActiveTexture(GL_TEXTURE0);   // 所有的子图加载在 texture 0 
-        glGenTextures(1, &Contact_Matrix->textures);   // 获取一个texture 存到
-        glBindTexture(GL_TEXTURE_2D_ARRAY, Contact_Matrix->textures); // 绑定到当前的texture
+        glActiveTexture(GL_TEXTURE0);   // all the sub-textures are loaded on texture 0 
+        glGenTextures(1, &Contact_Matrix->textures);   // get a texture and store it in Contact_Matrix->textures
+        glBindTexture(GL_TEXTURE_2D_ARRAY, Contact_Matrix->textures); // bind the texture to the current texture
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
@@ -7658,27 +8350,25 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0);
         glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, (GLint)Number_of_MipMaps - 1);
 
-        u32 resolution = Texture_Resolution;
-        ForLoop(Number_of_MipMaps) // 初始一个texture的一个维度有1024个像素点，放大后一个texture的一个维度只有32（1024 / 2**5）个像素点
-        {   // 初始化所有层级mipmap level的 gl_texture_2d_array
-            glCompressedTexImage3D  (
-                GL_TEXTURE_2D_ARRAY,       // 指定纹理目标 例如GL_TEXTURE_3D
-                (GLint)index,              // 指定纹理层级
-                GL_COMPRESSED_RED_RGTC1,   // texture数据的压缩格式  Unsigned normalized 1-component only.
-                (GLsizei)resolution, (GLsizei)resolution, (GLsizei)nTextures, // 纹理宽度， 高度， 深度
-                0,      // border
-                (GLsizei)((resolution >> 1) * resolution * nTextures),  // 每一个texture 的数据大小 （bytes），注意此处初始化了全部的 nTextures 个texture
-                0); // 指向数据的指针
-            resolution >>= 1;
+        if (!AllocateContactMatrixTextureArray(nTextures))
+        {
+            glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+            glDeleteTextures(1, &Contact_Matrix->textures);
+            Contact_Matrix->textures = 0;
+            return glErr;
         }
-        
+
+        u32* packedTextureIndexes = new u32[nTextures];
+        ThreadPoolAddTask(Thread_Pool, PopulateTextureLoadQueue, packedTextureIndexes);
+
         u32 ptr = 0;
+        u32 resolution = Texture_Resolution;
         printf("Loading textures...\n");
         ForLoop(Number_of_Textures_1D)
         {
             ForLoop2(Number_of_Textures_1D - index)
             {
-                volatile texture_buffer *loadedTexture = 0; // 使用volatile锁放弃存取优化。如果优化（不使用volatile），该值存取会被优化，可能会存放在寄存器中，而不是每次访问该值都会从内存中读取
+                volatile texture_buffer *loadedTexture = 0; // volatile: force loads from memory each time; without it the compiler may keep the value in a register
                 while (!loadedTexture)
                 {   
                     #ifndef _WIN32 // unix
@@ -7690,7 +8380,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                          NULL);
                     #endif // __WIN32
                 }  
-                u08 *texture = loadedTexture->texture; // 获取loadedtexture的texture的指针
+                u08 *texture = loadedTexture->texture; // Pointer to the loaded texture payload
                 
                 // push the texture data (number_of_mipmaps) to the gl_texture_2d_array
                 resolution = Texture_Resolution;
@@ -7698,36 +8388,37 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
                         level < (GLint)Number_of_MipMaps;
                         ++level )
                 {
-                    GLsizei nBytes = (GLsizei)(resolution * (resolution >> 1));  // 为什么每一个mipmap存储的像素点个数是 resolution ** 2 / 2 ，不应该是resolution**2吗
-                    // 此处将texture的数据压入到gl中，存储为gl_texture_2d_array的对象
+                    const u64 layerBytes = (u64)resolution * (u64)(resolution >> 1);
+                    GLsizei nBytes = (GLsizei)layerBytes;
+                    // push the texture data (number_of_mipmaps) to the gl_texture_2d_array
                     glCompressedTexSubImage3D(
                          GL_TEXTURE_2D_ARRAY,        //  target texture. Must be GL_TEXTURE_3D or GL_TEXTURE_2D_ARRAY.
                          level,                      //  level-of-detail number. Level 0 is the base image level. Level n is the nth mipmap reduction image. 
                          0, 0, (GLint)Texture_Ptr,   //  Texture_Ptr is the index of Current_loaded_texture
                          (GLsizei)resolution, (GLsizei)resolution, 1,   // Specifies the width, height, depth of the texture subimage.
-                         GL_COMPRESSED_RED_RGTC1,    // 压缩数据的格式，这就是为什么只用了一半的 （nBytes） bytes 的数据表示了 resolution * resolution 的图片
+                         GL_COMPRESSED_RED_RGTC1,    //  compressed format, that is the reason why only half byte used（nBytes） to represent the resolution * resolution image
                          nBytes,                     //  the number of unsigned bytes of image data starting at the address specified by data.
                          texture                     //  a pointer to the compressed image data in memory.
-                         );   // 是否此处将texture给到 GL_TEXTURE_2D_ARRAY, check the doc on https://registry.khronos.org/OpenGL-Refpages/es3.0/html/glCompressedTexSubImage3D.xhtml
+                         );   // whether the texture is pushed to the GL_TEXTURE_2D_ARRAY, check the doc on https://registry.khronos.org/OpenGL-Refpages/es3.0/html/glCompressedTexSubImage3D.xhtml
 
                     resolution >>= 1;
-                    texture += nBytes;
+                    texture += nBytes; // move the texture pointer to the next texture
                 }
 
-                printf("\r%3d/%3d (%1.2f%%) textures loaded from disk...", Texture_Ptr + 1, nTextures, 100.0 * (f64)((f32)(Texture_Ptr + 1) / (f32)((Number_of_Textures_1D >> 1) * (Number_of_Textures_1D + 1)))); // echo out 读取到了第Texture_Ptr个texture
+                printf("\r%3d/%3d (%1.2f%%) textures loaded from disk...", Texture_Ptr + 1, nTextures, 100.0 * (f64)((f32)(Texture_Ptr + 1) / (f32)((Number_of_Textures_1D >> 1) * (Number_of_Textures_1D + 1)))); // Progress: texture index Texture_Ptr loaded
                 fflush(stdout);
 
-                AddTextureBufferToQueue(Texture_Buffer_Queue, (texture_buffer *)loadedTexture);  // texture_buffer_queue 是全部的读取任务队列，读取后的buffer重新添加到队列中，供下一次读取。解决了从队列中弹出任务后任务队列空了的疑问。读取文件的任务队列在别的地方还会被调用吗？
-                FenceIn(Current_Loaded_Texture = 0); // 将临时变量置空，重新读取到current_loaded_texture后会跳出上面的循环
-                __atomic_fetch_add(&Texture_Ptr, 1, 0); // 更新全局的 texture_ptr 
+                AddTextureBufferToQueue(Texture_Buffer_Queue, (texture_buffer *)loadedTexture);  // Return the buffer to the read queue for reuse (avoids an empty queue after pop). texture_buffer_queue holds all read tasks.
+                FenceIn(Current_Loaded_Texture = 0); // set the temporary variable to empty, and jump out of the loop after reading the current_loaded_texture
+                __atomic_fetch_add(&Texture_Ptr, 1, 0); // Bump global Texture_Ptr
                 ptr ++ ;
             }
         }
 
         printf("\n");
-        CloseTextureBufferQueueFiles(Texture_Buffer_Queue); // 关闭所有的buffer_texture中的文件流指针file，并且释放解压器内存
-        delete[] packedTextureIndexes; // packedTextureIndexes 返回  
-        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);  // 给之前已经压入的GL_TEXTURE_2D_ARRAY解除绑定
+        CloseTextureBufferQueueFiles(Texture_Buffer_Queue); // close the file stream pointer file in buffer_texture, and release the decompressor memory
+        delete[] packedTextureIndexes; // free the memory of packedTextureIndexes
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);  // unbind the previously bound GL_TEXTURE_2D_ARRAY
     }
 
     
@@ -7743,43 +8434,43 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
 
     }
 
-    // Texture Pixel Lookups  texture像素查找
+    // Texture pixel lookups
     {   
         GLuint pixStart, pixStartTex, pixRearrage, pixRearrageTex;
        
         u32 nTex = (Number_of_Textures_1D + 1) * (Number_of_Textures_1D >> 1); // (32 + 1) * 32 / 2 = 528 
         u32 nPix1D = Number_of_Textures_1D * Texture_Resolution; // 32 * 1024 
 
-        glActiveTexture(GL_TEXTURE2);  // 调用 glActiveTexture 函数，可以选择当前活动的纹理单元，并且后续的纹理操作都会影响到该纹理单元
+        glActiveTexture(GL_TEXTURE2);  // call glActiveTexture function, to select the current active texture unit, and subsequent texture operations will affect the texture unit
 
-        u32 *pixStartLookup = PushArrayP(arena, u32, 2 * nTex); // 申请空间 2 * 528 个 u32
+        u32 *pixStartLookup = PushArrayP(arena, u32, 2 * nTex); // allocate memory for 2 * 528 u32
         u32 ptr = 0;
-        for (u32 i = 0; i < Number_of_Textures_1D; i ++ ) // 遍历每一个texture
+        for (u32 i = 0; i < Number_of_Textures_1D; i ++ ) //   traverse each texture
         {
             for (u32 j = i ; j < Number_of_Textures_1D; j ++ ) 
             {
-                pixStartLookup[ptr++] = (u32)(j * Texture_Resolution); // 列 * 1024   双数索引是列，单数是行
-                pixStartLookup[ptr++] = (u32)(i * Texture_Resolution);            // 行 * 1024
+                pixStartLookup[ptr++] = (u32)(j * Texture_Resolution); // column * 1024   even index is column, odd index is row
+                pixStartLookup[ptr++] = (u32)(i * Texture_Resolution);            // row * 1024
             }
         }
 
-        glGenBuffers(1, &pixStart); // 生成一个缓冲区对象，并将其标识符存储到 pixStart 变量中。这样，pixStart 变量就可以用于引用这个生成的缓冲区对象
-        glBindBuffer(GL_TEXTURE_BUFFER, pixStart); // 缓冲区对象 pixStart 就会被绑定到当前的纹理缓冲区上，后续的操作会影响这个缓冲区对象
-        glBufferData(GL_TEXTURE_BUFFER, sizeof(u32) * 2 * nTex, pixStartLookup, GL_STATIC_DRAW);  // 将数据从 pixStartLookup 指向的内存区域拷贝到绑定到 GL_TEXTURE_BUFFER 目标的缓冲区对象中，大小为 sizeof(u32) * 2 * nTex 字节，并且告诉 OpenGL 这些数据是静态的，不会频繁地变化
+        glGenBuffers(1, &pixStart); // generate a buffer object, and store the identifier in pixStart variable. so that pixStart variable can be used to reference this generated buffer object
+        glBindBuffer(GL_TEXTURE_BUFFER, pixStart); // bind the buffer object pixStart to the current texture buffer
+        glBufferData(GL_TEXTURE_BUFFER, sizeof(u32) * 2 * nTex, pixStartLookup, GL_STATIC_DRAW);  // copy the data from pixStartLookup to the buffer object, and tell OpenGL that the data is static and will not change frequently
 
-        glGenTextures(1, &pixStartTex);  // 生成一个纹理对象，并将其标识符存储到 pixStartTex 变量中
-        glBindTexture(GL_TEXTURE_BUFFER, pixStartTex); // 纹理对象 pixStartTex 就会被绑定到当前的纹理缓冲区上，后续的纹理操作（比如使用 glTexBuffer 函数将其与纹理缓冲区对象关联）将会影响到这个纹理对象
-        glTexBuffer(  // 纹理缓冲区对象与缓冲区对象关联的函数
-            GL_TEXTURE_BUFFER,  // 要关联到缓冲区的纹理目标，这里是 GL_TEXTURE_BUFFER，表示纹理缓冲区。
-            GL_RG32UI,     // 纹理缓冲区数据的格式， GL_RG32UI表示每个像素由两个u32组成，一个红色分量和一个绿色分量
-            pixStart);  //  缓冲区对象的标识符，这个缓冲区会与纹理缓冲区关联
+        glGenTextures(1, &pixStartTex);  // generate a texture object, and store the identifier in pixStartTex variable
+        glBindTexture(GL_TEXTURE_BUFFER, pixStartTex); // bind the texture object pixStartTex to the current texture buffer
+        glTexBuffer(  // texture buffer object and buffer object associated function
+            GL_TEXTURE_BUFFER,  // the texture target to associate with the buffer, here is GL_TEXTURE_BUFFER, which means texture buffer
+            GL_RG32UI,     // the format of the texture buffer data, GL_RG32UI means each pixel is represented by two u32, one for red component and one for green component
+            pixStart);  //  buffer object identifier, this buffer will be associated with the texture buffer
 
-        Contact_Matrix->pixelStartLookupBuffer = pixStart;       // 缓冲区对象标识符 
-        Contact_Matrix->pixelStartLookupBufferTex = pixStartTex; // 纹理对象标识符
+        Contact_Matrix->pixelStartLookupBuffer = pixStart;       // buffer object identifier 
+        Contact_Matrix->pixelStartLookupBufferTex = pixStartTex; // texture object identifier
 
-        FreeLastPushP(arena); // pixStartLookup  释放存放像素点开始的空间
+        FreeLastPushP(arena); // pixStartLookup: free arena allocation for pixel start lookup
 
-        glActiveTexture(GL_TEXTURE3); // 激活第三个texture，以下代码会影响第三个texture
+        glActiveTexture(GL_TEXTURE3); // shader samples pixrearrangelookup from texture unit 3
 
         u32 *pixRearrageLookup = PushArrayP(arena, u32, nPix1D); // allocte 1024 * 32 u32 memory
         for (u32 i = 0 ; i < nPix1D; i ++ )
@@ -7795,16 +8486,16 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         glBindTexture(GL_TEXTURE_BUFFER, pixRearrageTex);
         glTexBuffer(GL_TEXTURE_BUFFER, GL_R32UI, pixRearrage);
 
-        Contact_Matrix->pixelRearrangmentLookupBuffer = pixRearrage; // 32 * 1024 u32, this is a ascending order of 0 to 1024 * 32
-        Contact_Matrix->pixelRearrangmentLookupBufferTex = pixRearrageTex; // texture 的索引
+        Contact_Matrix->pixelRearrangmentLookupBuffer = pixRearrage; // 32 * 1024 u32, this is a ascending order of 0 to 1024 * 32-1
+        Contact_Matrix->pixelRearrangmentLookupBufferTex = pixRearrageTex; // texture index
 
         FreeLastPushP(arena); // free pixRearrageLookup as it has already been copied to the buffer object with index pixRearrage
 
-        glUniform1ui(glGetUniformLocation(Contact_Matrix->shaderProgram, "pixpertex"), Texture_Resolution); // 将1024传递给 pixpertex，每个texture有多少个像素点
-        glUniform1f(glGetUniformLocation(Contact_Matrix->shaderProgram, "oopixpertex"), 1.0f / (f32)Texture_Resolution); // 将 1 / 1024 传递给 oopixpertex 
-        glUniform1ui(glGetUniformLocation(Contact_Matrix->shaderProgram, "ntex1dm1"), Number_of_Textures_1D - 1); // 将31传递给 ntex1dm1 
+        glUniform1ui(glGetUniformLocation(Contact_Matrix->shaderProgram, "pixpertex"), Texture_Resolution); // pixpertex: pixels per texture edge (e.g. 1024)
+        glUniform1f(glGetUniformLocation(Contact_Matrix->shaderProgram, "oopixpertex"), 1.0f / (f32)Texture_Resolution); // oopixpertex: reciprocal of pixels per texture
+        glUniform1ui(glGetUniformLocation(Contact_Matrix->shaderProgram, "ntex1dm1"), Number_of_Textures_1D - 1); // ntex1dm1: Number_of_Textures_1D - 1 (e.g. 31)
 
-        glActiveTexture(GL_TEXTURE0); //  关闭激活的texture 3
+        glActiveTexture(GL_TEXTURE0); //  unbind the previously bound texture 3
     }
 
     GLuint posAttribFlatShader = (GLuint)glGetAttribLocation(Flat_Shader->shaderProgram, "position");
@@ -7911,12 +8602,12 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         }
     }
 
-    // 为添加的功能初始化指针
+    // Initialize pointers for the added features
     {
-        // 给pixel_density_extension分配内存
+        // Allocate pixel_density_extension (commented out)
         // pixel_density_extension = new Extension_Graph_Data(Number_of_Pixels_1D);
         
-        // 为 copy textures to cpu 分配内存
+        // Allocate copy-textures-to-CPU storage
         if (textures_array_ptr) delete textures_array_ptr;
         textures_array_ptr = new TexturesArray4AI(
             Number_of_Textures_1D, 
@@ -7933,7 +8624,7 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         ); 
         restore_settings_after_copy(original_color_control_points);
 
-        // 为 Pixel Cut 存储的数据分配空间，初始化，并且将数据push到extension中
+        // Allocate and initialize Pixel Cut data, then register with extensions
         if (frag_cut_cal_ptr) delete frag_cut_cal_ptr;
         frag_cut_cal_ptr = new FragCutCal(
             textures_array_ptr,
@@ -7943,10 +8634,10 @@ LoadFile(const char *filePath, memory_arena *arena, char **fileName, u64 *header
         // clear mem for textures
         textures_array_ptr->clear_textures();
         
-        // 添加数据到extensions
+        // Push graph data into extensions
         std::string graph_name = "pixel_discontinuity";
         bool is_pix_density_added = Extensions.is_graph_name_exist(graph_name);
-        if (!is_pix_density_added) // 未添加pixel density
+        if (!is_pix_density_added) // pixel density not added
         {
             u32 added_num = Extensions.get_num_extensions();
             u32* graph_data = new u32[Number_of_Pixels_1D];
@@ -8179,7 +8870,6 @@ Setup()
         Contig_Name_Labels->on = 0;
         Contig_Name_Labels->fg = Yellow_Text_Float;
         Contig_Name_Labels->bg = Grey_Background;
-#define DefaultNameLabelTextSize 32.0f
         Contig_Name_Labels->size = DefaultNameLabelTextSize;
     }
     
@@ -8189,7 +8879,6 @@ Setup()
         Scale_Bars->on = 0;
         Scale_Bars->fg = Red_Text_Float;
         Scale_Bars->bg = Grey_Background;
-#define DefaultScaleBarSize 20.0f
         Scale_Bars->size = DefaultScaleBarSize;
     }
    
@@ -8198,7 +8887,6 @@ Setup()
         Grid = PushStruct(Working_Set, ui_colour_element);
         Grid->on = 1;
         Grid->bg = Grey_Background;
-#define DefaultGridSize 0.00025f
         Grid->size = DefaultGridSize;
     }
 
@@ -8206,7 +8894,6 @@ Setup()
     {
         Contig_Ids = PushStruct(Working_Set, ui_colour_element);
         Contig_Ids->on = 1;
-#define DefaultContigIdSize (DefaultGridSize * 3.0f)
         Contig_Ids->size = DefaultContigIdSize;
     }
 
@@ -8216,7 +8903,6 @@ Setup()
         Tool_Tip->on = 1;
         Tool_Tip->fg = Yellow_Text_Float;
         Tool_Tip->bg = Grey_Background;
-#define DefaultToolTipTextSize 20.0f
         Tool_Tip->size = DefaultToolTipTextSize;
     }
 
@@ -8458,7 +9144,6 @@ Setup()
 
     // Nuklear Setup
     {
-#define NK_Memory_Size MegaByte(32)
         NK_Device = PushStruct(Working_Set, device);
         u08 *nkCmdMemory = PushArray(Working_Set, u08, NK_Memory_Size);
         nk_buffer_init_fixed(&NK_Device->cmds, (void *)nkCmdMemory, NK_Memory_Size);
@@ -8843,8 +9528,9 @@ global_function
 u08
 BreakMap(
     const int& loc, 
-    const u32& ignore_len  // Contigs whose length from the cut point to the beginning
-                           // or end is less than ignore_len will not be cut.
+    const u32& ignore_len,  // Contigs whose length from the cut point to the beginning
+                            // or end is less than ignore_len will not be cut.
+    bool verbose
 )
 {   
     if (loc < 0 || loc >= (int)Number_of_Pixels_1D)
@@ -8912,14 +9598,17 @@ BreakMap(
         Map_State->originalContigIds[tmp] += Number_of_Original_Contigs;
     }
 
-    fmt::print(
-        "[Pixel Cut] original_contig_id={} map_contig_id={} fragment_pixel_range=[{}, {}] {} cut_at_pixel={}\n",
-        original_contig_id,
-        contig_id,
-        ptr_left,
-        ptr_right,
-        inversed ? "inverted" : "not inverted",
-        loc);
+    if (verbose)
+    {
+        fmt::print(
+            "[Pixel Cut] original_contig_id={} map_contig_id={} fragment_pixel_range=[{}, {}] {} cut_at_pixel={}\n",
+            original_contig_id,
+            contig_id,
+            ptr_left,
+            ptr_right,
+            inversed ? "inverted" : "not inverted",
+            loc);
+    }
 
     return 1; 
 
@@ -9018,7 +9707,7 @@ void run_ai_detection()
     std::cout << "Running AI detection..." << std::endl;
     int status = std::system("/Users/sg35/miniconda3/envs/auto_cut/bin/python /Users/sg35/PretextView/python/autoCut/auto_cut.py");  
 
-    // 检查命令执行状态
+    // Check subprocess exit status
     if (status == 0) {
         std::cout << "Command successful!" << std::endl;
     } else {
@@ -9026,9 +9715,46 @@ void run_ai_detection()
     }
 }
 
-void cut_frags(const std::vector<int>& problem_locs, bool consider_gap_extension_flag=true, bool consider_min_len_flag=true)
+// After BreakMap has marked the cut in originalContigIds, give the right-hand
+// piece its own contig id so the next BreakMap stops at this boundary.
+// Avoids rebuilding every contig from the full pixel array after each cut.
+static bool
+split_contig_ids_after_break(int loc, u32& next_contig_id)
+{
+    if (!Contigs || !Map_State || loc < 0 || (u32)loc >= Number_of_Pixels_1D)
+        return false;
+    if (next_contig_id >= Contigs->contigs_arr_capacity)
+        return false;
+
+    const u32 contig_id = Map_State->contigIds[loc];
+    const u08 inversed = IsContigInverted(contig_id);
+    s32 ptr_right = loc;
+    while (
+        ptr_right < (int)Number_of_Pixels_1D - 1 &&
+        Map_State->contigIds[ptr_right] == contig_id &&
+        (Map_State->contigRelCoords[ptr_right] == Map_State->contigRelCoords[ptr_right + 1] + (inversed ? +1 : -1)))
+    {
+        ++ptr_right;
+    }
+    if (ptr_right <= loc)
+        return false;
+
+    const u32 new_id = next_contig_id++;
+    if (inversed)
+        Contigs->contigInvertFlags[new_id >> 3] |= (1 << (new_id & 7));
+    else
+        Contigs->contigInvertFlags[new_id >> 3] &= ~(1 << (new_id & 7));
+
+    for (s32 p = loc + 1; p <= ptr_right; ++p)
+        Map_State->contigIds[(u32)p] = new_id;
+    return true;
+}
+
+void cut_frags(const std::vector<int>& problem_locs, bool consider_gap_extension_flag=true, bool consider_min_len_flag=true, bool rebuild_each_cut=true)
 {   
     const u32* gap_data_ptr = (auto_curation_state.auto_cut_with_extension && consider_gap_extension_flag) ? Extensions.get_graph_data_ptr(EXT_NAME_GAP):nullptr; 
+    u32 next_contig_id = Contigs ? Contigs->numberOfContigs : 0;
+    u32 n_applied = 0;
 
     for (auto & loc_orig : problem_locs)
     {   
@@ -9063,10 +9789,27 @@ void cut_frags(const std::vector<int>& problem_locs, bool consider_gap_extension
             }
         }
         // cut the fragment
-        BreakMap(
+        if (BreakMap(
             loc,   // cut loc
-            consider_min_len_flag ? auto_curation_state.auto_cut_smallest_frag_size_in_pixel:1); // ignore length
+            consider_min_len_flag ? auto_curation_state.auto_cut_smallest_frag_size_in_pixel:1,
+            rebuild_each_cut))
+        {
+            ++n_applied;
+            if (rebuild_each_cut)
+            {
+                UpdateContigsFromMapState();
+            }
+            else if (!split_contig_ids_after_break(loc, next_contig_id))
+            {
+                UpdateContigsFromMapState();
+                next_contig_id = Contigs ? Contigs->numberOfContigs : next_contig_id;
+            }
+        }
+    }
+    if (!rebuild_each_cut)
+    {
         UpdateContigsFromMapState();
+        fmt::print("[Pixel Cut] applied {} cut(s)\n", n_applied);
     }
     Redisplay = 1;
 }
@@ -9260,7 +10003,7 @@ auto_cut_func(
             return ;
         }
         fmt::print(stdout, "[Pixel cut] restoring the cutted frags within the selected area: [{}, {}]\n", start, end);
-        Map_State->restore_cutted_contigs( start, end );
+        Map_State->restore_cutted_contigs( start, end, Number_of_Original_Contigs );
         UpdateContigsFromMapState();
         Redisplay = 1;
         return ;
@@ -9613,7 +10356,7 @@ void setContactMatrixVertexArray(
     GLuint texAttrib = (GLuint)glGetAttribLocation(Contact_Matrix_->shaderProgram, "texcoord");
     
     /*
-    从左上到右下开始遍历，见上述编号
+    Traverse from top-left to bottom-right; see symmetric indexing below.
     */
     f32 x = -0.5f;
     f32 y = 0.5f;
@@ -9633,17 +10376,17 @@ void setContactMatrixVertexArray(
         {
             tex_vertex textureVertices[4];
 
-            glGenVertexArrays( // 生成对象的名称， 
-                1,                            // 生成的个数
-                Contact_Matrix_->vaos + ptr);  // 存储位置的指针
-            glBindVertexArray(Contact_Matrix_->vaos[ptr]);  // 绑定顶点名称
+            glGenVertexArrays( // Generate vertex array object name(s)
+                1,                            // Count
+                Contact_Matrix_->vaos + ptr);  // Storage for generated name(s)
+            glBindVertexArray(Contact_Matrix_->vaos[ptr]);  // Bind VAO
 
-            f32 *cornerCoords = allCornerCoords[index2 >= index ? 0 : 1]; // 包含对角线的上三角的时候取第一行{0, 1}，否则取第二行{1, 0}  为了解决关于对角线对称
+            f32 *cornerCoords = allCornerCoords[index2 >= index ? 0 : 1]; // Upper triangle (incl. diagonal): row {0,1}; else {1,0} for diagonal symmetry
             
             u32 min = my_Min(index, index2);
             u32 max = my_Max(index, index2);
             /*
-                对称性编号
+                Symmetric linear index (example n=10)
                 [[ 0  1  2  3  4  5  6  7  8  9]
                     [ 1 10 11 12 13 14 15 16 17 18]
                     [ 2 11 19 20 21 22 23 24 25 26]
@@ -9666,8 +10409,8 @@ void setContactMatrixVertexArray(
             f32 half_len = 1.0f;
             textureVertices[0].x = !copy_flag? x               : -half_len;   // x -> [-0.5, 0.5]
             textureVertices[0].y = !copy_flag? y - quadSize    : -half_len;   // y -> [-0.5, 0.5]
-            textureVertices[0].s = !copy_flag? cornerCoords[0] :  0.f; // s表示texture的水平分量
-            textureVertices[0].t = !copy_flag? cornerCoords[1] :  0.f; // t表示texture的垂直分量
+            textureVertices[0].s = !copy_flag? cornerCoords[0] :  0.f; // s: horizontal texture coordinate
+            textureVertices[0].t = !copy_flag? cornerCoords[1] :  0.f; // t: vertical texture coordinate
             textureVertices[0].u = texture_index_symmetric;
 
             textureVertices[1].x = !copy_flag? x + quadSize    :  half_len;   
@@ -9688,35 +10431,35 @@ void setContactMatrixVertexArray(
             textureVertices[3].t = !copy_flag? 0.0f            :  1.f;
             textureVertices[3].u = texture_index_symmetric;
 
-            glGenBuffers(                    // 生成buffer的名字 存储在contact_matrix->vbos+ptr 对应的地址上
-                1,                           // 个数
-                Contact_Matrix_->vbos + ptr); // 指针，存储生成的名字  
-            glBindBuffer(                    // 绑定到一个已经命名的buffer对象上
-                GL_ARRAY_BUFFER,             // 绑定的对象，gl_array_buffer 一般是绑定顶点的信息
-                Contact_Matrix_->vbos[ptr]);  // 通过输入buffer的名字将其绑定到gl_array_buffer
-            glBufferData(                    // 创建、初始化存储数据的buffer
-                GL_ARRAY_BUFFER,             // 绑定的对象，gl_array_buffer 一般是绑定顶点的信息
-                4 * sizeof(tex_vertex),      // 对象的大小（bytes）
-                textureVertices,             // 即将绑定到gl_array_buffer的数据的指针
-                GL_STATIC_DRAW);             // 绑定后的数据是用于干什么的
+            glGenBuffers(                    // Generate buffer name; store at Contact_Matrix_->vbos + ptr
+                1,                           // Count
+                Contact_Matrix_->vbos + ptr); // Output: generated buffer name
+            glBindBuffer(                    // Bind named buffer object
+                GL_ARRAY_BUFFER,             // Target: vertex attribute data
+                Contact_Matrix_->vbos[ptr]);  // Buffer to bind to GL_ARRAY_BUFFER
+            glBufferData(                    // Create and fill buffer storage
+                GL_ARRAY_BUFFER,             // Target: vertex attribute data
+                4 * sizeof(tex_vertex),      // Size in bytes
+                textureVertices,             // Source data
+                GL_STATIC_DRAW);             // Usage hint: static draw
             
             // tell GL how to interpret the data in the GL_ARRAY_BUFFER
             glEnableVertexAttribArray(posAttrib); 
-            glVertexAttribPointer(           // 定义一个数组存储所有的通用顶点属性
-                posAttrib,                   // 即将修改属性的索引
-                2,                           // 定义每个属性的参数的个数， 只能为1 2 3 4中的一个，初始值为4
-                GL_FLOAT,                    // 定义该属性的数据类型，则数据为4个字节， 占用两个的话，则一共为8字节
-                GL_FALSE,                    // normalized， 是否要在取用的时候规范化这些数
-                sizeof(tex_vertex),          // stride  定义从一个信息的指针下一个信息指针的bytes的间隔， 一个信息包到下一个信息包的长度
-                0);                          // const void* 指定当前与 GL_ARRAY_BUFFER 绑定的缓冲区数据头指针偏移多少个到 第一个通用顶点属性的第一个特征开始的位置。 初始值为 0。因为此处想要读取的信息为 x 和 y
+            glVertexAttribPointer(           // Describe generic vertex attribute layout
+                posAttrib,                   // Attribute index to configure
+                2,                           // Components per attribute (1–4)
+                GL_FLOAT,                    // Component type
+                GL_FALSE,                    // Normalized (GL_FALSE = no)
+                sizeof(tex_vertex),          // Stride between consecutive vertices
+                0);                          // Offset to first x,y (0: read position from start of tex_vertex)
             glEnableVertexAttribArray(texAttrib); // 
             glVertexAttribPointer(
                 texAttrib, 
                 3, 
-                GL_FLOAT,   // 定义每个属性的数据类型
+                GL_FLOAT,   // Component type
                 GL_FALSE,   // GL_FALSE, GL_TRUE
                 sizeof(tex_vertex), 
-                (void *)(3 * sizeof(GLfloat))); // 偏移量为3，因为前三个为x, y and pad, 想要读取的数据为 s, t and u
+                (void *)(3 * sizeof(GLfloat))); // Offset 3 floats: after x, y, pad; read s, t, u
 
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, Quad_EBO);
 
@@ -9737,7 +10480,7 @@ prepare_before_copy(f32 *original_color_control_points)
     // prepare before reading textures
     glActiveTexture(GL_TEXTURE1);
 
-    glBindTexture(GL_TEXTURE_BUFFER, Color_Maps->maps[Color_Maps->nMaps-1]); // 绑定到颜色映射的最后一个颜色
+    glBindTexture(GL_TEXTURE_BUFFER, Color_Maps->maps[Color_Maps->nMaps-1]); // Bind the last color-map texture
     glActiveTexture(GL_TEXTURE0);
     for (u32 i = 0; i < 3 ; i ++ ) 
         original_color_control_points[i] = Color_Maps->controlPoints[i];
@@ -10050,9 +10793,184 @@ GatheringTextInput = 0;
 
 global_function
 void
+BeginEditSession(void)
+{
+    if (Map_Editor)
+    {
+        Edit_Pixels.editSessionBaselineEdits = Map_Editor->nEdits;
+    }
+    else
+    {
+        Edit_Pixels.editSessionBaselineEdits = 0;
+    }
+
+    Global_Edit_Invert_Flag = 0;
+    Edit_Session_NetDelta = 0;
+}
+
+global_function
+void
+ToggleEditSelectionInvert(void)
+{
+    if (!Edit_Pixels.editing)
+    {
+        return;
+    }
+
+    InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+    Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
+    Redisplay = 1;
+}
+
+global_function
+void
+CancelActiveEditSession(GLFWwindow *window)
+{
+    if (!Edit_Pixels.editing || !Map_Editor)
+    {
+        return;
+    }
+
+    if (Global_Edit_Invert_Flag)
+    {
+        InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
+        Global_Edit_Invert_Flag = 0;
+    }
+
+    if (Edit_Session_NetDelta)
+    {
+        RearrangeMap(
+            Edit_Pixels.pixels.x,
+            Edit_Pixels.pixels.y,
+            -Edit_Session_NetDelta,
+            Edit_Pixels.snap,
+            false);
+        Edit_Session_NetDelta = 0;
+    }
+
+    Edit_Pixels.editing = 0;
+    Edit_Pixels.selecting = 0;
+
+    while (Map_Editor->nEdits > Edit_Pixels.editSessionBaselineEdits)
+    {
+        UndoMapEdit();
+    }
+
+    UpdateContigsFromMapState();
+    UpdateScaffolds();
+    Redisplay = 1;
+
+    f64 mx, my;
+    glfwGetCursorPos(window, &mx, &my);
+    MouseMove(window, mx, my);
+}
+
+global_function
+u08
+FindPaintedScaffoldRangeAtPixel(u32 pixel, u32 *rangeStart, u32 *rangeEnd)
+{
+    if (!Map_State || !rangeStart || !rangeEnd || pixel >= Number_of_Pixels_1D)
+    {
+        return(0);
+    }
+
+    u32 scaffId = Map_State->scaffIds[pixel];
+    if (!scaffId)
+    {
+        return(0);
+    }
+
+    u32 start = pixel;
+    while (start > 0 && Map_State->scaffIds[start - 1] == scaffId)
+    {
+        --start;
+    }
+
+    u32 end = pixel;
+    while (end < (Number_of_Pixels_1D - 1) && Map_State->scaffIds[end + 1] == scaffId)
+    {
+        ++end;
+    }
+
+    *rangeStart = start;
+    *rangeEnd = end;
+    return(1);
+}
+
+global_function
+u08
+PickupPaintedScaffoldBlock(GLFWwindow *window)
+{
+    if (!Map_State || !File_Loaded)
+    {
+        return(0);
+    }
+
+    u32 pixel = Edit_Pixels.pixels.x;
+    u32 rangeStart = 0;
+    u32 rangeEnd = 0;
+    if (!FindPaintedScaffoldRangeAtPixel(pixel, &rangeStart, &rangeEnd))
+    {
+        return(0);
+    }
+
+    BeginEditSession();
+
+    Edit_Pixels.pixels.x = rangeEnd;
+    Edit_Pixels.pixels.y = rangeStart;
+    Edit_Pixels.worldCoords.x = (f32)(((f64)((2 * rangeEnd) + 1)) / ((f64)(2 * Number_of_Pixels_1D))) - 0.5f;
+    Edit_Pixels.worldCoords.y = (f32)(((f64)((2 * rangeStart) + 1)) / ((f64)(2 * Number_of_Pixels_1D))) - 0.5f;
+    Edit_Pixels.editing = 1;
+    Edit_Pixels.selecting = 0;
+    Edit_Pixels.tabSelecting = 0;
+    Edit_Pixels.tabSelectedRanges.clear();
+
+    f64 mx, my;
+    glfwGetCursorPos(window, &mx, &my);
+    MouseMove(window, mx, my);
+    Redisplay = 1;
+    return(1);
+}
+
+global_function
+u32
+GetHoverMapPixel(GLFWwindow *window)
+{
+    if (Edit_Mode)
+    {
+        return Edit_Pixels.pixels.x;
+    }
+
+    f64 x, y;
+    glfwGetCursorPos(window, &x, &y);
+
+    s32 w, h;
+    glfwGetWindowSize(window, &w, &h);
+    f32 height = (f32)h;
+    f32 width = (f32)w;
+
+    f32 factor1 = 1.0f / (2.0f * Camera_Position.z);
+    f32 factor2 = 2.0f / height;
+    f32 factor3 = width * 0.5f;
+
+    f32 wx = (factor1 * factor2 * ((f32)x - factor3)) + Camera_Position.x;
+    f32 wy = (-factor1 * (1.0f - (factor2 * (f32)y))) - Camera_Position.y;
+
+    wx = my_Max(-0.5f, my_Min(0.5f, wx));
+    wy = my_Max(-0.5f, my_Min(0.5f, wy));
+
+    u32 nPixels = Number_of_Pixels_1D;
+    u32 pixel = (u32)((f64)nPixels * (0.5 + (f64)wx));
+    return my_Min(pixel, nPixels ? nPixels - 1 : 0);
+}
+
+global_function
+void
 ConsolidateTabSelections(GLFWwindow* window)
 {
     u32 nPixels = Number_of_Pixels_1D;
+
+    BeginEditSession();
 
     // Sort by start position (ascending)
     std::sort(Edit_Pixels.tabSelectedRanges.begin(), Edit_Pixels.tabSelectedRanges.end(),
@@ -10139,6 +11057,9 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
             (void)scancode;
 #endif
 
+            // Y and U toggle the alg track on the map. Do not handle them while the
+            // GUI is open: file and sequence search fields need those letters, and
+            // the shortcut was closing the dialog.
             if (key == GLFW_KEY_ENTER && mods == GLFW_MOD_ALT)
             {
                 if (glfwGetWindowMonitor(window))
@@ -10356,7 +11277,15 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                 case GLFW_KEY_Q:
                     if (Edit_Mode || Select_Sort_Area_Mode)
                     {
-                        UndoMapEdit();
+                        if (Edit_Mode && Edit_Pixels.editing)
+                        {
+                            CancelActiveEditSession(window);
+                        }
+                        else
+                        {
+                            UndoMapEdit();
+                            Redisplay = 1;
+                        }
                     }
                     else
                     {
@@ -10410,6 +11339,13 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     else
                     {
                         keyPressed = ToggleScaffMode(window);
+                    }
+                    break;
+
+                case GLFW_KEY_U:
+                    if (action == GLFW_PRESS)
+                    {
+                        ToggleAlgTrack();
                     }
                     break;
 
@@ -10532,6 +11468,10 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     break;
 
                 case GLFW_KEY_Y:
+                    if (action == GLFW_PRESS)
+                    {
+                        CycleLinkageGroup();
+                    }
                     break;
 
                 case GLFW_KEY_Z:
@@ -10542,6 +11482,27 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     break;
 
                 case GLFW_KEY_TAB:
+                    if ((Normal_Mode || Edit_Mode || Scaff_Edit_Mode) &&
+                        !Edit_Pixels.editing && action == GLFW_PRESS && File_Loaded && Map_State)
+                    {
+                        f64 mx, my;
+                        glfwGetCursorPos(window, &mx, &my);
+                        MouseMove(window, mx, my);
+
+                        u32 hoverPixel = GetHoverMapPixel(window);
+                        if (Map_State->scaffIds[hoverPixel])
+                        {
+                            if (!Edit_Mode)
+                            {
+                                Global_Mode = mode_edit;
+                                MouseMove(window, mx, my);
+                            }
+                            if (PickupPaintedScaffoldBlock(window))
+                            {
+                                break;
+                            }
+                        }
+                    }
                     if (Edit_Mode && !Edit_Pixels.editing && action == GLFW_PRESS)
                     {
                         u32 pixel = Edit_Pixels.pixels.x;
@@ -10596,15 +11557,18 @@ KeyBoard(GLFWwindow* window, s32 key, s32 scancode, s32 action, s32 mods)
                     else if (Edit_Mode && Edit_Pixels.selecting && action == GLFW_RELEASE)
                     {
                         Edit_Pixels.selecting = 0;
-                        if (!Edit_Pixels.editing) Edit_Pixels.editing = 1;
+                        if (!Edit_Pixels.editing)
+                        {
+                            BeginEditSession();
+                            Edit_Pixels.editing = 1;
+                        }
                         f64 x, y;
                         glfwGetCursorPos(window, &x, &y);
                         MouseMove(window, x, y);
                     }
                     else if (Edit_Mode && Edit_Pixels.editing && action == GLFW_PRESS)
                     {
-                        InvertMap(Edit_Pixels.pixels.x, Edit_Pixels.pixels.y);
-                        Global_Edit_Invert_Flag = !Global_Edit_Invert_Flag;
+                        ToggleEditSelectionInvert();
                     }
                     else if (Waypoint_Edit_Mode && Selected_Waypoint && action == GLFW_PRESS)
                     {
@@ -10826,14 +11790,14 @@ UserProfileEditorRun(const char *name, struct file_browser *browser, struct nk_c
     struct nk_window *window = nk_window_find(ctx, name);
     u32 doesExist = window != 0;
 
-    if (!show && !doesExist) // 不显示 且 不存在
+    if (!show && !doesExist) // Not shown and window does not exist
     {
         return (0);
     }
 
-    if (show && doesExist && (window->flags & NK_WINDOW_HIDDEN))  // 显示 且 存在 且 隐藏
+    if (show && doesExist && (window->flags & NK_WINDOW_HIDDEN))  // Shown, exists, but hidden
     {
-        window->flags &= ~(nk_flags)NK_WINDOW_HIDDEN;  // 取消隐藏
+        window->flags &= ~(nk_flags)NK_WINDOW_HIDDEN;  // Clear hidden flag
         FileBrowserReloadDirectoryContent(browser, browser->directory);
     }
 
@@ -11241,7 +12205,7 @@ SetSaveStatePaths()
 
 global_variable
 u08
-SaveState_Magic[5] = {'p', 't', 's', 'x', 2};
+SaveState_Magic[5] = {'p', 't', 's', 'x', 3};
 
 global_variable
 u08
@@ -11251,12 +12215,36 @@ global_variable
 u08
 SaveState_Magic_Tail_Manual = 3;
 
+global_function
+u08
+ValidateSaveStateMagic(u08 *magicTest, u08 expectedTail)
+{
+    if (!magicTest ||
+        magicTest[0] != 'p' || magicTest[1] != 't' || magicTest[2] != 's' || magicTest[3] != 'x')
+    {
+        return(0);
+    }
+
+    u08 formatVersion = magicTest[4];
+    if (formatVersion < SaveState_Format_Version_Min || formatVersion > SaveState_Format_Version_Current)
+    {
+        return(0);
+    }
+
+    if (magicTest[5] != expectedTail)
+    {
+        return(0);
+    }
+
+    return(formatVersion);
+}
+
 /* 
-保存当前状态，
-    headerHash: 用于生成文件名的哈希值
-    path: 保存路径
-    overwrite: 是否覆盖
-    version: 版本号，用于控制生成文件的版本，兼容上一个版本
+save current state
+    headerHash: hash value used to generate the file name
+    path: path to the file
+    overwrite: whether to overwrite the file if it already exists
+    version: version number, used to control the version of the generated file, for compatibility with the previous version
 */
 global_function
 u08
@@ -11305,12 +12293,13 @@ SaveState(
             }
         }
         
-        // number of scaffs and metaFlags
-        u32 nScaffs = 0;
+        // Meta flags use contig view; scaffold painting is stored from per-pixel scaffIds (not contig scaffId).
+        EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+        UpdateContigsFromMapState();
+        u32 nScaffs = CountScaffoldPaintRunsOnMap();
         u32 nMetaFlags = 0;
         ForLoop(Contigs->numberOfContigs)
         {
-            if ((Contigs->contigs_arr + index)->scaffId) ++nScaffs;
             if (*(Contigs->contigs_arr + index)->metaDataFlags) ++nMetaFlags;
         }
         // number of meta tags
@@ -11326,7 +12315,7 @@ SaveState(
             }
         }
 
-        u32 nFileBytes = 352 + (13 * nWayp) + (12 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (8 * nScaffs) + sizeof(meta_mode_data) + sizeof(MetaData_Active_Tag) + 4 + (12 * nMetaFlags) + 1 + nMetaTags + totalMetaTagSpace;
+        u32 nFileBytes = 352 + (13 * nWayp) + (12 * nEdits) + ((nEdits + 7) >> 3) + (32 * nGraphPlots) + (SaveState_Scaff_Entry_Bytes_V3 * nScaffs) + sizeof(meta_mode_data) + sizeof(MetaData_Active_Tag) + 4 + (12 * nMetaFlags) + 1 + nMetaTags + totalMetaTagSpace;
         u08 *fileContents = PushArrayP(Loading_Arena, u08, nFileBytes);
         u08 *fileWriter = fileContents;
 
@@ -11539,26 +12528,42 @@ SaveState(
             fileWriter += (bytes_per_waypoint * nWayp);
         }
 
-        // scaffs
+        // scaffs (v3: consecutive pixel runs with the same non-zero Map_State->scaffIds value)
         {
             *fileWriter++ = ((u08 *)&nScaffs)[0];
             *fileWriter++ = ((u08 *)&nScaffs)[1];
             *fileWriter++ = ((u08 *)&nScaffs)[2];
             *fileWriter++ = ((u08 *)&nScaffs)[3];
-            ForLoop(Contigs->numberOfContigs)
+
+            u32 pixel = 0;
+            while (pixel < Number_of_Pixels_1D)
             {
-                if ((Contigs->contigs_arr + index)->scaffId)
+                u32 sId = Map_State->scaffIds[pixel];
+                if (!sId)
                 {
-                    u32 sId = (Contigs->contigs_arr + index)->scaffId;
-                    *fileWriter++ = ((u08 *)&index)[0];
-                    *fileWriter++ = ((u08 *)&index)[1];
-                    *fileWriter++ = ((u08 *)&index)[2];
-                    *fileWriter++ = ((u08 *)&index)[3];
-                    *fileWriter++ = ((u08 *)&sId)[0];
-                    *fileWriter++ = ((u08 *)&sId)[1];
-                    *fileWriter++ = ((u08 *)&sId)[2];
-                    *fileWriter++ = ((u08 *)&sId)[3];
+                    ++pixel;
+                    continue;
                 }
+
+                u32 rangeStart = pixel;
+                while (pixel < Number_of_Pixels_1D && Map_State->scaffIds[pixel] == sId)
+                {
+                    ++pixel;
+                }
+                u32 rangeEnd = pixel - 1;
+
+                *fileWriter++ = ((u08 *)&rangeStart)[0];
+                *fileWriter++ = ((u08 *)&rangeStart)[1];
+                *fileWriter++ = ((u08 *)&rangeStart)[2];
+                *fileWriter++ = ((u08 *)&rangeStart)[3];
+                *fileWriter++ = ((u08 *)&rangeEnd)[0];
+                *fileWriter++ = ((u08 *)&rangeEnd)[1];
+                *fileWriter++ = ((u08 *)&rangeEnd)[2];
+                *fileWriter++ = ((u08 *)&rangeEnd)[3];
+                *fileWriter++ = ((u08 *)&sId)[0];
+                *fileWriter++ = ((u08 *)&sId)[1];
+                *fileWriter++ = ((u08 *)&sId)[2];
+                *fileWriter++ = ((u08 *)&sId)[3];
             }
         }
 
@@ -11702,6 +12707,7 @@ LoadState(u64 headerHash, char *path)
     {
         FILE *file = 0;
         u08 fullLoad = 1;
+        u08 saveStateFormatVersion = 0;
         
         if (path) // load state file with a specific path
         {
@@ -11712,31 +12718,26 @@ LoadState(u64 headerHash, char *path)
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic))
+                    u08 formatVersion = ValidateSaveStateMagic(magicTest, SaveState_Magic_Tail_Manual);
+                    if (!formatVersion)
                     {
-                        if (SaveState_Magic[index] != magicTest[index])
-                        {
-                            fclose(file);
-                            file = 0;
-                            break;
-                        }
+                        fclose(file);
+                        file = 0;
                     }
-                    if (file)
+                    else
                     {
-                        if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Manual)
+                        saveStateFormatVersion = formatVersion;
+                        u64 hashTest;
+                        bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
+                        if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
                         {
+                            fprintf(stderr,
+                                "[LoadState::error]: Savestate header hash (%016llx) does not match open map (%016llx). "
+                                "Open the same .pretext file this state was saved from, then use Load State again.\n",
+                                (unsigned long long)hashTest,
+                                (unsigned long long)headerHash);
                             fclose(file);
                             file = 0;
-                        }
-                        else
-                        {
-                            u64 hashTest;
-                            bytesRead = (u32)fread(&hashTest, 1, sizeof(hashTest), file);
-                            if (!(bytesRead == sizeof(hashTest) && hashTest == headerHash))
-                            {
-                                fclose(file);
-                                file = 0;
-                            }
                         }
                     }
                 }
@@ -11766,22 +12767,15 @@ LoadState(u64 headerHash, char *path)
                 u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                 if (bytesRead == sizeof(magicTest))
                 {
-                    ForLoop(sizeof(SaveState_Magic))
+                    u08 formatVersion = ValidateSaveStateMagic(magicTest, SaveState_Magic_Tail_Auto);
+                    if (!formatVersion)
                     {
-                        if (SaveState_Magic[index] != magicTest[index])
-                        {
-                            fclose(file);
-                            file = 0;
-                            break;
-                        }
+                        fclose(file);
+                        file = 0;
                     }
-                    if (file)
+                    else
                     {
-                        if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Auto)
-                        {
-                            fclose(file);
-                            file = 0;
-                        }
+                        saveStateFormatVersion = formatVersion;
                     }
                 }
                 else
@@ -11818,22 +12812,15 @@ LoadState(u64 headerHash, char *path)
                             u32 bytesRead = (u32)fread(magicTest, 1, sizeof(magicTest), file);
                             if (bytesRead == sizeof(magicTest))
                             {
-                                ForLoop(sizeof(SaveState_Magic))
+                                u08 formatVersion = ValidateSaveStateMagic(magicTest, SaveState_Magic_Tail_Auto);
+                                if (!formatVersion)
                                 {
-                                    if (SaveState_Magic[index] != magicTest[index])
-                                    {
-                                        fclose(file);
-                                        file = 0;
-                                        break;
-                                    }
+                                    fclose(file);
+                                    file = 0;
                                 }
-                                if (file)
+                                else
                                 {
-                                    if (magicTest[sizeof(magicTest) - 1] != SaveState_Magic_Tail_Auto)
-                                    {
-                                        fclose(file);
-                                        file = 0;
-                                    }
+                                    saveStateFormatVersion = formatVersion;
                                 }
                             }
                             else
@@ -11998,6 +12985,10 @@ LoadState(u64 headerHash, char *path)
 
             if (fullLoad)
             {
+                // Saved curation can exceed initial fragment count (especially on high-res maps).
+                // Replay must not run UpdateContigsFromMapState() while contigs_arr is still header-sized.
+                EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+
                 // camera
                 {
                     ForLoop(12)
@@ -12009,61 +13000,103 @@ LoadState(u64 headerHash, char *path)
 
                 // edits
                 {
-                    u32 nEdits  = my_Min(Edits_Stack_Size, Map_Editor->nEdits);
-                    ForLoop(nEdits) UndoMapEdit();
+                    u32 nEdits = 0;
 
                     ForLoop(4) ((u08 *)&nEdits)[index] = *fileContents++;
                     nBytesRead += 4;
 
+                    if (nEdits > Edits_Stack_Size)
+                    {
+                        fmt::print(
+                            "[LoadState::warning]: Savestate lists {} edits; replaying first {} (Edits_Stack_Size).\n",
+                            nEdits,
+                            Edits_Stack_Size);
+                        nEdits = Edits_Stack_Size;
+                    }
+
                     u08 *contigFlags = fileContents + (12 * nEdits);
                     u32 nContigFlags = ((u32)nEdits + 7) >> 3;
 
-                    ForLoop(nEdits)
+                    u08 replayOk = PrepareMapForSaveStateEditReplay();
+
+                    if (replayOk)
                     {
-                        u32 x;
-                        u32 y;
-                        s32 d;
-
-                        ((u08 *)&x)[0] = *fileContents++;
-                        ((u08 *)&x)[1] = *fileContents++;
-                        ((u08 *)&x)[2] = *fileContents++;
-                        ((u08 *)&x)[3] = *fileContents++;
-                        ((u08 *)&y)[0] = *fileContents++;
-                        ((u08 *)&y)[1] = *fileContents++;
-                        ((u08 *)&y)[2] = *fileContents++;
-                        ((u08 *)&y)[3] = *fileContents++;
-                        ((u08 *)&d)[0] = *fileContents++;
-                        ((u08 *)&d)[1] = *fileContents++;
-                        ((u08 *)&d)[2] = *fileContents++;
-                        ((u08 *)&d)[3] = *fileContents++;
-
-                        if (d == Break_Edit_Delta)
+                        ForLoop(nEdits)
                         {
-                            if (x < Number_of_Pixels_1D && BreakMap((int)x, 1))
+                            u32 x;
+                            u32 y;
+                            s32 d;
+
+                            ((u08 *)&x)[0] = *fileContents++;
+                            ((u08 *)&x)[1] = *fileContents++;
+                            ((u08 *)&x)[2] = *fileContents++;
+                            ((u08 *)&x)[3] = *fileContents++;
+                            ((u08 *)&y)[0] = *fileContents++;
+                            ((u08 *)&y)[1] = *fileContents++;
+                            ((u08 *)&y)[2] = *fileContents++;
+                            ((u08 *)&y)[3] = *fileContents++;
+                            ((u08 *)&d)[0] = *fileContents++;
+                            ((u08 *)&d)[1] = *fileContents++;
+                            ((u08 *)&d)[2] = *fileContents++;
+                            ((u08 *)&d)[3] = *fileContents++;
+
+                            if (d == Break_Edit_Delta)
                             {
-                                AddBreakEdit(x);
-                                UpdateContigsFromMapState();
-                                UpdateScaffolds();
+                                if (x < Number_of_Pixels_1D && BreakMap((int)x, 1))
+                                {
+                                    AddBreakEdit(x);
+                                    UpdateContigsFromMapState();
+                                }
+                                continue;
                             }
-                            continue;
+
+                            u32 byte = (index + 1) >> 3;
+                            u32 bit = (index + 1) & 7;
+                            u32 invert = contigFlags[byte] & (1 << bit);
+
+                            pointui startPixels = {x, y};
+                            s32 delta = d;
+                            pointui finalPixels = {(u32)((s32)startPixels.x + delta), (u32)((s32)startPixels.y + delta)};
+
+                            if (startPixels.x >= Number_of_Pixels_1D || startPixels.y >= Number_of_Pixels_1D ||
+                                finalPixels.x >= Number_of_Pixels_1D || finalPixels.y >= Number_of_Pixels_1D)
+                            {
+                                continue;
+                            }
+
+                            // Match RedoMapEdit: keep contigIds in sync during replay (needed for breaks).
+                            RearrangeMap(startPixels.x, startPixels.y, delta, 0, true);
+                            if (invert)
+                            {
+                                InvertMap(finalPixels.x, finalPixels.y, true);
+                            }
+
+                            AddMapEdit(delta, finalPixels, invert);
                         }
 
-                        u32 byte = (index + 1) >> 3; // find the byte, 1 byte saves 8 invert_flag of edits
-                        u32 bit = (index + 1) & 7; // find the bit in the byte
-                        u32 invert  = contigFlags[byte] & (1 << bit);
+                        EnsureContigsArrayCapacity(Number_of_Pixels_1D);
+                        UpdateContigsFromMapState();
 
-                        pointui startPixels = {x, y};
-                        s32 delta = d;
-                        pointui finalPixels = {(u32)((s32)startPixels.x + delta), (u32)((s32)startPixels.y + delta)};
+                        if (!ValidatePixelRearrangementLookupBuffer())
+                        {
+                            fprintf(stderr,
+                                "[LoadState::error]: GPU pixel rearrangement buffer is invalid after edit replay. "
+                                "Try Clear Cache, reopen the .pretext, and load the savestate again.\n");
+                        }
 
-                        RearrangeMap(startPixels.x, startPixels.y, delta);
-                        if (invert) InvertMap(finalPixels.x, finalPixels.y);
-
-                        AddMapEdit(delta, finalPixels, invert);
+                        fmt::print(
+                            "[LoadState]: After edit replay: {} map frags ({} edits listed).\n",
+                            Contigs->numberOfContigs,
+                            nEdits);
+                    }
+                    else
+                    {
+                        fileContents += (12 * nEdits);
                     }
 
+                    nBytesRead += (12 * nEdits);
                     fileContents += nContigFlags;
-                    nBytesRead += (nContigFlags + (12 * nEdits));
+                    nBytesRead += nContigFlags;
                 }
 
                 // waypoints
@@ -12106,7 +13139,12 @@ LoadState(u64 headerHash, char *path)
                     nBytesRead += (bytes_per_waypoint * nWayp);
                 }
 
-                // scaffs
+                // scaffs (read now; apply after meta — UpdateContigsFromMapState re-derives scaffIds)
+                u32 nScaffsLoaded = 0;
+                u08 scaffLoadFormat = saveStateFormatVersion;
+                u32 *loadedScaffRangeStarts = 0;
+                u32 *loadedScaffRangeEnds = 0;
+                u32 *loadedScaffIds = 0;
                 {
                     u32 nScaffs;
                     ((u08 *)&nScaffs)[0] = *fileContents++;
@@ -12116,27 +13154,68 @@ LoadState(u64 headerHash, char *path)
 
                     nBytesRead += 4;
 
-                    ForLoop(Contigs->numberOfContigs) (Contigs->contigs_arr + index)->scaffId = 0;
+                    u32 scaffEntryBytes = (scaffLoadFormat >= SaveState_Format_Version_Current)
+                        ? SaveState_Scaff_Entry_Bytes_V3
+                        : SaveState_Scaff_Entry_Bytes_V2;
+
+                    if (nScaffs)
+                    {
+                        loadedScaffRangeStarts = PushArrayP(Loading_Arena, u32, nScaffs);
+                        loadedScaffRangeEnds = PushArrayP(Loading_Arena, u32, nScaffs);
+                        loadedScaffIds = PushArrayP(Loading_Arena, u32, nScaffs);
+                        nScaffsLoaded = nScaffs;
+                    }
 
                     ForLoop(nScaffs)
                     {
-                        u32 cId;
-                        u32 sId;
-                        ((u08 *)&cId)[0] = *fileContents++;
-                        ((u08 *)&cId)[1] = *fileContents++;
-                        ((u08 *)&cId)[2] = *fileContents++;
-                        ((u08 *)&cId)[3] = *fileContents++;
-                        ((u08 *)&sId)[0] = *fileContents++;
-                        ((u08 *)&sId)[1] = *fileContents++;
-                        ((u08 *)&sId)[2] = *fileContents++;
-                        ((u08 *)&sId)[3] = *fileContents++;
+                        if (scaffLoadFormat >= SaveState_Format_Version_Current)
+                        {
+                            u32 rangeStart;
+                            u32 rangeEnd;
+                            u32 sId;
+                            ((u08 *)&rangeStart)[0] = *fileContents++;
+                            ((u08 *)&rangeStart)[1] = *fileContents++;
+                            ((u08 *)&rangeStart)[2] = *fileContents++;
+                            ((u08 *)&rangeStart)[3] = *fileContents++;
+                            ((u08 *)&rangeEnd)[0] = *fileContents++;
+                            ((u08 *)&rangeEnd)[1] = *fileContents++;
+                            ((u08 *)&rangeEnd)[2] = *fileContents++;
+                            ((u08 *)&rangeEnd)[3] = *fileContents++;
+                            ((u08 *)&sId)[0] = *fileContents++;
+                            ((u08 *)&sId)[1] = *fileContents++;
+                            ((u08 *)&sId)[2] = *fileContents++;
+                            ((u08 *)&sId)[3] = *fileContents++;
 
-                        (Contigs->contigs_arr + cId)->scaffId = sId;
+                            if (loadedScaffRangeStarts && loadedScaffRangeEnds && loadedScaffIds)
+                            {
+                                loadedScaffRangeStarts[index] = rangeStart;
+                                loadedScaffRangeEnds[index] = rangeEnd;
+                                loadedScaffIds[index] = sId;
+                            }
+                        }
+                        else
+                        {
+                            u32 cId;
+                            u32 sId;
+                            ((u08 *)&cId)[0] = *fileContents++;
+                            ((u08 *)&cId)[1] = *fileContents++;
+                            ((u08 *)&cId)[2] = *fileContents++;
+                            ((u08 *)&cId)[3] = *fileContents++;
+                            ((u08 *)&sId)[0] = *fileContents++;
+                            ((u08 *)&sId)[1] = *fileContents++;
+                            ((u08 *)&sId)[2] = *fileContents++;
+                            ((u08 *)&sId)[3] = *fileContents++;
+
+                            if (loadedScaffRangeStarts && loadedScaffRangeEnds && loadedScaffIds)
+                            {
+                                loadedScaffRangeStarts[index] = cId;
+                                loadedScaffIds[index] = sId;
+                                loadedScaffRangeEnds[index] = 0;
+                            }
+                        }
                     }
 
-                    UpdateScaffolds();
-
-                    nBytesRead += (8 * nScaffs);
+                    nBytesRead += (scaffEntryBytes * nScaffs);
                 }
 
                 // meta data
@@ -12195,6 +13274,32 @@ LoadState(u64 headerHash, char *path)
                     }
                 }
 
+                if (nScaffsLoaded && loadedScaffRangeStarts && loadedScaffRangeEnds && loadedScaffIds)
+                {
+                    if (scaffLoadFormat >= SaveState_Format_Version_Current)
+                    {
+                        ApplyLoadedScaffoldPaintingByPixelRange(
+                            nScaffsLoaded,
+                            loadedScaffRangeStarts,
+                            loadedScaffRangeEnds,
+                            loadedScaffIds);
+                    }
+                    else
+                    {
+                        ApplyLoadedScaffoldPaintingLegacy(
+                            nScaffsLoaded,
+                            loadedScaffRangeStarts,
+                            loadedScaffIds);
+                    }
+                }
+
+                if (Contigs)
+                {
+                    EnsureGridDataBuffersForContigCount(Contigs->numberOfContigs);
+                    EnsureContigColourBarBuffersForContigCount(Contigs->numberOfContigs);
+                    EnsureScaffBarBuffersForContigCount(Contigs->numberOfContigs);
+                }
+
                 // extensions
                 {
                     TraverseLinkedList(Extensions.head, extension_node)
@@ -12226,84 +13331,430 @@ LoadState(u64 headerHash, char *path)
     return(0);
 }
 
+static int
+agp_local_bp_to_rel_pixel(int64_t start_bp, double bp_per_pixel, u32 pixel_count)
+{
+    if (pixel_count == 0 || !(bp_per_pixel > 0.0)) return 0;
+    const int64_t bp = start_bp < 1 ? 1 : start_bp;
+    int lp = (int)std::llround((double)(bp - 1) / bp_per_pixel);
+    if (lp < 0) lp = 0;
+    if (lp >= (int)pixel_count) lp = (int)pixel_count - 1;
+    return lp;
+}
+
+struct agp_pixel_ref
+{
+    u32 rel;
+    u32 pix;
+};
+
+// `refs` is sorted by (rel, pix). Equal distance keeps the smaller pixel index,
+// matching a left-to-right scan of the map.
+static int
+find_closest_agp_pixel(const std::vector<agp_pixel_ref>& refs, int local_pixel)
+{
+    if (refs.empty()) return -1;
+    const auto it = std::lower_bound(
+        refs.begin(), refs.end(), local_pixel,
+        [](const agp_pixel_ref& ref, int pix) { return (int)ref.rel < pix; });
+
+    int best = -1;
+    int best_dist = std::numeric_limits<int>::max();
+    auto consider = [&](const agp_pixel_ref& ref)
+    {
+        const int dist = std::abs((int)ref.rel - local_pixel);
+        if (dist < best_dist || (dist == best_dist && (best < 0 || (int)ref.pix < best)))
+        {
+            best_dist = dist;
+            best = (int)ref.pix;
+        }
+    };
+
+    if (it != refs.end()) consider(*it);
+    if (it != refs.begin())
+    {
+        auto floor_it = std::prev(it);
+        const u32 rel = floor_it->rel;
+        while (floor_it != refs.begin() && std::prev(floor_it)->rel == rel)
+            --floor_it;
+        consider(*floor_it);
+    }
+    return best;
+}
+
+static u32
+agp_map_contig_low_coord(u32 contig_idx)
+{
+    const contig *cont = Contigs->contigs_arr + contig_idx;
+    if (IsContigInverted(contig_idx) && cont->length)
+        return cont->startCoord - (cont->length - 1);
+    return cont->startCoord;
+}
+
+struct agp_contig_cand
+{
+    int low;
+    u32 idx;
+};
+
+// Closest unused map contig in `cands` (one original contig, contig-index order).
+// Equal distance keeps the earlier contig, matching a scan from index 0.
+static int
+find_map_contig_for_agp_frag(const std::vector<agp_contig_cand>& cands, int local_pixel, const std::vector<u08>& used)
+{
+    int best = -1;
+    int best_dist = std::numeric_limits<int>::max();
+    for (const agp_contig_cand& cand : cands)
+    {
+        if (cand.idx < used.size() && used[cand.idx]) continue;
+        const int dist = std::abs(cand.low - local_pixel);
+        if (dist < best_dist)
+        {
+            best_dist = dist;
+            best = (int)cand.idx;
+        }
+    }
+    return best;
+}
+
+static void
+restore_map_to_uncut_originals()
+{
+    // A full savestate holds Edits_Stack_Size edits. Undoing each one rearranges
+    // the map, so Load AGP would sit silent after the header. Rebuild the uncut
+    // layout from the .pretext instead.
+    if (PrepareMapForSaveStateEditReplay())
+    {
+        return;
+    }
+    if (Map_Editor && Map_Editor->nEdits)
+        EraseAllEdits(Map_Editor);
+    Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
+    UpdateContigsFromMapState();
+}
+
+// Place contigs in `order` (signed 1-based ids, negative = reverse) by permuting
+// pixel arrays once. Same arrangement as InvertMap/RearrangeMap, without a GL
+// upload per fragment.
+static u08
+apply_signed_contig_order(const std::vector<int>& order)
+{
+    if (!Contigs || !Map_State || !Contact_Matrix || !Contact_Matrix->pixelRearrangmentLookupBuffer)
+        return 0;
+    const u32 n = Contigs->numberOfContigs;
+    const u32 nPixels = Number_of_Pixels_1D;
+    if (!n || !nPixels || order.size() != n)
+        return 0;
+
+    std::vector<u32> rangeStart(n + 1, 0);
+    u32 covered = 0;
+    for (u32 i = 0; i < n; ++i)
+    {
+        rangeStart[i + 1] = rangeStart[i] + Contigs->contigs_arr[i].length;
+        covered += Contigs->contigs_arr[i].length;
+    }
+    if (covered != nPixels)
+        return 0;
+
+    std::vector<u08> seen(n, 0);
+    std::vector<u32> srcOfDest(nPixels);
+    std::vector<u32> destOfSrc(nPixels);
+    for (u32 i = 0; i < nPixels; ++i) destOfSrc[i] = i;
+
+    u32 dest = 0;
+    for (int signed_id : order)
+    {
+        const u32 id = (u32)std::abs(signed_id);
+        if (id < 1 || id > n || seen[id - 1])
+            return 0;
+        seen[id - 1] = 1;
+        const bool inverted = signed_id < 0;
+        const u32 srcContig = id - 1;
+        const u32 begin = rangeStart[srcContig];
+        const u32 len = Contigs->contigs_arr[srcContig].length;
+        for (u32 j = 0; j < len; ++j)
+        {
+            if (dest >= nPixels) return 0;
+            const u32 src = inverted ? (begin + len - 1 - j) : (begin + j);
+            srcOfDest[dest] = src;
+            destOfSrc[src] = dest;
+            ++dest;
+        }
+    }
+    if (dest != nPixels)
+        return 0;
+
+    glBindBuffer(GL_TEXTURE_BUFFER, Contact_Matrix->pixelRearrangmentLookupBuffer);
+    u32 *buffer = (u32 *)glMapBufferRange(
+        GL_TEXTURE_BUFFER, 0, nPixels * sizeof(u32), GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
+    if (!buffer)
+    {
+        glBindBuffer(GL_TEXTURE_BUFFER, 0);
+        fprintf(stderr, "[Load AGP] Could not map pixel rearrange buffer\n");
+        return 0;
+    }
+
+    std::vector<u32> tmp32(nPixels);
+    std::vector<u64> tmp64(nPixels);
+    auto permute32 = [&](u32 *arr)
+    {
+        for (u32 d = 0; d < nPixels; ++d) tmp32[d] = arr[srcOfDest[d]];
+        std::copy(tmp32.begin(), tmp32.end(), arr);
+    };
+    permute32(buffer);
+    permute32(Map_State->originalContigIds);
+    permute32(Map_State->contigRelCoords);
+    permute32(Map_State->scaffIds);
+    for (u32 d = 0; d < nPixels; ++d) tmp64[d] = Map_State->metaDataFlags[srcOfDest[d]];
+    std::copy(tmp64.begin(), tmp64.end(), Map_State->metaDataFlags);
+
+    glUnmapBuffer(GL_TEXTURE_BUFFER);
+    glBindBuffer(GL_TEXTURE_BUFFER, 0);
+
+    if (Waypoint_Editor && Waypoint_Editor->nWaypointsActive)
+    {
+        waypoint *ways[Waypoints_Stack_Size];
+        u32 nways = 0;
+        TraverseLinkedList(Waypoint_Editor->activeWaypoints.next, waypoint)
+        {
+            if (nways < Waypoints_Stack_Size) ways[nways++] = node;
+        }
+        const f32 ooNPixels = (f32)(1.0 / (f64)nPixels);
+        for (u32 i = 0; i < nways; ++i)
+        {
+            waypoint *wayp = ways[i];
+            const u32 upperTri = wayp->coords.x > wayp->coords.y;
+            u32 pixX = (u32)((0.5f + wayp->coords.x) / ooNPixels);
+            u32 pixY = (u32)((0.5f + wayp->coords.y) / ooNPixels);
+            if (pixX >= nPixels) pixX = nPixels - 1;
+            if (pixY >= nPixels) pixY = nPixels - 1;
+            pixX = destOfSrc[pixX];
+            pixY = destOfSrc[pixY];
+            point2f newCoords = {((f32)pixX * ooNPixels) - 0.5f, ((f32)pixY * ooNPixels) - 0.5f};
+            if ((newCoords.x > newCoords.y) != (upperTri != 0))
+                newCoords = {newCoords.y, newCoords.x};
+            UpdateWayPoint(wayp, newCoords);
+        }
+    }
+
+    UpdateContigsFromMapState();
+    Redisplay = 1;
+    return 1;
+}
+
 /*
     load the .agp file to restore the curated state
-    NOTE: please make sure to clear the cache before loading the agp file. 
-        which means after clearing the cache, all edits will be lost. if you want 
-        to keep the edits, please try to change the file name and reopen that. as 
-        the cache is automatically named as the hash of the file name.
+    NOTE: Load AGP first restores the uncut original-contig layout, so it can
+        be applied more than once in a session. Clear Cache still discards edits.
 */
 void Load_AGP(const std::string& agp_path)
 {
     fmt::print("Load AGP file: {}\n", agp_path);
     try
     {
-        AssemblyAGP assembly_agp(agp_path, Original_Contigs, Number_of_Original_Contigs, Meta_Data);
+        AssemblyAGP assembly_agp(agp_path, Original_Contigs, (int)Number_of_Original_Contigs, Meta_Data);
         fmt::println("{}", assembly_agp.__str__());
 
-        // do curations to achieve the map_state
-        // 1. split the original contigs according to the curation agp 
-        std::vector<std::set<int>> split_points_frags(Number_of_Original_Contigs);
-        for (int i = 0; i < assembly_agp.frags.size(); i++)
+        restore_map_to_uncut_originals();
+
+        double bp_per_pixel = assembly_agp.bp_per_pixel;
+        if (!(bp_per_pixel > 0.0) && Number_of_Pixels_1D)
         {
-            auto& frag = assembly_agp.frags[i];
-            if (frag.start > 1) // skip the start bp of one contig 
-                split_points_frags[frag.orig_contig_id].insert(frag.start);
-        }
-        // merge the split points
-        int ptr_bp = 0;
-        std::vector<int> merged_split_points;
-        std::string contig_name_tmp;
-        for (int i = 0; i < Number_of_Original_Contigs; i ++ )
-        {
-            for (auto it = split_points_frags[i].begin(); it != split_points_frags[i].end(); ++it)
-                merged_split_points.push_back((int)((double)(*it + ptr_bp) / assembly_agp.bp_per_pixel));
-            contig_name_tmp = std::string((char*)Original_Contigs[i].name);
-            if (assembly_agp.original_contigs.find(contig_name_tmp) != assembly_agp.original_contigs.end())
-                ptr_bp += assembly_agp.original_contigs[contig_name_tmp].len;
-            else 
-                fmt::print("[Load AGP::error]: Original_Contig name ({}) not found in the assembly_agp.original_contigs.\n", contig_name_tmp);
-        }
-        // cut the at the split points
-        cut_frags( merged_split_points, false, false);
-        // check if the number of contigs between contigs_agp and contigs are the same
-        // after cutting, this should be the same
-        if (Contigs->numberOfContigs != assembly_agp.frags.size())
-        {
-            fmt::print("[Load AGP::error]: The number of contigs between contigs_agp and contigs are not the same.\n");
-            throw std::runtime_error(fmt::format("[Load AGP::error]: The number of contigs between Contigs({}) and contigs_agp({}) are not the same.\n", Contigs->numberOfContigs, assembly_agp.frags.size()));
+            bp_per_pixel = (double)Total_Genome_Length / (double)Number_of_Pixels_1D;
+            fmt::print("[Load AGP::warning]: AGP map resolution missing or invalid; using {} bp/texel from the map.\n", bp_per_pixel);
         }
 
-        // vector to save frag's local order within orignal contig
-        std::vector<int> global_frag_start_Contigs(Number_of_Original_Contigs, 0);
-        for (int i = 1;  i < Number_of_Original_Contigs; i++)
-            global_frag_start_Contigs[i] = global_frag_start_Contigs[i-1] + Original_Contigs[i-1].nContigs;
-
-        // 2. reorder them
-        // call the auto_curation func to reorder the contigs globally
-        std::vector<int> contigs_order_agp(assembly_agp.frags.size());              // restore the order in agp
-        for (int i = 0; i < assembly_agp.frags.size(); i++)
+        std::vector<u32> contig_pixel_count(Number_of_Original_Contigs, 0);
+        for (u32 p = 0; p < Number_of_Pixels_1D; ++p)
         {
-            auto& frag = assembly_agp.frags[i];
-            contigs_order_agp[i] = ( global_frag_start_Contigs[frag.orig_contig_id] + frag.local_index + 1 ) * (frag.is_reverse?-1:1); 
+            const u32 oid = GetOriginalContigBaseId(Map_State->originalContigIds[p]);
+            if (oid < Number_of_Original_Contigs) contig_pixel_count[oid]++;
         }
-        FragsOrder frags_order_agp(contigs_order_agp);
-        // curation globally 
-        AutoCurationFromFragsOrder( &frags_order_agp, Contigs, Map_State, nullptr );
 
-        // add scaff id to restore the painted scaffID and meta tags
-        int pix_ptr = 0, contig_start_pix_ptr = 0;
-        for (int i =0 ; i < Contigs->numberOfContigs;i++)
-        {   
-            auto& frag = assembly_agp.frags[i];
-            while (pix_ptr < Number_of_Pixels_1D && pix_ptr < contig_start_pix_ptr + Contigs->contigs_arr[i].length) 
+        for (u32 i = 0; i < Number_of_Original_Contigs; ++i)
+        {
+            const std::string name((char*)Original_Contigs[i].name);
+            if (assembly_agp.original_contigs.find(name) != assembly_agp.original_contigs.end())
+                continue;
+            if (contig_pixel_count[i] == 0)
             {
-                Map_State->scaffIds[pix_ptr]        = frag.is_painted? frag.scaff_id + 1 : 0; // scaff_id
-                Map_State->metaDataFlags[pix_ptr++] = frag.meta_data_flag ;                   // meta data flag
+                fmt::print("[Load AGP::warning]: Original contig '{}' is not in the AGP and has no map pixels; ignored.\n", name);
             }
-            contig_start_pix_ptr += Contigs->contigs_arr[i].length;
+            else
+            {
+                fmt::print(
+                    "[Load AGP::warning]: Original contig '{}' is not in the AGP; it will be left unmatched at the end of the map.\n",
+                    name);
+            }
+        }
+
+        std::vector<int> representative_frags;
+        representative_frags.reserve(assembly_agp.frags.size());
+        std::set<std::pair<int, int>> seen_pixel_keys;
+        for (int i = 0; i < (int)assembly_agp.frags.size(); ++i)
+        {
+            const Frag& frag = assembly_agp.frags[i];
+            if (frag.orig_contig_id < 0 || (u32)frag.orig_contig_id >= Number_of_Original_Contigs)
+                continue;
+            if (contig_pixel_count[frag.orig_contig_id] == 0)
+            {
+                fmt::print(
+                    "[Load AGP::warning]: AGP fragment of '{}' has no pixels on the map; skipped.\n",
+                    (char*)Original_Contigs[frag.orig_contig_id].name);
+                continue;
+            }
+            const int local_pixel = agp_local_bp_to_rel_pixel(
+                frag.start, bp_per_pixel, contig_pixel_count[frag.orig_contig_id]);
+            if (!seen_pixel_keys.insert({frag.orig_contig_id, local_pixel}).second)
+            {
+                fmt::print(
+                    "[Load AGP::warning]: AGP fragments of '{}' collapse to the same map pixel {}; extra fragment skipped.\n",
+                    (char*)Original_Contigs[frag.orig_contig_id].name,
+                    local_pixel);
+                continue;
+            }
+            representative_frags.push_back(i);
+        }
+
+        if (representative_frags.empty())
+        {
+            throw std::runtime_error(
+                "[Load AGP::error]: No AGP sequence lines matched original contigs on the map.\n");
+        }
+
+        std::vector<std::vector<agp_pixel_ref>> pixels_by_orig(Number_of_Original_Contigs);
+        for (u32 oid = 0; oid < Number_of_Original_Contigs; ++oid)
+            pixels_by_orig[oid].reserve(contig_pixel_count[oid]);
+        for (u32 p = 0; p < Number_of_Pixels_1D; ++p)
+        {
+            const u32 oid = GetOriginalContigBaseId(Map_State->originalContigIds[p]);
+            if (oid < Number_of_Original_Contigs)
+                pixels_by_orig[oid].push_back({Map_State->contigRelCoords[p], p});
+        }
+        for (auto& refs : pixels_by_orig)
+        {
+            std::sort(refs.begin(), refs.end(), [](const agp_pixel_ref& a, const agp_pixel_ref& b)
+            {
+                if (a.rel != b.rel) return a.rel < b.rel;
+                return a.pix < b.pix;
+            });
+        }
+
+        std::vector<int> merged_split_points;
+        for (int idx : representative_frags)
+        {
+            const Frag& frag = assembly_agp.frags[idx];
+            if (frag.start <= 1) continue;
+            const int local_pixel = agp_local_bp_to_rel_pixel(
+                frag.start, bp_per_pixel, contig_pixel_count[frag.orig_contig_id]);
+            if (local_pixel <= 0) continue;
+            const int global_pixel = find_closest_agp_pixel(pixels_by_orig[frag.orig_contig_id], local_pixel);
+            if (global_pixel <= 0 || global_pixel >= (int)Number_of_Pixels_1D) continue;
+            merged_split_points.push_back(global_pixel);
+        }
+        std::sort(merged_split_points.begin(), merged_split_points.end());
+        merged_split_points.erase(
+            std::unique(merged_split_points.begin(), merged_split_points.end()),
+            merged_split_points.end());
+
+        cut_frags(merged_split_points, false, false, false);
+
+        const u32 n_map = Contigs->numberOfContigs;
+        if (!n_map)
+        {
+            throw std::runtime_error("[Load AGP::error]: Map has no contigs after applying AGP splits.\n");
+        }
+
+        std::vector<u08> used(n_map, 0);
+        std::vector<int> contigs_order_agp;
+        std::vector<const Frag*> paint_frags;
+        contigs_order_agp.reserve(n_map);
+        paint_frags.reserve(n_map);
+
+        std::vector<std::vector<agp_contig_cand>> cands_by_orig(Number_of_Original_Contigs);
+        for (u32 i = 0; i < n_map; ++i)
+        {
+            const contig *cont = Contigs->contigs_arr + i;
+            if (cont->originalContigId < Number_of_Original_Contigs)
+                cands_by_orig[cont->originalContigId].push_back({(int)agp_map_contig_low_coord(i), i});
+        }
+
+        for (int idx : representative_frags)
+        {
+            const Frag& frag = assembly_agp.frags[idx];
+            if (frag.orig_contig_id < 0 || (u32)frag.orig_contig_id >= Number_of_Original_Contigs)
+                continue;
+            const int local_pixel = agp_local_bp_to_rel_pixel(
+                frag.start, bp_per_pixel, contig_pixel_count[frag.orig_contig_id]);
+            const int map_idx = find_map_contig_for_agp_frag(
+                cands_by_orig[(u32)frag.orig_contig_id], local_pixel, used);
+            if (map_idx < 0)
+            {
+                fmt::print(
+                    "[Load AGP::warning]: AGP fragment of '{}' starting at {} bp has no unused map contig; skipped.\n",
+                    (char*)Original_Contigs[frag.orig_contig_id].name,
+                    frag.start);
+                continue;
+            }
+            used[(u32)map_idx] = 1;
+            contigs_order_agp.push_back((map_idx + 1) * (frag.is_reverse ? -1 : 1));
+            paint_frags.push_back(&frag);
+        }
+
+        u32 n_unmatched = 0;
+        for (u32 i = 0; i < n_map; ++i)
+        {
+            if (used[i]) continue;
+            contigs_order_agp.push_back((int)i + 1);
+            paint_frags.push_back(nullptr);
+            ++n_unmatched;
+        }
+
+        if (contigs_order_agp.size() != n_map)
+        {
+            throw std::runtime_error(fmt::format(
+                "[Load AGP::error]: Built order size ({}) does not match map contig count ({}).\n",
+                contigs_order_agp.size(), n_map));
+        }
+
+        if (n_unmatched)
+        {
+            fmt::print(
+                "[Load AGP::warning]: {} map contig(s) were not in the AGP (or were leftover prefixes after rounding) and were appended after the AGP order.\n",
+                n_unmatched);
+        }
+
+        if (!apply_signed_contig_order(contigs_order_agp))
+        {
+            fmt::print("[Load AGP] Direct reorder unavailable; applying order fragment by fragment.\n");
+            FragsOrder frags_order_agp(contigs_order_agp);
+            AutoCurationFromFragsOrder(&frags_order_agp, Contigs, Map_State, nullptr);
+            UpdateContigsFromMapState();
+        }
+
+        int pix_ptr = 0;
+        for (u32 i = 0; i < Contigs->numberOfContigs; i++)
+        {
+            const Frag *frag = (i < paint_frags.size()) ? paint_frags[i] : nullptr;
+            const int contig_end = pix_ptr + (int)Contigs->contigs_arr[i].length;
+            while (pix_ptr < (int)Number_of_Pixels_1D && pix_ptr < contig_end)
+            {
+                if (frag)
+                {
+                    Map_State->scaffIds[pix_ptr]        = frag->is_painted ? (u32)frag->scaff_id + 1 : 0;
+                    Map_State->metaDataFlags[pix_ptr++] = frag->meta_data_flag;
+                }
+                else
+                {
+                    Map_State->scaffIds[pix_ptr]        = 0;
+                    Map_State->metaDataFlags[pix_ptr++] = 0;
+                }
+            }
         }
         UpdateContigsFromMapState();
+        fmt::print(
+            "[Load AGP]: Done. Restored {} AGP fragments ({} unmatched map contig(s) appended) from {} AGP sequence lines into {} map contig(s).\n",
+            paint_frags.size() - n_unmatched, n_unmatched, assembly_agp.frags.size(), Contigs->numberOfContigs);
     }
     catch (const std::exception& e)
     {
@@ -12312,9 +13763,6 @@ void Load_AGP(const std::string& agp_path)
         return;
     }
 
-
-
-    
     return ;
 }
 
@@ -12426,13 +13874,14 @@ restore_initial_state()
 
     // edits
     {
-        u32 nEdits  = my_Min(Edits_Stack_Size, Map_Editor->nEdits);
-        ForLoop(nEdits) UndoMapEdit();
-    }
-    
-    // restore all the splited contigs
-    {
-        Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D);
+        // A full savestate leaves editStackPtr at 0. Undoing that used to read
+        // one past the edit array and crash. Rebuild the uncut map instead.
+        if (!PrepareMapForSaveStateEditReplay())
+        {
+            u32 nEdits = my_Min(Edits_Stack_Size, Map_Editor->nEdits);
+            ForLoop(nEdits) UndoMapEdit();
+            Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
+        }
     }
 
 
@@ -13184,14 +14633,16 @@ SaveEditsToFile(char *path, u08 overwrite)
 
 global_function
 void
-GenerateAGP(char *path, u08 overwrite, u08 formatSingletons, u08 preserveOrder)
-{   
+GenerateAGP(char *path, u08 overwrite, u08 preserveOrder)
+{
+    // Fragment orientation (+/-) always follows the map (IsContigInverted); the
+    // old "Format Singletons" option that forced many rows to + has been removed.
 
-    // 这里粘贴所有的original contigs
+    // Restore all original contigs before export
     u32* tmp_orignal_contig_ids = new u32[Number_of_Pixels_1D];
     for (u32 i = 0 ; i< Number_of_Pixels_1D; i++ )tmp_orignal_contig_ids[i] = Map_State->originalContigIds[i];
-    Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D);
-    UpdateContigsFromMapState(); // todo 检查粘贴后会不会影响 painted 的 scaffolds
+    Map_State->restore_cutted_contigs_all(Number_of_Pixels_1D, Number_of_Original_Contigs);
+    UpdateContigsFromMapState(); // todo :check if it affects painted scaffolds    
 
     FILE *file;
     if (!overwrite && (file = fopen((const char *)path, "rb")))
@@ -13204,14 +14655,8 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons, u08 preserveOrder)
     {
         char buffer[1024];
 
-        stbsp_snprintf(buffer, sizeof(buffer), "##agp-version\t%s\n# DESCRIPTION: Generated by %s\n# HiC MAP RESOLUTION: %f bp/texel\n", formatSingletons ? "<NA>" : "2.1", PretextView_Version, (f64)Total_Genome_Length / (f64)Number_of_Pixels_1D);
+        stbsp_snprintf(buffer, sizeof(buffer), "##agp-version\t2.1\n# DESCRIPTION: Generated by %s\n# HiC MAP RESOLUTION: %f bp/texel\n", PretextView_Version, (f64)Total_Genome_Length / (f64)Number_of_Pixels_1D);
         fwrite(buffer, 1, strlen(buffer), file);
-
-        if (formatSingletons)
-        {
-            stbsp_snprintf(buffer, sizeof(buffer), "# WARNING: Non-standard AGP, singletons may be reverse-complemented\n");
-            fwrite(buffer, 1, strlen(buffer), file);
-        }
 
         u32 scaffId = 0;
         u64 scaffCoord_Start = 1;
@@ -13227,18 +14672,10 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons, u08 preserveOrder)
             ForLoop(Contigs->numberOfContigs)
             {
                 contig *cont = Contigs->contigs_arr + index;
+                // Always export map orientation; do not override singleton/scaffold-end rows to +.
                 u08 invert = IsContigInverted( index );
                 u32 startCoord = cont->startCoord - (invert ? (cont->length - 1) : 0);
-                
-                /*
-                set invert to 0 if: 
-                    - formatSingletons is False and
-                        - contig is not painted
-                        - contig is just 1 pixel long
-                        - contig is the first or last contig in the genome
-                */ 
-                invert = (!formatSingletons && (!cont->scaffId || (index && (index < (Contigs->numberOfContigs - 1)) && (cont->scaffId != ((cont + 1)->scaffId)) && (cont->scaffId != ((cont - 1)->scaffId))) || (!index && (cont->scaffId != ((cont + 1)->scaffId))) || ((index == (Contigs->numberOfContigs - 1)) && (cont->scaffId != ((cont - 1)->scaffId))))) ? 0 : invert;
-                
+
                 u64 contRealStartCoord = (u64)((f64)startCoord / (f64)Number_of_Pixels_1D * (f64)Total_Genome_Length) + 1;
                 u64 contRealEndCoord = (u64)((f64)(startCoord + cont->length) / (f64)Number_of_Pixels_1D * (f64)Total_Genome_Length);
                 u64 contRealSize = contRealEndCoord - contRealStartCoord + 1;
@@ -13309,7 +14746,7 @@ GenerateAGP(char *path, u08 overwrite, u08 formatSingletons, u08 preserveOrder)
         fclose(file);
     }
 
-    // 把临时切开的再粘贴上
+    // Re-apply temporary cuts (restore originalContigIds from backup)
     for (u32 i = 0; i < Number_of_Pixels_1D; i++) Map_State->originalContigIds[i] = tmp_orignal_contig_ids[i]; 
     UpdateContigsFromMapState();
     delete[] tmp_orignal_contig_ids;
@@ -13795,6 +15232,7 @@ MainArgs
             s32 showSaveStateScreen = 0;
             s32 showLoadStateScreen = 0;
             s32 showSaveAGPScreen = 0;
+            s32 showSaveStateAGPScreen = 0;
             s32 showSaveEditsScreen = 0;
             static s32 showSaveClipboardScreen = 0;
             s32 showLoadAGPScreen = 0;
@@ -13838,6 +15276,16 @@ MainArgs
                         showSaveAGPScreen = nk_button_label(NK_Context, "Generate AGP");
                         showLoadAGPScreen = nk_button_label(NK_Context, "Load AGP");
                     }
+                    if (currFileName)
+                    {
+                        f32 buttonRatio[] = {0.46f, 0.27f, 0.27f};
+                        nk_layout_row(NK_Context, NK_DYNAMIC, Screen_Scale.y * 30.0f, 3, buttonRatio);
+                        showSaveStateAGPScreen = nk_button_label(NK_Context, "Save State + AGP");
+                    }
+                    else
+                    {
+                        nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 2);
+                    }
                     showUserProfileScreen = nk_button_label(NK_Context, "User Profile");
                     showAboutScreen = nk_button_label(NK_Context, "About");
                     nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 3);
@@ -13854,7 +15302,6 @@ MainArgs
                     struct nk_color sort_button_active = nk_rgb(128, 0, 128);  
                     push_nk_style(NK_Context, sort_button_normal, sort_button_hover, sort_button_active);
                     nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30.0f, 3);
-
                     // Pixel Cut
                     {
                         bounds = nk_widget_bounds(NK_Context);
@@ -13877,7 +15324,7 @@ MainArgs
                                     sizeof(auto_curation_state.auto_cut_threshold_buf), 
                                     nk_filter_float);
                                 
-                                nk_label(NK_Context, "Pixel_mean window size (default: 8)", NK_TEXT_LEFT); //  见鬼了，见鬼了，这个地方，如果我使用 "Pixel_mean windows (default: 8)" 点击弹出的窗口外面程序就会卡死，但是使用"Pixel_mean window size (default: 8)" 就不会卡死
+                                nk_label(NK_Context, "Pixel_mean window size (default: 8)", NK_TEXT_LEFT); // 'Pixel_mean windows (default: 8)' freezes on outside click, whereas 'Pixel_mean window size (default: 8)' doesn't
                                 nk_edit_string_zero_terminated(
                                     NK_Context, 
                                     NK_EDIT_FIELD, 
@@ -13898,18 +15345,18 @@ MainArgs
                                 {
                                     // Apply changes
                                     // Convert text to integer and float
-                                    auto_curation_state.update_value_from_buf(); // todo 这里还有问题，因为设置了pixel_mean之后 并没有重新计算 pixel_density...
+                                    auto_curation_state.update_value_from_buf(); // TODO: changing pixel_mean does not recompute pixel_density yet
                                     auto_curation_state.set_buf();
                                     fmt::print("[Pixel Cut] cut_threshold:               {:.3f}\n", auto_curation_state.auto_cut_threshold);
                                     fmt::print("[Pixel Cut] pixel mean window size:      {}\n", auto_curation_state.auto_cut_diag_window_for_pixel_mean);
                                     fmt::print("[Pixel Cut] smallest_frag_size_in_pixel: {}\n", auto_curation_state.auto_cut_smallest_frag_size_in_pixel);
 
                                 }
-                                /* run cut 按钮 */
+                                /* Run cut button */
                                 if (nk_button_label(NK_Context, "Run") && currFileName) {
 
                                     // Convert text to integer and float
-                                    auto_curation_state.update_value_from_buf(); // todo 这里还有问题，因为设置了pixel_mean之后 并没有重新计算 pixel_density...
+                                    auto_curation_state.update_value_from_buf(); // TODO: changing pixel_mean does not recompute pixel_density yet
                                     auto_curation_state.set_buf();
                                     fmt::print("[Pixel Cut] cut_threshold:               {:.3f}\n", auto_curation_state.auto_cut_threshold);
                                     fmt::print("[Pixel Cut] pixel mean window size:      {}\n", auto_curation_state.auto_cut_diag_window_for_pixel_mean);
@@ -13921,7 +15368,7 @@ MainArgs
                                     nk_popup_close(NK_Context);
                                 }
                                 
-                                /* 关闭按钮 */
+                                /* Close button */
                                 if (nk_button_label(NK_Context, "Close")) {
                                     auto_cut_button = 0;
                                     auto_curation_state.set_buf();
@@ -13931,7 +15378,7 @@ MainArgs
                                 
                                 nk_popup_end(NK_Context);
                             } else {
-                                /* 如果用户点击了窗口外的区域，也关闭弹出窗口 */
+                                /* Close popup when user clicks outside the window */
                                 auto_cut_button = 0;
                                 #ifdef DEBUG 
                                     fmt::println("Outside of the popup window is clicked.");
@@ -13988,7 +15435,7 @@ MainArgs
                                 fmt::print("[Pixel Sort] link_score_threshold:        {:.3f}\n", auto_curation_state.link_score_threshold);
                                 fmt::print("[Pixel Sort] Sort mode:                   {}\n", auto_curation_state.get_sort_mode_name());
                             }
-                            /* run sort 按钮 */
+                            /* Run sort button */
                             if (nk_button_label(NK_Context, "Run") && currFileName) {
                                 
                                 // Convert text to integer and float
@@ -14003,7 +15450,7 @@ MainArgs
                                 auto_curation_state.clear(); // click the button will run sort globally
                                 nk_popup_close(NK_Context);
                             }
-                            // 关闭按钮 
+                            // Close button
                             if (nk_button_label(NK_Context, "Close")) {
                                 auto_sort_button = 0;
                                 auto_curation_state.set_buf();
@@ -14013,7 +15460,7 @@ MainArgs
                             nk_popup_end(NK_Context);
 
                         } else {
-                            /* 如果用户点击了窗口外的区域，也关闭弹出窗口 */
+                            /* if user clicks outside of the popup window, close the popup window */
                             auto_sort_button = 0;
                             #ifdef DEBUG 
                                 fmt::println("Outside of the popup window is clicked.");
@@ -14816,7 +16263,18 @@ MainArgs
                                                             colour = nk_color_picker(NK_Context, colour, NK_RGBA);
 
                                                             nk_layout_row_dynamic(NK_Context, Screen_Scale.y * 30, 1);
-                                                            if (nk_button_label(NK_Context, "Default")) colour = DefaultGraphColour;
+                                                            if (nk_button_label(NK_Context, "Default"))
+                                                            {
+                                                                linkage_colour groupColour;
+                                                                if (LinkageGroupColour((const char *)gph->name, &groupColour))
+                                                                {
+                                                                    colour = {groupColour.r, groupColour.g, groupColour.b, groupColour.a};
+                                                                }
+                                                                else
+                                                                {
+                                                                    colour = DefaultGraphColour;
+                                                                }
+                                                            }
 
                                                             gph->colour = colour;
 
@@ -14886,8 +16344,35 @@ MainArgs
 
                     if ((state = FileBrowserRun("Generate AGP", &saveAGPBrowser, NK_Context, (u32)showSaveAGPScreen, 2))) 
                     {
-                        FenceIn(GenerateAGP(saveAGPBrowser.file, state & 2, state & 4, state & 8));
+                        FenceIn(GenerateAGP(saveAGPBrowser.file, state & 2, state & 4));
                         FileBrowserReloadDirectoryContent(&saveAGPBrowser, saveAGPBrowser.directory);
+                    }
+
+                    if ((state = FileBrowserRun("Save State + AGP", &saveBrowser, NK_Context, (u32)showSaveStateAGPScreen, 6)))
+                    {
+                        char stem[MAX_PATH_LEN];
+                        char statePath[MAX_PATH_LEN];
+                        char agpPath[MAX_PATH_LEN];
+                        strncpy(stem, saveBrowser.file, MAX_PATH_LEN - 1);
+                        stem[MAX_PATH_LEN - 1] = 0;
+                        static const char *suffixes[] = {".savestate_1", ".agp_1", ".savestate", ".agp"};
+                        size_t stemLength = strlen(stem);
+                        ForLoop(ArrayCount(suffixes))
+                        {
+                            size_t suffixLength = strlen(suffixes[index]);
+                            if (stemLength >= suffixLength && strcmp(stem + stemLength - suffixLength, suffixes[index]) == 0)
+                            {
+                                stem[stemLength - suffixLength] = 0;
+                                break;
+                            }
+                        }
+                        stbsp_snprintf(statePath, sizeof(statePath), "%s.savestate_1", stem);
+                        stbsp_snprintf(agpPath, sizeof(agpPath), "%s.agp_1", stem);
+                        SaveState(headerHash, statePath, state & 2);
+                        FenceIn(GenerateAGP(agpPath, state & 2, state & 4));
+                        fmt::println("[export] savestate: {}", statePath);
+                        fmt::println("[export] agp: {}", agpPath);
+                        FileBrowserReloadDirectoryContent(&saveBrowser, saveBrowser.directory);
                     }
 
                     if ((state = FileBrowserRun("Save Edits", &saveEditsBrowser, NK_Context, (u32)showSaveEditsScreen, 3))) 

@@ -78,7 +78,7 @@ struct ValueVisitor
 
 
 /*
-hic图片信息
+Hi-C figure metadata
 */
 struct Figure_Info
 {
@@ -175,9 +175,8 @@ struct Figure_Info
 };
 
 /*
-保存 Hi-C 数据，以给定的
-    位置、大小和分辨率 
-    保存 Hi-C 数据图表。
+Export Hi-C contact maps as figures at the given
+    genomic span, pixel size, and resolution.
 */
 class Hic_Figure
 {
@@ -389,11 +388,11 @@ public:
             data_out_f32[i] = (f32)my_Min(data_out[i], percentile_95) / (f32)percentile_95;
         }
 
-        // 分配三通道数据内存（R, G, B）
+        // Allocate RGB buffer (3 channels)
         u32 num_channels = 3;
         u08* rgb_data = new u08[num_pixels * num_channels];
 
-        // 转换逻辑：0 → 白色 (255,255,255)，非0 → 红色 (val,0,0)
+        // Map normalized signal to white background with blue channel from (1 - val)
         for (int i = 0; i < num_pixels; ++i) 
         {   
             // rgb_data[i*3]   = (u08) (data_out_f32[i] < gamma? 255 : data_out_f32[i] * 255.f);         // R
@@ -403,7 +402,7 @@ public:
         }
         delete[] data_out_f32;
 
-        // 生成保存路径（添加_red后缀）
+        // Build output PNG path
         char buff[512];
         snprintf(
             buff, sizeof(buff), 

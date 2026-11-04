@@ -156,7 +156,7 @@ TexturesArray4AI::TexturesArray4AI(
     this->texture_resolution_exp = (u32)std::log2(this->texture_resolution);
     this->total_num_textures = ((1 + this->num_textures_1d) * this->num_textures_1d ) >> 1;
     
-    // 此处不再为copy textures申请空间，因为耗费太多内存
+    // Do not allocate copy textures here (too much memory)
     // this->initialise_textures();
 
     // Shader setup and texture binding
@@ -340,15 +340,15 @@ void TexturesArray4AI::check_copied_from_buffer() const
 }
 
 /* 
-复制没有经过re-order的buffer到 this->textures 中
-其实就是存储在.pretext 文件中的textures
+Copy unreordered GPU buffers into this->textures
+(same layout as textures stored in the .pretext file).
 */
 void TexturesArray4AI::copy_buffer_to_textures(
     const contact_matrix *contact_matrix_, 
     bool show_flag) 
 {   
 
-    this->initialise_textures(); // 申请空间 textures
+    this->initialise_textures(); // allocate textures[]
 
     const GLuint &contact_matrix_textures = contact_matrix_->textures;
     if (is_copied_from_buffer) return;
@@ -430,7 +430,7 @@ void TexturesArray4AI::copy_buffer_to_textures_dynamic(
     bool show_flag) 
 {
 
-    this->initialise_textures(); // 申请空间textures
+    this->initialise_textures(); // allocate textures[]
 
     GLuint temptexture;
     glGenTextures(1, &temptexture);
@@ -521,9 +521,9 @@ void TexturesArray4AI::copy_buffer_to_textures_dynamic(
 }
 
 /*
-存储一个matrix然后 rearrange
+Could store a matrix and rearrange in place.
 
-目前没有这样做，因为需要存两个textures... 目前还是从opengl的buffer往外copy
+Not implemented: would need two texture copies; currently still copy from OpenGL buffers.
 */
 void TexturesArray4AI::rearrange_textures(const u32* rearrange_index)
 {
@@ -745,13 +745,13 @@ void TexturesArray4AI::show_collected_texture()
         glfwSetCursorPosCallback(window, cursor_position_callback);
         glUseProgram(shaderProgram);
         GLcall(glUniform1i(glGetUniformLocation(shaderProgram, "texArray"), 0));
-        glm::mat4 model_not_flipped = glm::scale( // 控制显示大小
+        glm::mat4 model_not_flipped = glm::scale( // tile scale for display
             glm::mat4(1.0f), 
             glm::vec3(
                 1.0f/(f32)num_textures_1d, 
                 -1.0f/(f32)num_textures_1d, // flipped on y axis 
                 1.0f));
-        glm::mat4 model_flipped = glm::scale( // 控制显示大小
+        glm::mat4 model_flipped = glm::scale( // tile scale for display (flipped triangle)
             glm::rotate(model_not_flipped, glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)), 
             glm::vec3(1.0f, -1.0f, 1.0f));
         while (!glfwWindowShouldClose(window))
@@ -767,20 +767,20 @@ void TexturesArray4AI::show_collected_texture()
 
             glBindVertexArray(vao);
             glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo);
-            glm::mat4 projection = glm::ortho( // 控制镜头远近
+            glm::mat4 projection = glm::ortho( // orthographic zoom
                 -1.0f * ratio_w_h * show_state.zoomlevel, 1.0f * ratio_w_h * show_state.zoomlevel, 
                 -1.0f * show_state.zoomlevel, 1.0f * show_state.zoomlevel, 
                 -1.0f, 1.0f);
             
             glm::mat4 model_tmp;
-            for (int row = 0; row < num_textures_1d; row++ )// 显示所有的 tile
+            for (int row = 0; row < num_textures_1d; row++ )// draw every tile
             {
                 for (int column = 0; column < num_textures_1d; column ++ )
                 {   
                     // if (row > column) continue;
                     u32 layer = texture_id_cal((u32)row, (u32)column, num_textures_1d);
                     GLcall(glUniform1i(glGetUniformLocation(shaderProgram, "layer"), (int)layer));
-                    model_tmp =  glm::translate( // 控制显示位置
+                    model_tmp =  glm::translate( // tile position on screen
                         glm::mat4(1.0f), 
                         glm::vec3( 
                             -1.0f + ((f32)column + 0.5f) * 2.0f / (f32)num_textures_1d + show_state.translationOffset.x,
@@ -1120,7 +1120,7 @@ void TexturesArray4AI::get_interaction_score(
         };
 
     u32 number_of_scores = std::min(D-1, std::max(num_row, num_column));
-    u32 len_of_weight_mask = std::min(D-1, (u32)(number_of_scores + 5) );  // 往外多算几个像素点，因此小的片段的link score分就会相对下降, 特别是很小的片段
+    u32 len_of_weight_mask = std::min(D-1, (u32)(number_of_scores + 5) );  // extend mask by a few pixels so small fragments get lower link scores
     // f32 linear_weight[number_of_scores]; 
     // get_linear_mask(linear_weight, number_of_scores);  // assign the linear weight mask
     std::vector<f32> linear_weight(len_of_weight_mask, 0.f);

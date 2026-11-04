@@ -8,15 +8,15 @@
 #include <memory>
 
 
-// 定义图相关的结构体
+// Graph-related structures
 struct GraphArc 
 {
-    uint32_t v;      // 前31位表示节点编号，最后一位表示方向
-    uint32_t w;      // 前31位表示节点编号，最后一位表示方向
-    double wt;       // 权重
-    int64_t link_id; // 边的id 
-    bool del=false;        // 是否删除
-    bool comp;       // 是否互补
+    uint32_t v;      // upper 31 bits: node id; LSB: orientation
+    uint32_t w;      // upper 31 bits: node id; LSB: orientation
+    double wt;       // edge weight
+    int64_t link_id; // arc id
+    bool del=false;        // marked for deletion
+    bool comp;       // complementary arc
 
     GraphArc(uint32_t v, uint32_t w, double wt, int64_t link_id, bool comp)
         : v(v), w(w), wt(wt), link_id(link_id), comp(comp) {}
@@ -28,70 +28,70 @@ public:
     Graph() = default;
     ~Graph() = default;
     
-    // 基本图操作方法
-    // 添加边
+    // Basic graph operations
+    // Add an arc
     int64_t add_arc(uint32_t v, uint32_t w, double wt, int64_t link_id, bool comp = false) ;
-    // 预分配空间
+    // Preallocate arc storage
     void reserve_arcs(size_t size) {
         arcs.reserve(size);
     }
-    // 获取边的数量
+    // Outgoing arc count for node v
     size_t get_arc_count(uint32_t v) const {
         if (v >= idx.size()) return 0;
-        return idx[v] & 0xFFFFFFFF; // 取低32位
+        return idx[v] & 0xFFFFFFFF; // lower 32 bits
     }
-    // 获取边的指针
+    // Pointer to outgoing arcs for node v
     GraphArc* get_arcs(uint32_t v) {
         if (v >= idx.size()) return nullptr;
         uint64_t offset = idx[v] >> 32;
         return &arcs[offset];
     }
-    // 获取边的指针（常量版本）
+    // Const pointer to outgoing arcs for node v
     const GraphArc* get_arcs(uint32_t v) const {
         if (v >= idx.size()) return nullptr;
         uint64_t offset = idx[v] >> 32;
         return &arcs[offset];
     }
-    // 获取边的数量 
+    // Total number of arcs
     size_t get_arc_size() const { return arcs.size(); }
 
-    // 图操作相关方法
-    // 对边进行排序
+    // Graph maintenance
+    // Sort arcs by head vertex
     void arc_sort();
-    // 对边进行索引
+    // Build per-vertex arc index
     void arc_index();
-    // 清理图，删除被标记为删除的边
+    // Remove arcs marked deleted
     void clean(bool shear);
     
-    // 图修剪方法
-    // 基于权重过滤
+    // Graph trimming passes
+    // Weight-based simple filter
     int trim_simple_filter(double min_wt, double min_diff_h, double min_diff_l, int min_len);
-    // 修剪端点
+    // Trim tip arcs
     int trim_tips();
-    // 修剪钝化
+    // Trim blunt ends
     int trim_blunts();
-    // 修剪重复边
+    // Trim repeat motifs
     int trim_repeats();
-    // 修剪传递边
+    // Trim transitive edges
     int trim_transitive_edges();
-    // 修剪泡状边
+    // Trim bubble structures
     int trim_pop_bubbles();
-    // 修剪无向边
+    // Trim undirected pops
     int trim_pop_undirected();
-    // 修剪弱边
+    // Trim weak edges
     int trim_weak_edges();
-    // 修剪自环边
+    // Trim self-loops
     int trim_self_loops();
-    // 修剪歧义边
+    // Trim ambiguous edges
     int trim_ambiguous_edges();
 
 private:
     std::vector<GraphArc> arcs;
-    std::vector<uint64_t> idx;  // 用于快速查找节点的边, 记录每个节点开始和结束的边
+    std::vector<uint64_t> idx;  // per-vertex arc range in arcs (offset | count)
     
-    // 辅助方法
-    bool is_mwt(uint32_t v, uint32_t w) const; // 判断v和w之间是否存在最大权重边
-    bool exist_strong_edge(uint32_t v, double wt) const; // 判断v节点是否存在权重大于wt的边
+    // Helpers
+    bool is_mwt(uint32_t v, uint32_t w) const; // true if max-weight arc from v goes to w
+    bool exist_strong_edge(uint32_t v, double wt) const; // true if v has an arc with weight > wt
 };
 
 
@@ -107,10 +107,10 @@ private:
 public:
     YaHS() = default;
     
-    // 构建图的方法
+    // Build graph from link scores
     Graph* build_graph_from_links(const LikelihoodTable& likelihood_table, double min_norm, double la);
     
-    // 运行scaffolding
+    // Run YaHS scaffolding / ordering
     std::vector<std::vector<uint32_t>> yahs_sorting(const LikelihoodTable& likelihood_table, double min_norm = 0.1, double la = 0.1);
 };
 

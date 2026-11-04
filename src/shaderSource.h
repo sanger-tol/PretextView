@@ -184,15 +184,18 @@ uniform usamplerBuffer pixrearrangelookup;
 uniform samplerBuffer yvalues;
 uniform float ytop;
 uniform float yscale;
+out vec4 vertexColour;
 void main()
 {
     float x = position;
     float realx = texelFetch(pixrearrangelookup, int(x)).x;
     x /= textureSize(pixrearrangelookup);
     x -= 0.5;
-    float y = texelFetch(yvalues, int(realx)).x;
+    vec4 sample = texelFetch(yvalues, int(realx));
+    float y = sample.x;
     y *= yscale;
     y += ytop;
+    vertexColour = vec4(sample.yzw, 1.0);
 
     gl_Position = vec4(x, y, 0.0, 1.0);
 }
@@ -202,11 +205,16 @@ inline
 std::string
 FragmentSource_EditablePlot = R"(
 #version 330
+flat in vec4 segmentColour;
 out vec4 outColor;
 uniform vec4 color;
+uniform int useGroupColour;
 void main()
 {
-    outColor = color;
+    if (useGroupColour != 0)
+        outColor = segmentColour;
+    else
+        outColor = color;
 }
 )";
 
@@ -220,6 +228,8 @@ layout (triangle_strip, max_vertices = 4) out;
 
 uniform mat4 matrix;
 uniform float linewidth;
+in vec4 vertexColour[];
+flat out vec4 segmentColour;
 
 void main()
 {
@@ -228,6 +238,7 @@ void main()
     vec3 lhs = cross(normalize(end-start), vec3(0.0, 0.0, -1.0));  // get a line prependicular to (end - start) on the xy plane
 
     lhs *= linewidth*0.0007;
+    segmentColour = vertexColour[0];
 
     gl_Position = matrix * vec4(start+lhs, 1.0);  // offset the line to add width
     EmitVertex();
