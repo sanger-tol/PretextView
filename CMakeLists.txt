@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.17)
-project(PretextView VERSION "1.0.7")
+project(PretextView VERSION "1.1.0")
 # User-visible version (window title, macOS CFBundleShortVersionString); keep in sync with PretextView.cpp
-set(PRETEXTVIEW_APP_VERSION_STRING "1.0.7")
+set(PRETEXTVIEW_APP_VERSION_STRING "1.1.0-beta")
 
 
 option(FORCE_MAC_X86 "Force macOS x86_64 build" OFF)
@@ -44,15 +44,17 @@ if (APPLE)
     set(ARCH_TYPE ${CMAKE_OSX_ARCHITECTURES})
 
 else()
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+    string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _cmake_system_processor)
+    if(_cmake_system_processor MATCHES "amd64|x86_64")
         set(ARCH_TYPE "x86_64")
-    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    elseif(_cmake_system_processor MATCHES "arm64|aarch64")
         set(ARCH_TYPE "ARM64")
-    elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "i[3-6]86")
+    elseif(_cmake_system_processor MATCHES "i[3-6]86")
         set(ARCH_TYPE "x86")
     else()
-        message(FATAL_ERROR "Unsupported architecture")
+        message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
     endif()
+    unset(_cmake_system_processor)
     if(WIN32)
         message(STATUS "Windows build")
     elseif(UNIX AND NOT APPLE)
@@ -89,17 +91,33 @@ include_directories(
     subprojects/eigen
 )
 
+# GLFW 3.5 still declares cmake_minimum_required 3.4; CMake 4.0+ errors without this.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "4.0")
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "Allow vendored CMake < 3.5 projects")
+endif()
+
 add_subdirectory(subprojects/glfw)
 add_subdirectory(subprojects/glm)
+
+# Visual Studio puts libs in <platform>/<config> (e.g. ARM64/Release),
+# while Ninja/NMake use build/ or build/Release.
+set(_prebuilt_lib_suffixes Release Debug release debug)
+if(CMAKE_VS_PLATFORM_NAME)
+    list(APPEND _prebuilt_lib_suffixes
+        "${CMAKE_VS_PLATFORM_NAME}/Release"
+        "${CMAKE_VS_PLATFORM_NAME}/Debug")
+endif()
+list(APPEND _prebuilt_lib_suffixes
+    ARM64/Release ARM64/Debug
+    x64/Release x64/Debug)
 
 find_library(
     lib_fmt
     NAMES fmt libfmt
-    PATHS 
-        subprojects/fmt/build 
-        subprojects/fmt/build/debug 
-        subprojects/fmt/build/Release
-        subprojects/fmt/build/release)
+    PATHS
+        "${CMAKE_SOURCE_DIR}/subprojects/fmt/build"
+        subprojects/fmt/build
+    PATH_SUFFIXES ${_prebuilt_lib_suffixes})
 if(NOT lib_fmt)
     message(FATAL_ERROR "lib_fmt not found")
 else()
@@ -107,9 +125,10 @@ else()
 endif()
 
 
-# test the parse_agp
+# test the parse_agp (not part of the installer package)
+option(AGP_TEST_FLAG "Build parse_agp unit test" OFF)
 if (AGP_TEST_FLAG)
-    add_executable(parse_agp_test src/parse_agp_test.cpp)
+    add_executable(parse_agp_test EXCLUDE_FROM_ALL src/parse_agp_test.cpp)
     target_link_libraries(parse_agp_test PRIVATE ${lib_fmt})
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(parse_agp_test PRIVATE DEBUG)
@@ -119,16 +138,19 @@ endif()
 find_library(
     lib_deflate_static 
     NAMES deflate deflatestatic
-    PATHS 
-        subprojects/libdeflate/build 
-        subprojects/libdeflate/build/debug 
-        subprojects/libdeflate/build/Release
-        subprojects/libdeflate/build/release)
+    PATHS
+        "${CMAKE_SOURCE_DIR}/subprojects/libdeflate/build"
+        subprojects/libdeflate/build
+    PATH_SUFFIXES ${_prebuilt_lib_suffixes})
+unset(_prebuilt_lib_suffixes)
 if(NOT lib_deflate_static)
     message(FATAL_ERROR "lib_deflate_static not found")
 else()
     message(STATUS "lib_deflate_static found: ${lib_deflate_static}")
 endif()
+# find_library often returns libdeflate.dylib, a symlink to libdeflate.0.dylib.
+# install(FILES) would copy that symlink and leave the soname missing at runtime.
+get_filename_component(lib_deflate_real ${lib_deflate_static} REALPATH)
 
 add_library(yahs STATIC 
     src/yahs_sort.cpp
@@ -163,9 +185,9 @@ add_library(copy_texture STATIC src/copy_texture.cpp)
 
 
 if(NOT APPLE)
-    add_executable( ${target_name} PretextView.cpp )
+    add_executable( ${target_name} PretextView.cpp src/linkage.cpp )
 else()
-    add_executable( ${target_name} MACOSX_BUNDLE PretextView.cpp )
+    add_executable( ${target_name} MACOSX_BUNDLE PretextView.cpp src/linkage.cpp )
     set_target_properties(
         ${target_name} PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/Info.plist"
@@ -268,12 +290,12 @@ endif()
 if (PYTHON_SCOPED_INTERPRETER AND Python_FOUND)
     message(STATUS "PYTHON_SCOPED_INTERPRETER defined, build with PYTHON_SCOPED_INTERPRETER")
     add_subdirectory(subprojects/pybind11)
-    # 拷贝python lib文件到编译目录下
+    # Copy Python shared library into the build directory
     get_filename_component(Python_LIBRARIES "${Python_LIBRARIES}" REALPATH)
     get_filename_component(Python_lib_name "${Python_LIBRARIES}" NAME)
     file(COPY ${Python_LIBRARIES} DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
     message(STATUS "Python lib realpath: ${Python_LIBRARIES}, name: ${Python_lib_name}")
-    # 获取拷贝后文件的路径
+    # Path to the copied library in the build tree
     # find_library(PYTHON_LIB_PATH 
     #     NAMES ${Python_lib_name}  
     #     PATHS ${CMAKE_CURRENT_BINARY_DIR} 
@@ -284,13 +306,13 @@ if (PYTHON_SCOPED_INTERPRETER AND Python_FOUND)
         COMMENT "Fix install_name of python lib")    
     message(STATUS "Build with PYTHON_SCOPED_INTERPRETER. Python search path: ${CMAKE_CURRENT_BINARY_DIR}, Python version: ${Python_VERSION}, Python_lib: ${PYTHON_LIB_PATH}")
 
-    # 将 Python 脚本复制到构建目录
+    # Copy Python helper script into the build directory
     configure_file(
         ${CMAKE_CURRENT_SOURCE_DIR}/python/frag_cluster/kmeans_utils.py
         ${CMAKE_CURRENT_BINARY_DIR}/kmeans_utils.py
         COPYONLY )
 
-    # 链接 pybind11 和 Python 库
+    # Link pybind11 embed and Python
     target_link_libraries(${target_name} PRIVATE 
         ${PYTHON_LIB_PATH}
         pybind11::embed 
@@ -343,7 +365,7 @@ if(APPLE)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/icon.icns"
             DESTINATION "${target_name}.app/Contents/Resources" )
     install(
-        FILES ${lib_deflate_static}
+        FILES ${lib_deflate_real}
         DESTINATION "${target_name}.app/Contents/Frameworks")
     # Install libfmt dylib - get the real file path
     get_filename_component(lib_fmt_real ${lib_fmt} REALPATH)
@@ -387,7 +409,7 @@ elseif(UNIX AND NOT APPLE) # Linux
         RUNTIME DESTINATION "bin"
         COMPONENT Runtime)
     install(
-        FILES ${lib_deflate_static}
+        FILES ${lib_deflate_real}
         DESTINATION "lib")
     if (WITH_TORCH)
         install(
@@ -413,7 +435,7 @@ else () # windows
         RUNTIME DESTINATION .
         COMPONENT Runtime)
     install(
-        FILES ${lib_deflate_static}
+        FILES ${lib_deflate_real}
         DESTINATION .)
     if (WITH_TORCH)
         install(
@@ -437,7 +459,7 @@ endif()
 # ==== CPack: installation package ====
 include(InstallRequiredSystemLibraries)
 set(CPACK_PACKAGE_NAME ${target_name})
-# Match installer/DMG name to user-visible version (e.g. PretextViewAI-1.0.7-beta-Darwin-x86_64.dmg)
+# Match installer/DMG name to user-visible version (e.g. PretextViewAI-1.1.0-beta-Darwin-x86_64.dmg)
 set(CPACK_PACKAGE_VERSION "${PRETEXTVIEW_APP_VERSION_STRING}")
 set(CPACK_PACKAGE_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/sanger-tol/PretextView")
@@ -493,14 +515,20 @@ elseif(${CMAKE_SYSTEM_NAME} STREQUAL "Linux") # Linux (Ubuntu)
     set(CPACK_DEBIAN_PACKAGE_SECTION "utils") 
 elseif(WIN32) # Windows
     message(STATUS "[CPack]: Generate on Windows")
-    set(CPACK_GENERATOR "NSIS")
-    set(CPACK_NSIS_DISPLAY_NAME "${target_name}")
-    set(CPACK_NSIS_PACKAGE_NAME "${target_name} Installer")
-    set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/pretextview_icon.ico")
-    set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/pretextview_icon.ico") 
-    set(CPACK_NSIS_INSTALLED_ICON_NAME "${target_name}.exe")
-    set(CPACK_NSIS_HELP_LINK "https://github.com/guanshaoheng/PretextView") 
-    set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/guanshaoheng/PretextView") 
+    # windows-11-arm now ships CMake 4.4, which emits an ARM64 NSIS target;
+    # the image still has NSIS 3.10 (ARM64 installers need 3.11+).
+    if(ARCH_TYPE STREQUAL "ARM64")
+        set(CPACK_GENERATOR "ZIP")
+    else()
+        set(CPACK_GENERATOR "NSIS")
+        set(CPACK_NSIS_DISPLAY_NAME "${target_name}")
+        set(CPACK_NSIS_PACKAGE_NAME "${target_name} Installer")
+        set(CPACK_NSIS_MUI_ICON "${CMAKE_SOURCE_DIR}/pretextview_icon.ico")
+        set(CPACK_NSIS_MUI_UNIICON "${CMAKE_SOURCE_DIR}/pretextview_icon.ico")
+        set(CPACK_NSIS_INSTALLED_ICON_NAME "${target_name}.exe")
+        set(CPACK_NSIS_HELP_LINK "https://github.com/guanshaoheng/PretextView")
+        set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/guanshaoheng/PretextView")
+    endif()
 endif()
 
 include(CPack)

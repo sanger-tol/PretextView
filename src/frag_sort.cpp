@@ -453,7 +453,7 @@ void FragSortTool::sort_according_likelihood_unionFind(
     u32 n = likelihood_table.get_num_frags();
     std::vector<Link> all_links;
 
-    // 计算的分位数
+    // Compute score percentile for threshold
     f32 threshold_val = percentile_cal(
         likelihood_table.data, likelihood_table.size, this->threshold_ratio);
     f32 threshold_using = std::min(threshold_val, threshold);
@@ -659,10 +659,10 @@ void FragSortTool::sort_according_likelihood_unionFind_doFuse(
 {   
 
     // this is used to fix the source and sink during local sort
-    s32 source_frag_id = -1,  // 第一个片段的id
-        sink_frag_id = -1,    // 最后一个片段的id
-        source_chain_id = -1, // 第一个片段所在的chain的id
-        sink_chain_id = -1;   // 最后一个片段所在的chain的id 
+    s32 source_frag_id = -1,  // id of first fragment (anchor)
+        sink_frag_id = -1,    // id of last fragment (anchor)
+        source_chain_id = -1, // chain id of source fragment
+        sink_chain_id = -1;   // chain id of sink fragment
     if (select_area.source_frag_id >=0)
     {
         source_frag_id = 1;
@@ -674,7 +674,7 @@ void FragSortTool::sort_according_likelihood_unionFind_doFuse(
         sink_chain_id = sink_frag_id - 1;
     }
 
-    // 计算的分位数
+    // Compute score percentile for threshold
     f32 threshold_val = percentile_cal(likelihood_table.data, likelihood_table.size, this->threshold_ratio);
     if (threshold_val < 0)
     {   
@@ -685,7 +685,7 @@ void FragSortTool::sort_according_likelihood_unionFind_doFuse(
     f32 threshold_using = std::min(threshold_val, threshold);
     fmt::print(stderr, "[Pixel Sort]: link score threshold at {}: {}, fixed_threshold: {}, using: {}\n", this->threshold_ratio, threshold_val, threshold, threshold_using);
 
-    // 建立所有的links 
+    // Collect all links above threshold
     u32 n = likelihood_table.get_num_frags();
     std::vector<Link> all_links;
     std::map<u64, u32> map_links;

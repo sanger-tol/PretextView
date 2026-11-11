@@ -11,6 +11,9 @@ SET CC=clang-cl
 SET CXX=clang-cl
 SET WINDRES=rc
 
+rem CMake 4.x on windows-11-arm rejects vendored GLFW's cmake_minimum_required 3.4.
+if not defined CMAKE_POLICY_VERSION_MINIMUM set "CMAKE_POLICY_VERSION_MINIMUM=3.5"
+
 rem --- check architecture ---
 set "ARCH=%PROCESSOR_ARCHITECTURE%"
 if /I "%ARCH%"=="x86" (
@@ -21,6 +24,8 @@ if /I "%ARCH%"=="x86" (
     )
 ) else if /I "%ARCH%"=="AMD64" (
     set "ARCH=x86_64"
+) else if /I "%ARCH%"=="ARM64" (
+    set "ARCH=ARM64"
 )
 echo Detected architecture: %ARCH%
 

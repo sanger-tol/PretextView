@@ -3,7 +3,7 @@
 
 
 
-// Graph类方法实现
+// Graph method implementations
 int64_t Graph::add_arc(uint32_t v, uint32_t w, double wt, int64_t link_id, bool comp)
 {
     link_id = link_id > 0 ? link_id : arcs.size();
@@ -21,11 +21,10 @@ void Graph::arc_sort()
 }
 
 /*
-创建索引 idx 向量，
-    编号为：节点编号<<32 | 正反向，
-    每个元素为uint64_t类型，
-        高32位：开始边的在arcs中的索引
-        低32位：开始节点对应的边的数量
+Build idx vector for adjacency lookup.
+Each idx[v] is uint64_t:
+    high 32 bits: start index of v's arcs in arcs
+    low 32 bits:  count of outgoing arcs from v
 */
 void Graph::arc_index()
 {
@@ -60,7 +59,7 @@ void Graph::clean(bool shear) {
 
 
 /*
-    判断v节点是否存在权重大于wt的边，且该边指向w节点
+    True if the maximum-weight arc from v points to w.
 */
 bool Graph::is_mwt(uint32_t v, uint32_t w) const {
     size_t na = get_arc_count(v);
@@ -95,7 +94,7 @@ int Graph::trim_simple_filter(double min_wt, double min_diff_h, double min_diff_
     int n_del = 0;
     uint32_t nv = idx.size();
     
-    // 移除短序列的边
+    // Remove arcs incident on short (low-index) vertices
     for (uint32_t v = 0; v < nv; ++v) {
         if (v >= min_len) continue;
         size_t na = get_arc_count(v);
@@ -107,7 +106,7 @@ int Graph::trim_simple_filter(double min_wt, double min_diff_h, double min_diff_
     }
     clean(true);
     
-    // 基于权重过滤
+    // Weight-based filtering
     for (uint32_t v = 0; v < nv; ++v) {
         size_t na = get_arc_count(v);
         GraphArc* av = get_arcs(v);
@@ -115,7 +114,7 @@ int Graph::trim_simple_filter(double min_wt, double min_diff_h, double min_diff_
         double mwt = 0, smwt = 0;
         size_t n_ma = 0;
         
-        // 找出最大和次大权重
+        // Find max and second-max weights
         for (size_t i = 0; i < na; ++i) {
             if (av[i].wt > mwt) {
                 smwt = mwt;
@@ -128,7 +127,7 @@ int Graph::trim_simple_filter(double min_wt, double min_diff_h, double min_diff_
             }
         }
         
-        // 过滤边
+        // Mark arcs that fail the filter
         for (size_t i = 0; i < na; ++i) {
             if ((av[i].wt >= min_wt && av[i].wt >= mwt * min_diff_h) ||
                 (av[i].wt < min_wt && av[i].wt == mwt && mwt * min_diff_l >= smwt && n_ma == 1)) {
@@ -288,7 +287,7 @@ int Graph::trim_pop_undirected() {
         
         if (is_mwt(v^1, w) && get_arc_count(v^1) > 1 && get_arc_count(w) > 0) {
             ++n_del;
-            // 删除互补边
+            // Delete complementary arc
             for (size_t i = 0; i < get_arc_count(w^1); ++i) {
                 GraphArc* aw = get_arcs(w^1);
                 if (aw[i].w == v) {
@@ -296,7 +295,7 @@ int Graph::trim_pop_undirected() {
                     break;
                 }
             }
-            // 删除原边
+            // Delete original arc
             for (size_t i = 0; i < get_arc_count(v^1); ++i) {
                 GraphArc* av1 = get_arcs(v^1);
                 if (av1[i].w == w) {
@@ -347,15 +346,15 @@ int Graph::trim_self_loops() {
 
 
 /* 
-    删除歧义边
+    Remove ambiguous edges
 */
 int Graph::trim_ambiguous_edges() {
     int n_del = 0;
     
     for (auto& arc : arcs) {
         if (
-            get_arc_count(arc.v) > 1      // 节点v存在多条边
-            || get_arc_count(arc.w^1) > 1 // 节点w的互补边存在多条
+            get_arc_count(arc.v) > 1      // v has multiple outgoing arcs
+            || get_arc_count(arc.w^1) > 1 // complement of w has multiple outgoing arcs
         ) {
             arc.del = true;
             ++n_del;
@@ -367,37 +366,37 @@ int Graph::trim_ambiguous_edges() {
 }
 
 
-// 构建图的方法
+// Build graph from likelihood table
 Graph* YaHS::build_graph_from_links(const LikelihoodTable& likelihood_table, double min_score, double la)
 {
     auto g = std::make_unique<Graph>();
     
     uint32_t num_frags = likelihood_table.get_num_frags();
     
-    // 预分配空间以提高性能
-    g->reserve_arcs(num_frags * num_frags * 4);  // 最坏情况下每个片段对可能有4个方向的连接
+    // Preallocate for performance
+    g->reserve_arcs(num_frags * num_frags * 4);  // up to 4 orientations per fragment pair
     
-    // 遍历所有可能的片段对构建图
+    // Iterate all fragment pairs
     double link_score = 0.f;
     int index_arc = 0;
     for (uint32_t i = 0; i < num_frags; ++i) {
         for (uint32_t j = i+1; j < num_frags; ++j) {
             
-            // 检查四个方向的连接
+            // Check four orientation combinations
             for (uint32_t k = 0; k < 4; ++k) {
                 link_score = likelihood_table(i, j, k);
                 if (link_score >= min_score) {
-                    // 添加边
+                    // Add arc
                     index_arc = g->add_arc((i << 1) | (k >> 1), (j << 1) | (k & 1), link_score, -1, false);
                     
-                    // 添加互补边
+                    // Add complementary arc
                     g->add_arc((j << 1) | !(k & 1), (i << 1) | !(k >> 1), link_score, index_arc, true);
                 }
             }
         }
     }
     
-    // 排序和索引
+    // Sort and index arcs
     g->arc_sort();
     g->arc_index();
     
@@ -406,81 +405,81 @@ Graph* YaHS::build_graph_from_links(const LikelihoodTable& likelihood_table, dou
 
 
 
-// 运行scaffolding
+// Run scaffolding
 std::vector<std::vector<uint32_t>> YaHS::yahs_sorting(const LikelihoodTable& likelihood_table, double min_score, double la)
 {
     min_norm_ = min_score;
     la_ = la;
     
-    // 构建图
+    // Build graph
     std::unique_ptr<Graph> g(this->build_graph_from_links(likelihood_table, min_norm_, la_));
     
-    // 记录修剪前的边数
+    // Arc count before trimming iteration
     size_t n_arc = g->get_arc_size();
     
-    // 循环进行图修剪，直到没有边被删除
+    // Repeat trimming until arc count stabilizes
     while (true) {
-        // 简单过滤
+        // Simple filter
         g->trim_simple_filter(0.1, 0.7, 0.1, 0);
         
-        // 修剪端点
+        // Trim tips
         g->trim_tips();
         
-        // 修剪钝化
+        // Trim blunts
         g->trim_blunts();
         
-        // 修剪重复边
+        // Trim repeats
         g->trim_repeats();
         
-        // 修剪传递边
+        // Trim transitive edges
         g->trim_transitive_edges();
         
-        // 修剪泡状边
+        // Trim bubbles
         g->trim_pop_bubbles();
         
-        // 修剪无向边
+        // Trim undirected pops
         g->trim_pop_undirected();
         
-        // 修剪弱边
+        // Trim weak edges
         g->trim_weak_edges();
         
-        // 修剪自环边
+        // Trim self-loops
         g->trim_self_loops();
         
-        // 如果边数没有变化，说明修剪完成
+        // No change in arc count: trimming converged
         if (g->get_arc_size() == n_arc)
             break;
         n_arc = g->get_arc_size();
     }
     
-    // 最后修剪歧义边
+    // Final pass: ambiguous edges
     g->trim_ambiguous_edges();
     
-    // 构建染色体序列
+    // Build chromosome sequences
     std::vector<std::vector<uint32_t>> chromosomes;
     std::vector<bool> visited(g->get_arc_size() * 2, false);
     
-    // 遍历所有节点
+    // Walk all oriented nodes
     for (uint32_t v = 0; v < g->get_arc_size() * 2; ++v) {
         if (visited[v]) continue;
         
-        // 开始一个新的染色体
+        // Start a new chromosome walk
         std::vector<uint32_t> chromosome;
         
-        // 使用深度优先搜索遍历图
+        // Greedy walk following max-weight arcs
         uint32_t current = v;
         while (!visited[current]) {
             visited[current] = true;
-            chromosome.push_back(current >> 1);  // 存储节点编号（去掉方向位）
+            chromosome.push_back(current >> 1);  // store fragment id (drop orientation bit)
             
-            // 获取当前节点的边
+            // Outgoing arcs from current node
             size_t na = g->get_arc_count(current);
             if (na == 0) break;
             
             const GraphArc* av = g->get_arcs(current);
             if (av == nullptr) break;
             
-            // 选择权重最大的边
+            // Follow heaviest arc
             double max_wt = -1;
             uint32_t next = current;
             

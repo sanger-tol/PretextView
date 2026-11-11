@@ -46,7 +46,7 @@ public:
         const std::vector<std::vector<s32>>& clusters)
     {   
         cleanup();
-        for (u32 i = 0; i < frags_order_list.size(); i++) // 遍历所有的cluster
+        for (u32 i = 0; i < frags_order_list.size(); i++) // iterate each cluster
         {   
             this->num_frags += clusters[i].size();
             auto tmp_order = frags_order_list[i].get_order_without_chromosomeInfor();

@@ -67,7 +67,7 @@ public:
             std::filesystem::create_directory(this->file_save_dir);
         #endif
         
-        this->frags = textures_array->get_frags(); // 需要得到最初没有进行排序的contig 信息
+        this->frags = textures_array->get_frags(); // original (unsorted) contig layout
 
         // cal the hic_pixel_density
         this->cal_pixel_density(num_pixels_1d);
@@ -120,14 +120,14 @@ public:
         const map_contigs* Contigs,
         const SelectArea* select_area=nullptr)
     {   
-        // 设定cut的参数
+        // Cut parameters from auto-curation state
         this->smallest_frag_size_in_pixel = auto_curation_state.auto_cut_smallest_frag_size_in_pixel;
         this->cut_threshold = auto_curation_state.auto_cut_threshold;
 
         // rearrange index 
         this->rearrange_hic_pixel_density(pixel_rearrange_index_);
 
-        // 在 select_area 中进行cut 
+        // Run cuts within select_area
         this->frags->re_allocate_mem(Contigs, select_area, 1);
         std::vector<int> cut_locs_pixel;
         for (u32 i = 0; i < this->frags->num; i++)
@@ -137,7 +137,7 @@ public:
         return cut_locs_pixel;
     }
 
-    /* 全局坐标存储在 break_points 数组中 */
+    /* break_points holds cut positions in global pixel coordinates */
     void find_break_points(
         const u32 start_pixel,
         const std::vector<f32>& arr,
@@ -263,7 +263,7 @@ public:
         return ;
     }
 
-    // 计算对角线上的距离为 i < this->pixel_mean_window_size 的像素的和
+    // Mean of off-diagonal pairs with separation i < pixel_mean_window_size
     f32 pixel_mean(
         const u32& frag_start_pixel,
         const u32& relative_index, 
@@ -287,9 +287,9 @@ public:
     }
 
     /* 
-    计算导数, 参数：
-        arr：        原向量
-        derivative： 倒数向量存储位置
+    Smoothed first derivative.
+        arr:        input series
+        derivative: output buffer
     */
     void get_smoothed_1st_order_derivative(
         const std::vector<f32>& arr, 

@@ -214,7 +214,7 @@ struct Sum_and_Number
     
 
 /*
-GraphData类用于存储图数据，将压缩后的hic数据转化为图数据，从而输入到图网络中预测两个片段之间的连接分数。
+GraphData holds graph features derived from compressed Hi-C tiles for GNN link-score prediction between fragments.
 */
 class GraphData
 {

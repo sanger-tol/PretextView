@@ -11,15 +11,15 @@ namespace py = pybind11;
 
 template<typename T>
 py::array_t<T> create_tensor(const int n, const int channel, const T* data_ptr) {
-    // 总元素个数
+    // Total element count
     s32 total_size = n * n * channel;
 
-    // 指定 shape 和 strides
+    // NumPy shape and strides
     std::vector<s32> shape = {n, n, channel};
     std::vector<s32> strides = {
-        static_cast<s32>(n * channel * sizeof(T)),  // 跨 n 行
-        static_cast<s32>(channel * sizeof(T)),      // 跨 n 列
-        static_cast<s32>(sizeof(T))           // 跨特征维
+        static_cast<s32>(n * channel * sizeof(T)),  // stride along first axis (rows)
+        static_cast<s32>(channel * sizeof(T)),      // stride along second axis (cols)
+        static_cast<s32>(sizeof(T))           // stride along feature/channel axis
     };
 
     return py::array_t<T>(shape, strides, data_ptr);
@@ -36,7 +36,7 @@ class KmeansClusters
     {   
         try
         {
-            // 将当前目录加入 Python 模块搜索路径
+            // Append build/resource paths to Python sys.path
             py::module sys = py::module::import("sys");
             py::module os = py::module::import("os");
             #ifdef DEBUG
@@ -60,7 +60,7 @@ class KmeansClusters
                 fmt::print("\t{}\n", path.cast<std::string>());
             }
 
-            // 导入 Python 模块
+            // Import kmeans_utils module
             kmeans_utils = py::module::import("kmeans_utils");
             fmt::print("Python kmeans module loaded successfully\n");
             is_init = true;
@@ -101,7 +101,7 @@ class KmeansClusters
         py::array_t<float> adj_matrix = create_tensor<float>(mat3d->row_num, mat3d->layer_num, mat3d->get_data_ptr());
         labels = kmeans_utils.attr("run_kmeans")(k, adj_matrix);
 
-        // 解析 NumPy 数组结果
+        // Read cluster labels from NumPy array
         py::buffer_info buf = labels.request();
         int* cluster_ids = static_cast<int*>(buf.ptr);
         std::vector<std::vector<int>> clusters(k);  
